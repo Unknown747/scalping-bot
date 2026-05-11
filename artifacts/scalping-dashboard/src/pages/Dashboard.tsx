@@ -10,6 +10,7 @@ import {
   getGetScannedTokensQueryKey, getGetLogsQueryKey, getGetWalletBalanceQueryKey,
 } from "@workspace/api-client-react";
 import { useSocket } from "../hooks/useSocket";
+import { useAuth } from "../hooks/useAuth";
 import { StatsRow } from "../components/StatsRow";
 import { ControlPanel } from "../components/ControlPanel";
 import { WalletCard } from "../components/WalletCard";
@@ -31,6 +32,7 @@ export function Dashboard() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [liveTokens, setLiveTokens] = useState<TokenEntry[]>([]);
   const queryClient = useQueryClient();
+  const { logout } = useAuth();
 
   const { data: botStatus } = useGetBotStatus({
     query: { refetchInterval: 5000, queryKey: getGetBotStatusQueryKey() },
@@ -79,9 +81,9 @@ export function Dashboard() {
     onTradeExecuted: (data) => {
       const sign = data.profitPercent >= 0 ? "+" : "";
       if (data.profitPercent >= 0) {
-        toast.success(`${data.tokenSymbol} closed ${sign}${data.profitPercent.toFixed(2)}%`);
+        toast.success(`${data.tokenSymbol} ditutup ${sign}${data.profitPercent.toFixed(2)}%`);
       } else {
-        toast.error(`${data.tokenSymbol} stopped ${sign}${data.profitPercent.toFixed(2)}%`);
+        toast.error(`${data.tokenSymbol} stop loss ${sign}${data.profitPercent.toFixed(2)}%`);
       }
     },
     onLogs: (newLogs) => {
@@ -105,15 +107,17 @@ export function Dashboard() {
       stopBot.mutate(undefined, {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getGetBotStatusQueryKey() });
-          toast.info("Bot stopped");
+          toast.info("Bot dihentikan");
         },
+        onError: () => toast.error("Gagal menghentikan bot"),
       });
     } else {
       startBot.mutate(undefined, {
         onSuccess: () => {
           queryClient.invalidateQueries({ queryKey: getGetBotStatusQueryKey() });
-          toast.success("Bot started");
+          toast.success("Bot dijalankan");
         },
+        onError: () => toast.error("Gagal menjalankan bot"),
       });
     }
   };
@@ -123,7 +127,7 @@ export function Dashboard() {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getGetBotStatusQueryKey() });
         queryClient.invalidateQueries({ queryKey: getGetPositionsQueryKey() });
-        toast.error("Emergency stop executed — all positions closed");
+        toast.error("Emergency stop — semua posisi ditutup");
       },
     });
   };
@@ -133,8 +137,9 @@ export function Dashboard() {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getGetPositionsQueryKey() });
         queryClient.invalidateQueries({ queryKey: getGetTradesQueryKey() });
-        toast.success(`Position closed (${percent}%)`);
+        toast.success(`Posisi ditutup (${percent}%)`);
       },
+      onError: () => toast.error("Gagal menutup posisi"),
     });
   };
 
@@ -142,7 +147,7 @@ export function Dashboard() {
     updateConfig.mutate({ data: { riskLevel: level as "conservative" | "moderate" | "aggressive" } }, {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getGetConfigQueryKey() });
-        toast.info(`Risk level set to ${level}`);
+        toast.info(`Level risiko: ${level}`);
       },
     });
   };
@@ -151,15 +156,21 @@ export function Dashboard() {
     updateConfig.mutate({ data: { mode } }, {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getGetConfigQueryKey() });
-        toast.info(`Mode set to ${mode.toUpperCase()}`);
+        toast.info(`Mode diganti ke ${mode.toUpperCase()}`);
       },
     });
+  };
+
+  const handleLogout = async () => {
+    await logout();
+    toast.info("Berhasil keluar");
   };
 
   const isPaperMode = botStatus?.mode === "paper";
 
   return (
     <div className="min-h-screen bg-background text-foreground">
+      {/* Paper trading banner */}
       <AnimatePresence>
         {isPaperMode && (
           <motion.div
@@ -169,12 +180,13 @@ export function Dashboard() {
             className="bg-warn/10 border-b border-warn/30 px-4 py-1.5 text-center overflow-hidden"
           >
             <span className="text-warn text-xs font-semibold tracking-widest uppercase">
-              Paper Trading Mode — No real funds at risk
+              Paper Trading Mode — Tidak ada dana nyata yang berisiko
             </span>
           </motion.div>
         )}
       </AnimatePresence>
 
+      {/* Header */}
       <header className="border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-40">
         <div className="max-w-[1600px] mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -191,9 +203,9 @@ export function Dashboard() {
             </span>
           </div>
 
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3">
             {wallet?.address && (
-              <span className="text-xs text-muted-foreground font-mono">
+              <span className="text-xs text-muted-foreground font-mono hidden sm:block">
                 {wallet.address.slice(0, 6)}...{wallet.address.slice(-4)}
               </span>
             )}
@@ -208,6 +220,18 @@ export function Dashboard() {
               <div className={`w-1.5 h-1.5 rounded-full ${botStatus?.running ? "bg-primary blink" : "bg-muted-foreground"}`} />
               {botStatus?.running ? "RUNNING" : "STOPPED"}
             </div>
+
+            {/* Logout button */}
+            <button
+              onClick={handleLogout}
+              title="Keluar"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-border text-muted-foreground hover:text-loss hover:border-loss/50 transition-colors font-mono text-[11px]"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+              </svg>
+              <span className="hidden sm:inline">Keluar</span>
+            </button>
           </div>
         </div>
       </header>

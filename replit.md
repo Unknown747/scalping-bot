@@ -59,11 +59,20 @@ A real-time meme coin scalping dashboard and automated trading bot for Base Netw
 | Variable | Required | Description |
 |---|---|---|
 | `PORT` | Yes (auto) | Server port (set by workflow) |
+| `SESSION_SECRET` | Yes | Secret for signing session cookies |
+| `DASHBOARD_PASSWORD` | Yes | Password to access the dashboard (default: ScalpBase2024!) |
 | `PRIVATE_KEY` | For live only | Wallet private key |
 | `WALLET_ADDRESS` | For live only | Wallet public address |
 | `BASE_RPC_URL` | Optional | Base RPC URL (default: mainnet.base.org) |
 | `MEV_PROTECTION_RPC` | Optional | MEV-protected RPC for live trading |
 | `SQLITE_PATH` | Optional | SQLite file path (default: artifacts/scalping.db) |
+
+## Security
+
+- All API routes require session authentication — unauthenticated requests return 401
+- Password is stored as `DASHBOARD_PASSWORD` env variable; change via Replit Secrets
+- Sessions last 7 days; users must re-login after expiry
+- To change password: update `DASHBOARD_PASSWORD` in Secrets and restart the API server
 
 ## Gotchas
 

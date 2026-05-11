@@ -1,7 +1,7 @@
 import { logger } from "../lib/logger.js";
 import { TokenScanner, type TokenData } from "./TokenScanner.js";
 import { SafetyChecker } from "./SafetyChecker.js";
-import { PriceMonitor, type PriceUpdate } from "./PriceMonitor.js";
+import { PriceMonitor } from "./PriceMonitor.js";
 import { SwapExecutor } from "./SwapExecutor.js";
 import type { ScalpingConfigData } from "./config.js";
 import { DEFAULT_CONFIG } from "./config.js";
@@ -78,6 +78,10 @@ export class ScalpingBot {
 
   getConfig(): ScalpingConfigData {
     return this.config;
+  }
+
+  async getWalletBalance(): Promise<{ ethBalance: number; address: string | null }> {
+    return this.swapExecutor.getWalletBalance();
   }
 
   getStatus() {
