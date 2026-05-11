@@ -1,11 +1,18 @@
 import { logger } from "../lib/logger.js";
 
 /**
- * RPC rotation utility — cycles through multiple Base network endpoints.
- * Primary (Alchemy/Infura from env) → public backups when rate-limited or down.
+ * RPC Provider — strict separation of read vs write providers.
+ *
+ * readProvider  = BASE_RPC_URL  (data queries, price reads, balance checks)
+ * writeProvider = MEV_PROTECTION_RPC  (all swap / approve transactions)
+ *
+ * Fallback chain:
+ *   write: MEV_PROTECTION_RPC → BASE_RPC_URL → public RPCs
+ *   read:  BASE_RPC_URL → public RPCs (never touches MEV endpoint)
  */
 
-const PUBLIC_BASE_RPCS = [
+// ─── Public fallback RPCs (read only) ─────────────────────────────────────────
+const PUBLIC_READ_RPCS = [
   "https://mainnet.base.org",
   "https://base.publicnode.com",
   "https://base.drpc.org",
@@ -14,84 +21,156 @@ const PUBLIC_BASE_RPCS = [
   "https://base-rpc.publicnode.com",
 ];
 
-// Health tracking per RPC
-const rpcHealth = new Map<string, { failures: number; lastFail: number; latencyMs: number }>();
-
-function getRpcList(): string[] {
-  const primary = process.env["BASE_RPC_URL"];
-  const mev = process.env["MEV_PROTECTION_RPC"];
-  const extras: string[] = [];
-
-  if (primary && primary !== "https://mainnet.base.org") extras.push(primary);
-  if (mev && mev !== primary && mev !== "https://mainnet.base.org") extras.push(mev);
-
-  return [...extras, ...PUBLIC_BASE_RPCS];
+// ─── Health tracking ──────────────────────────────────────────────────────────
+interface RpcHealth {
+  failures: number;
+  lastFail: number;
+  latencyMs: number;
+  lastUsed: number;
 }
+const rpcHealth = new Map<string, RpcHealth>();
 
 function isHealthy(rpc: string): boolean {
   const h = rpcHealth.get(rpc);
   if (!h) return true;
-  // Cool down: after 3+ failures, wait 60s before retrying
   if (h.failures >= 3 && Date.now() - h.lastFail < 60_000) return false;
   return true;
 }
 
-function recordSuccess(rpc: string, latencyMs: number) {
-  const h = rpcHealth.get(rpc) ?? { failures: 0, lastFail: 0, latencyMs: 0 };
+function recordSuccess(rpc: string, latencyMs: number): void {
+  const h = rpcHealth.get(rpc) ?? { failures: 0, lastFail: 0, latencyMs: 0, lastUsed: 0 };
   h.failures = Math.max(0, h.failures - 1);
   h.latencyMs = latencyMs;
+  h.lastUsed = Date.now();
   rpcHealth.set(rpc, h);
 }
 
-function recordFailure(rpc: string) {
-  const h = rpcHealth.get(rpc) ?? { failures: 0, lastFail: 0, latencyMs: 999 };
-  h.failures++;
+function recordFailure(rpc: string): void {
+  const h = rpcHealth.get(rpc) ?? { failures: 0, lastFail: 0, latencyMs: 999, lastUsed: 0 };
+  h.failures += 1;
   h.lastFail = Date.now();
   rpcHealth.set(rpc, h);
-  logger.warn({ rpc, failures: h.failures }, "RPC failure recorded");
+  logger.warn({ rpc: maskKey(rpc), failures: h.failures }, "RPC failure recorded");
 }
 
+function maskKey(rpc: string): string {
+  return rpc.replace(/\/[a-zA-Z0-9]{20,}/, "/***");
+}
+
+// ─── Read RPC list (BASE_RPC_URL + public backups, never MEV endpoint) ────────
+function getReadRpcList(): string[] {
+  const primary = process.env["BASE_RPC_URL"];
+  const list: string[] = [];
+  if (primary) list.push(primary);
+  for (const pub of PUBLIC_READ_RPCS) {
+    if (!list.includes(pub)) list.push(pub);
+  }
+  return list;
+}
+
+// ─── Write RPC list (MEV first → BASE_RPC_URL → public) ──────────────────────
+function getWriteRpcList(): string[] {
+  const mev = process.env["MEV_PROTECTION_RPC"];
+  const primary = process.env["BASE_RPC_URL"];
+  const list: string[] = [];
+  if (mev) list.push(mev);
+  if (primary && primary !== mev) list.push(primary);
+  for (const pub of PUBLIC_READ_RPCS) {
+    if (!list.includes(pub)) list.push(pub);
+  }
+  return list;
+}
+
+// ─── getReadProvider ─────────────────────────────────────────────────────────
 /**
- * Get a working JSON-RPC provider with automatic fallback.
- * Returns both the provider and its RPC URL.
+ * Returns a provider backed by BASE_RPC_URL (read-only queries).
+ * Never uses the MEV endpoint.
  */
-export async function getProvider(): Promise<{ provider: any; rpcUrl: string; ethers: any }> {
+export async function getReadProvider(): Promise<{ provider: any; ethers: any; rpcUrl: string }> {
   const { ethers } = await import("ethers");
-  const rpcs = getRpcList();
-  const healthy = rpcs.filter(isHealthy);
-  const candidates = healthy.length > 0 ? healthy : rpcs; // fallback to all if all unhealthy
+  const rpcs = getReadRpcList();
+  const candidates = rpcs.filter(isHealthy).length > 0 ? rpcs.filter(isHealthy) : rpcs;
 
   for (const rpc of candidates) {
     try {
       const start = Date.now();
       const provider = new ethers.JsonRpcProvider(rpc);
-      // Quick liveness check
       await provider.getBlockNumber();
       recordSuccess(rpc, Date.now() - start);
-      return { provider, rpcUrl: rpc, ethers };
+      return { provider, ethers, rpcUrl: rpc };
+    } catch {
+      recordFailure(rpc);
+    }
+  }
+  throw new Error("All read RPC endpoints failed");
+}
+
+// ─── getWriteProvider ─────────────────────────────────────────────────────────
+/**
+ * Returns a wallet-ready provider for submitting transactions.
+ * Tries MEV_PROTECTION_RPC first, logs which path is taken,
+ * then falls back to BASE_RPC_URL, then public RPCs.
+ */
+export interface WriteProviderResult {
+  provider: any;
+  ethers: any;
+  rpcUrl: string;
+  mevActive: boolean;
+}
+
+export async function getWriteProvider(): Promise<WriteProviderResult> {
+  const { ethers } = await import("ethers");
+  const mevRpc = process.env["MEV_PROTECTION_RPC"];
+  const primaryRpc = process.env["BASE_RPC_URL"] || "https://mainnet.base.org";
+  const rpcs = getWriteRpcList();
+
+  for (const rpc of rpcs) {
+    const isMev = rpc === mevRpc;
+    if (!isHealthy(rpc)) continue;
+
+    try {
+      const start = Date.now();
+      const provider = new ethers.JsonRpcProvider(rpc);
+      await provider.getBlockNumber();
+      recordSuccess(rpc, Date.now() - start);
+
+      if (isMev) {
+        logger.info({ rpc: maskKey(rpc) }, "MEV protection active — using MEV RPC for write");
+      } else {
+        logger.warn(
+          { rpc: maskKey(rpc), mevRpc: mevRpc ? maskKey(mevRpc) : "not set" },
+          "MEV protection failed, using standard RPC for write"
+        );
+      }
+
+      return { provider, ethers, rpcUrl: rpc, mevActive: isMev };
     } catch (err: any) {
       recordFailure(rpc);
-      logger.debug({ rpc, err: err?.message }, "RPC not responsive, trying next");
+      if (isMev) {
+        logger.warn({ err: err?.message, rpc: maskKey(rpc) }, "MEV RPC unreachable, falling back");
+      }
     }
   }
 
-  throw new Error("All Base RPC endpoints failed");
+  // Last-resort: force primary RPC (no liveness check — better than failing)
+  logger.error({ primaryRpc: maskKey(primaryRpc) }, "All write RPCs failed — using primary RPC as last resort");
+  const provider = new ethers.JsonRpcProvider(primaryRpc);
+  return { provider, ethers, rpcUrl: primaryRpc, mevActive: false };
 }
 
+// ─── withRpcRetry (read operations) ─────────────────────────────────────────
 /**
- * Execute a function with automatic RPC retry on failure.
- * Tries each healthy RPC in order.
+ * Execute a read-only call with automatic RPC retry on failure.
+ * Only uses read RPCs (BASE_RPC_URL + public backups).
  */
 export async function withRpcRetry<T>(
   fn: (provider: any, ethers: any, rpcUrl: string) => Promise<T>
 ): Promise<T> {
   const { ethers } = await import("ethers");
-  const rpcs = getRpcList();
-  const healthy = rpcs.filter(isHealthy);
-  const candidates = healthy.length > 0 ? healthy : rpcs;
+  const rpcs = getReadRpcList();
+  const candidates = rpcs.filter(isHealthy).length > 0 ? rpcs.filter(isHealthy) : rpcs;
 
   let lastError: any;
-
   for (const rpc of candidates) {
     try {
       const start = Date.now();
@@ -101,49 +180,40 @@ export async function withRpcRetry<T>(
       return result;
     } catch (err: any) {
       lastError = err;
-      const isRateLimit = err?.message?.includes("429") ||
-        err?.message?.includes("rate") ||
+      const isRateLimit =
+        err?.message?.includes("429") ||
+        err?.message?.includes("rate limit") ||
         err?.code === "SERVER_ERROR";
       if (isRateLimit) recordFailure(rpc);
-      logger.debug({ rpc, err: err?.message }, "RPC call failed, trying next");
+      logger.debug({ rpc: maskKey(rpc), err: err?.message }, "Read RPC call failed, trying next");
     }
   }
-
-  throw lastError ?? new Error("All RPC endpoints failed");
+  throw lastError ?? new Error("All read RPC endpoints failed");
 }
 
-/**
- * Get MEV-protected provider for trade submission.
- * Falls back to primary RPC if MEV RPC fails.
- */
-export async function getMevProvider(): Promise<{ provider: any; ethers: any }> {
-  const { ethers } = await import("ethers");
-  const mevRpc = process.env["MEV_PROTECTION_RPC"];
-  const primaryRpc = process.env["BASE_RPC_URL"] || "https://mainnet.base.org";
+// ─── Health report ─────────────────────────────────────────────────────────
+export function getRpcHealthReport(): Array<{
+  rpc: string;
+  role: "read" | "write-mev" | "write-fallback" | "backup";
+  failures: number;
+  latencyMs: number;
+  healthy: boolean;
+}> {
+  const mevRpc = process.env["MEV_PROTECTION_RPC"] || "";
+  const primaryRpc = process.env["BASE_RPC_URL"] || "";
 
-  const candidates = [mevRpc, primaryRpc, ...PUBLIC_BASE_RPCS].filter(Boolean) as string[];
+  const allRpcs = [...new Set([...getWriteRpcList(), ...getReadRpcList()])];
 
-  for (const rpc of candidates) {
-    if (!isHealthy(rpc)) continue;
-    try {
-      const provider = new ethers.JsonRpcProvider(rpc);
-      await provider.getBlockNumber();
-      return { provider, ethers };
-    } catch {
-      recordFailure(rpc);
-    }
-  }
-
-  // Last resort — use ethers default with primary
-  const provider = new ethers.JsonRpcProvider(primaryRpc);
-  return { provider, ethers };
-}
-
-export function getRpcHealthReport(): Array<{ rpc: string; failures: number; latencyMs: number; healthy: boolean }> {
-  return getRpcList().map((rpc) => {
+  return allRpcs.map((rpc) => {
     const h = rpcHealth.get(rpc);
+    let role: "read" | "write-mev" | "write-fallback" | "backup" = "backup";
+    if (rpc === mevRpc) role = "write-mev";
+    else if (rpc === primaryRpc) role = "write-fallback";
+    else if (rpc === primaryRpc) role = "read";
+
     return {
-      rpc: rpc.replace(/\/[a-zA-Z0-9]{20,}/, "/***"),
+      rpc: maskKey(rpc),
+      role,
       failures: h?.failures ?? 0,
       latencyMs: h?.latencyMs ?? 0,
       healthy: isHealthy(rpc),

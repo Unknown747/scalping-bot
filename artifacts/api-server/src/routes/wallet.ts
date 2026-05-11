@@ -38,7 +38,17 @@ router.get("/wallet/balance", async (req, res) => {
 router.get("/wallet/rpc-health", (_req, res) => {
   try {
     const report = getRpcHealthReport();
-    res.json({ rpcs: report, total: report.length, healthy: report.filter((r) => r.healthy).length });
+    const mevEndpoint = report.find((r) => r.role === "write-mev");
+    const readEndpoint = report.find((r) => r.role === "write-fallback");
+
+    res.json({
+      rpcs: report,
+      total: report.length,
+      healthy: report.filter((r) => r.healthy).length,
+      mevActive: mevEndpoint?.healthy ?? false,
+      readRpc: readEndpoint?.rpc ?? "mainnet.base.org",
+      writeRpc: mevEndpoint?.rpc ?? "not configured",
+    });
   } catch (err) {
     res.status(500).json({ error: "Failed to get RPC health" });
   }
