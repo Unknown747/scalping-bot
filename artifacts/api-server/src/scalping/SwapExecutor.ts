@@ -1,6 +1,7 @@
 import { logger } from "../lib/logger.js";
 import type { ScalpingConfigData } from "./config.js";
 import { BASE_CONTRACTS, calculateDynamicSlippage } from "./config.js";
+import { getMevProvider, withRpcRetry } from "./RpcProvider.js";
 
 export interface SwapResult {
   success: boolean;
@@ -9,6 +10,7 @@ export interface SwapResult {
   amountOut: bigint;
   gasUsed: bigint;
   error?: string;
+  usedWeth?: boolean;
 }
 
 export interface TWAPResult {
@@ -21,15 +23,18 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Uniswap V3 QuoterV2 on Base — verified working
 const QUOTER_V2 = "0x61fFE014bA17989E743c5F6cB21bF9697530B21e";
+const FEE_TIERS = [10000, 3000, 500, 100];
 
-// Fee tiers to try in order of preference for meme coins
-const FEE_TIERS = [10000, 3000, 500, 100]; // 1%, 0.3%, 0.05%, 0.01%
-
-// Cache for best fee tier per token (avoid repeated on-chain calls)
 const feeTierCache = new Map<string, { fee: number; timestamp: number }>();
-const FEE_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const FEE_CACHE_TTL = 5 * 60 * 1000;
+
+const ERC20_ABI = [
+  "function approve(address spender, uint256 amount) returns (bool)",
+  "function allowance(address owner, address spender) view returns (uint256)",
+  "function balanceOf(address owner) view returns (uint256)",
+  "function decimals() view returns (uint8)",
+];
 
 export class SwapExecutor {
   private config: ScalpingConfigData;
@@ -55,29 +60,57 @@ export class SwapExecutor {
     return this.walletAddress;
   }
 
-  async getWalletBalance(): Promise<{ ethBalance: number; address: string | null }> {
+  async getWalletBalance(): Promise<{ ethBalance: number; wethBalance: number; address: string | null }> {
     if (this.isPaperMode || !this.walletAddress) {
-      return { ethBalance: this.config.totalCapitalEth, address: this.walletAddress };
+      return { ethBalance: this.config.totalCapitalEth, wethBalance: 0, address: this.walletAddress };
     }
 
     try {
-      const { ethers } = await import("ethers");
-      const provider = new ethers.JsonRpcProvider(this.rpcUrl);
-      const balance = await provider.getBalance(this.walletAddress);
-      return {
-        ethBalance: parseFloat(ethers.formatEther(balance)),
-        address: this.walletAddress,
-      };
+      return await withRpcRetry(async (provider, ethers) => {
+        const [ethBal, wethBal] = await Promise.all([
+          provider.getBalance(this.walletAddress!),
+          new ethers.Contract(BASE_CONTRACTS.WETH, ERC20_ABI, provider)
+            .balanceOf(this.walletAddress!),
+        ]);
+        return {
+          ethBalance: parseFloat(ethers.formatEther(ethBal)),
+          wethBalance: parseFloat(ethers.formatEther(wethBal)),
+          address: this.walletAddress,
+        };
+      });
     } catch (err) {
       logger.warn({ err }, "Failed to fetch wallet balance");
-      return { ethBalance: 0, address: this.walletAddress };
+      return { ethBalance: 0, wethBalance: 0, address: this.walletAddress };
     }
   }
 
   /**
-   * Find the best Uniswap V3 fee tier for a token by querying QuoterV2.
-   * Returns the fee tier with the best quote (most tokens out).
+   * Get WETH balance for the wallet.
    */
+  async getWethBalance(ethers: any, provider: any): Promise<bigint> {
+    if (!this.walletAddress) return 0n;
+    try {
+      const weth = new ethers.Contract(BASE_CONTRACTS.WETH, ERC20_ABI, provider);
+      return await weth.balanceOf(this.walletAddress);
+    } catch {
+      return 0n;
+    }
+  }
+
+  /**
+   * Ensure WETH approval for the router if needed.
+   */
+  private async ensureWethApproval(ethers: any, wallet: any, amount: bigint): Promise<void> {
+    const weth = new ethers.Contract(BASE_CONTRACTS.WETH, ERC20_ABI, wallet);
+    const allowance: bigint = await weth.allowance(this.walletAddress, BASE_CONTRACTS.UNISWAP_V3_ROUTER);
+    if (allowance < amount) {
+      logger.info({}, "Approving WETH for Uniswap V3 router");
+      const tx = await weth.approve(BASE_CONTRACTS.UNISWAP_V3_ROUTER, ethers.MaxUint256);
+      await tx.wait(1);
+      logger.info({}, "WETH approval confirmed");
+    }
+  }
+
   private async getBestFeeTier(
     ethers: any,
     provider: any,
@@ -94,10 +127,9 @@ export class SwapExecutor {
     const quoterAbi = [
       "function quoteExactInputSingle((address tokenIn, address tokenOut, uint256 amountIn, uint24 fee, uint160 sqrtPriceLimitX96) params) external returns (uint256 amountOut, uint160 sqrtPriceX96After, uint32 initializedTicksCrossed, uint256 gasEstimate)",
     ];
-
     const quoter = new ethers.Contract(QUOTER_V2, quoterAbi, provider);
 
-    let bestFee = 3000; // default fallback
+    let bestFee = 3000;
     let bestAmountOut = 0n;
 
     for (const fee of FEE_TIERS) {
@@ -109,15 +141,12 @@ export class SwapExecutor {
           fee,
           sqrtPriceLimitX96: 0,
         });
-
-        logger.info({ tokenAddress, fee, amountOut: amountOut.toString() }, "Quote result");
-
         if (amountOut > bestAmountOut) {
           bestAmountOut = amountOut;
           bestFee = fee;
         }
       } catch {
-        // Pool doesn't exist for this fee tier, skip
+        // Pool doesn't exist for this fee tier
       }
     }
 
@@ -126,10 +155,6 @@ export class SwapExecutor {
     return bestFee;
   }
 
-  /**
-   * Get a quote for exact ETH in → tokens out.
-   * Used to calculate amountOutMinimum with slippage.
-   */
   private async getQuote(
     ethers: any,
     provider: any,
@@ -176,52 +201,43 @@ export class SwapExecutor {
         if (result.success) {
           logger.info({ slice: `${i + 1}/${slices}`, amount: sliceAmount }, "TWAP slice executed");
         } else {
-          logger.warn({ slice: `${i + 1}/${slices}`, error: result.error }, "TWAP slice failed — continuing");
+          logger.warn({ slice: `${i + 1}/${slices}`, error: result.error }, "TWAP slice failed");
         }
       } catch (err) {
         logger.error({ err, slice: i + 1 }, "TWAP slice threw error");
-        results.push({
-          success: false,
-          txHash: null,
-          amountIn: 0n,
-          amountOut: 0n,
-          gasUsed: 0n,
-          error: String(err),
-        });
+        results.push({ success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: String(err) });
       }
       if (i < slices - 1) await sleep(intervalMs);
     }
 
     const successfulSlices = results.filter((r) => r.success).length;
-    logger.info({ successfulSlices, totalSlices: slices }, "TWAP execution completed");
+    logger.info({ successfulSlices, totalSlices: slices }, "TWAP completed");
     return { successfulSlices, totalSlices: slices, results };
   }
 
+  /**
+   * Buy token using WETH (preferred) or native ETH (fallback).
+   *
+   * WETH path:  approve WETH → exactInputSingle(tokenIn=WETH, value=0)
+   * ETH path:   exactInputSingle(tokenIn=WETH, value=amountInWei) — router wraps ETH
+   *
+   * Strategy: prefer WETH if wallet WETH balance >= amountIn.
+   * This avoids needing native ETH gas for trading (only gas costs need ETH).
+   */
   async buyToken(
     tokenAddress: string,
     amountEth: number,
     routerAddress?: string,
     marketData?: { volume5mUsd: number; liquidityUsd: number; priceChange5m: number }
   ): Promise<SwapResult> {
-    if (this.isPaperMode) {
-      return this.simulateBuy(tokenAddress, amountEth);
-    }
+    if (this.isPaperMode) return this.simulateBuy(tokenAddress, amountEth);
 
     if (!this.privateKey || !this.walletAddress) {
-      return {
-        success: false,
-        txHash: null,
-        amountIn: 0n,
-        amountOut: 0n,
-        gasUsed: 0n,
-        error: "No private key configured. Set PRIVATE_KEY in environment.",
-      };
+      return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: "No private key configured" };
     }
 
     try {
-      const { ethers } = await import("ethers");
-      const mevRpc = process.env["MEV_PROTECTION_RPC"] || this.rpcUrl;
-      const provider = new ethers.JsonRpcProvider(mevRpc);
+      const { provider, ethers } = await getMevProvider();
       const wallet = new ethers.Wallet(this.privateKey, provider);
 
       // Dynamic slippage
@@ -238,52 +254,79 @@ export class SwapExecutor {
       const amountInWei = ethers.parseEther(amountEth.toFixed(18));
       const targetRouter = routerAddress || BASE_CONTRACTS.UNISWAP_V3_ROUTER;
 
-      // Auto-detect best fee tier
       const fee = await this.getBestFeeTier(ethers, provider, tokenAddress, amountInWei);
-
-      // Get quote to calculate amountOutMinimum
       const expectedOut = await this.getQuote(ethers, provider, tokenAddress, amountInWei, fee);
       const amountOutMinimum = expectedOut > 0n
         ? (expectedOut * BigInt(Math.floor((100 - slippagePct) * 100))) / 10000n
         : 0n;
 
+      // ── Decide: use WETH ERC-20 or native ETH? ──────────────────────────
+      const wethBalance = await this.getWethBalance(ethers, provider);
+      const useWeth = wethBalance >= amountInWei;
+
       logger.info(
-        { tokenAddress, fee, amountEth, slippagePct, expectedOut: expectedOut.toString(), amountOutMinimum: amountOutMinimum.toString() },
-        "Executing buy"
+        { tokenAddress, fee, amountEth, slippagePct, useWeth,
+          wethBalance: ethers.formatEther(wethBalance),
+          expectedOut: expectedOut.toString() },
+        useWeth ? "Executing BUY with WETH (ERC-20)" : "Executing BUY with native ETH"
       );
+
+      const feeData = await provider.getFeeData();
+      const baseFee = (feeData as any).lastBaseFeePerGas ?? feeData.gasPrice ?? ethers.parseUnits("0.005", "gwei");
+      const priorityFee = ethers.parseUnits(this.config.maxPriorityFeeGwei.toString(), "gwei");
+      const maxFee = BigInt(baseFee) * 2n + priorityFee;
 
       const routerAbi = [
         "function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96) params) external payable returns (uint256 amountOut)",
       ];
       const router = new ethers.Contract(targetRouter, routerAbi, wallet);
 
-      // Use current network gas + small priority fee
-      const feeData = await provider.getFeeData();
-      const baseFee = (feeData as any).lastBaseFeePerGas ?? feeData.gasPrice ?? ethers.parseUnits("0.005", "gwei");
-      const priorityFee = ethers.parseUnits(this.config.maxPriorityFeeGwei.toString(), "gwei");
-      const maxFee = BigInt(baseFee) * 2n + priorityFee;
+      let tx: any;
 
-      const tx = await router.exactInputSingle(
-        {
-          tokenIn: BASE_CONTRACTS.WETH,
-          tokenOut: tokenAddress,
-          fee,
-          recipient: this.walletAddress,
-          amountIn: amountInWei,
-          amountOutMinimum,
-          sqrtPriceLimitX96: 0,
-        },
-        {
-          value: amountInWei,
-          maxFeePerGas: maxFee,
-          maxPriorityFeePerGas: priorityFee,
-        }
-      );
+      if (useWeth) {
+        // WETH path: approve first, then swap with no ETH value
+        await this.ensureWethApproval(ethers, wallet, amountInWei);
+        tx = await router.exactInputSingle(
+          {
+            tokenIn: BASE_CONTRACTS.WETH,
+            tokenOut: tokenAddress,
+            fee,
+            recipient: this.walletAddress,
+            amountIn: amountInWei,
+            amountOutMinimum,
+            sqrtPriceLimitX96: 0,
+          },
+          {
+            value: 0n, // No native ETH — using WETH ERC-20
+            maxFeePerGas: maxFee,
+            maxPriorityFeePerGas: priorityFee,
+          }
+        );
+      } else {
+        // Native ETH path: router wraps ETH to WETH internally
+        logger.info({ wethBalance: ethers.formatEther(wethBalance), needed: amountEth }, "WETH insufficient, using native ETH");
+        tx = await router.exactInputSingle(
+          {
+            tokenIn: BASE_CONTRACTS.WETH,
+            tokenOut: tokenAddress,
+            fee,
+            recipient: this.walletAddress,
+            amountIn: amountInWei,
+            amountOutMinimum,
+            sqrtPriceLimitX96: 0,
+          },
+          {
+            value: amountInWei,
+            maxFeePerGas: maxFee,
+            maxPriorityFeePerGas: priorityFee,
+          }
+        );
+      }
 
-      logger.info({ txHash: tx.hash, tokenAddress }, "Buy tx submitted, waiting for receipt");
+      logger.info({ txHash: tx.hash, tokenAddress, useWeth }, "Buy tx submitted, waiting for receipt");
       const receipt = await tx.wait(1);
 
-      // Parse amountOut from Transfer event logs (ERC-20 transfer to wallet)
+      // Parse amountOut from Transfer event (ERC-20 transfer to wallet)
       let amountOut = 0n;
       const transferSig = ethers.id("Transfer(address,address,uint256)");
       for (const log of receipt.logs || []) {
@@ -303,6 +346,7 @@ export class SwapExecutor {
         amountIn: amountInWei,
         amountOut,
         gasUsed: receipt.gasUsed,
+        usedWeth: useWeth,
       };
     } catch (err: any) {
       logger.error({ err, tokenAddress, amountEth }, "Buy swap failed");
@@ -318,46 +362,28 @@ export class SwapExecutor {
   }
 
   async sellToken(tokenAddress: string, amountTokens: bigint, amountEth: number): Promise<SwapResult> {
-    if (this.isPaperMode) {
-      return this.simulateSell(tokenAddress, amountEth);
-    }
+    if (this.isPaperMode) return this.simulateSell(tokenAddress, amountEth);
 
     if (!this.privateKey || !this.walletAddress) {
-      return {
-        success: false,
-        txHash: null,
-        amountIn: 0n,
-        amountOut: 0n,
-        gasUsed: 0n,
-        error: "No private key configured",
-      };
+      return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: "No private key configured" };
     }
 
     try {
-      const { ethers } = await import("ethers");
-      const mevRpc = process.env["MEV_PROTECTION_RPC"] || this.rpcUrl;
-      const provider = new ethers.JsonRpcProvider(mevRpc);
+      const { provider, ethers } = await getMevProvider();
       const wallet = new ethers.Wallet(this.privateKey, provider);
 
-      const erc20Abi = [
-        "function approve(address spender, uint256 amount) returns (bool)",
-        "function allowance(address owner, address spender) view returns (uint256)",
-        "function balanceOf(address owner) view returns (uint256)",
-        "function decimals() view returns (uint8)",
-      ];
-      const tokenContract = new ethers.Contract(tokenAddress, erc20Abi, wallet);
+      const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, wallet);
 
-      // Always use actual on-chain balance to avoid rounding mismatches
+      // Always use actual on-chain balance
       const actualBalance: bigint = await tokenContract.balanceOf(this.walletAddress);
       if (actualBalance === 0n) {
         logger.warn({ tokenAddress }, "No token balance to sell");
         return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: "Zero balance" };
       }
-      // Use min of stored amount and actual balance to be safe
       amountTokens = actualBalance < amountTokens ? actualBalance : amountTokens;
-      logger.info({ tokenAddress, storedAmount: amountTokens.toString(), actualBalance: actualBalance.toString() }, "Sell using on-chain balance");
+      logger.info({ tokenAddress, amountTokens: amountTokens.toString(), actualBalance: actualBalance.toString() }, "Sell using on-chain balance");
 
-      // Ensure allowance
+      // Ensure allowance for token → router
       const allowance: bigint = await tokenContract.allowance(this.walletAddress, BASE_CONTRACTS.UNISWAP_V3_ROUTER);
       if (allowance < amountTokens) {
         logger.info({ tokenAddress }, "Approving token for router");
@@ -365,17 +391,9 @@ export class SwapExecutor {
         await approveTx.wait(1);
       }
 
-      // Get best fee tier for the sell direction
-      // Use same fee tier as buy (cached)
       const cacheKey = tokenAddress.toLowerCase();
       const cached = feeTierCache.get(cacheKey);
       const fee = cached ? cached.fee : 3000;
-
-      // Slippage: allow up to maxSlippagePercent
-      const slippagePct = this.config.maxSlippagePercent;
-      // amountOutMinimum = 0 for sell (we don't know token price precisely, use 0 to avoid reverts)
-      // In practice for meme coins, slippage on sell is high anyway
-      const amountOutMinimum = 0n;
 
       const routerAbi = [
         "function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96) params) external payable returns (uint256 amountOut)",
@@ -387,7 +405,7 @@ export class SwapExecutor {
       const priorityFee = ethers.parseUnits(this.config.maxPriorityFeeGwei.toString(), "gwei");
       const maxFee = BigInt(baseFee) * 2n + priorityFee;
 
-      logger.info({ tokenAddress, fee, amountTokens: amountTokens.toString(), slippagePct }, "Executing sell");
+      logger.info({ tokenAddress, fee, amountTokens: amountTokens.toString() }, "Executing sell → WETH");
 
       const tx = await router.exactInputSingle(
         {
@@ -396,7 +414,7 @@ export class SwapExecutor {
           fee,
           recipient: this.walletAddress,
           amountIn: amountTokens,
-          amountOutMinimum,
+          amountOutMinimum: 0n,
           sqrtPriceLimitX96: 0,
         },
         {
@@ -405,10 +423,10 @@ export class SwapExecutor {
         }
       );
 
-      logger.info({ txHash: tx.hash, tokenAddress }, "Sell tx submitted, waiting for receipt");
+      logger.info({ txHash: tx.hash, tokenAddress }, "Sell tx submitted");
       const receipt = await tx.wait(1);
 
-      // Parse ETH received from WETH Transfer event
+      // Parse WETH received from Transfer event
       let amountOut = 0n;
       const transferSig = ethers.id("Transfer(address,address,uint256)");
       for (const log of receipt.logs || []) {

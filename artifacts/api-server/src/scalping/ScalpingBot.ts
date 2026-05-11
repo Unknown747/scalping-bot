@@ -91,6 +91,7 @@ export class ScalpingBot {
   private scanInterval: NodeJS.Timeout | null = null;
   private priceInterval: NodeJS.Timeout | null = null;
   private dailySummaryInterval: NodeJS.Timeout | null = null;
+  private _scanCycle = 0;
 
   private tokenScanner: TokenScanner;
   private safetyChecker: SafetyChecker;
@@ -175,7 +176,7 @@ export class ScalpingBot {
     return this.config;
   }
 
-  async getWalletBalance(): Promise<{ ethBalance: number; address: string | null }> {
+  async getWalletBalance(): Promise<{ ethBalance: number; wethBalance: number; address: string | null }> {
     return this.swapExecutor.getWalletBalance();
   }
 
@@ -186,17 +187,45 @@ export class ScalpingBot {
 
     return {
       running: this.running,
+      isRunning: this.running,
       mode: this.config.mode,
       startedAt: this.startedAt?.toISOString() || null,
       dailyLossHit: this.isDailyLossHit(),
       cooldownUntil: this.cooldownUntil?.toISOString() || null,
       activePositions: this.positions.size,
+      openPositions: this.positions.size,
+      maxPositions: this.config.maxConcurrentPositions,
       totalTradesDay: today.totalTrades,
       winRateDay: today.totalTrades > 0 ? (today.winningTrades / today.totalTrades) * 100 : 0,
       walletAddress: this.swapExecutor.getWalletAddress(),
       buysInLastFiveMin: buysInWindow,
       postCloseCooldownSeconds: postCloseCooldown,
       accumulatedProfitEth: this.accumulatedProfitEth,
+      aiFilterEnabled: this.config.enableAIFilter,
+      scanCycle: this._scanCycle ?? 0,
+      config: {
+        tp1Percent: this.config.tp1Percent,
+        tp1SellPercent: this.config.tp1SellPercent,
+        tp2Percent: this.config.tp2Percent,
+        tp2SellPercent: this.config.tp2SellPercent,
+        tp3Percent: this.config.tp3Percent,
+        tp3SellPercent: this.config.tp3SellPercent,
+        stopLossPercent: this.config.stopLossPercent,
+        trailingStopActivatePercent: this.config.trailingStopActivatePercent,
+        trailingStopDistancePercent: this.config.trailingStopDistancePercent,
+        peakProfitDropPercent: this.config.peakProfitDropPercent,
+        enablePeakProfitExit: this.config.enablePeakProfitExit,
+        maxHoldMinutes: this.config.maxHoldMinutes,
+        minMemeScore: this.config.minMemeScore,
+        enableAIFilter: this.config.enableAIFilter,
+        aiFilterMinConfidence: this.config.aiFilterMinConfidence,
+        enableNewListingMode: this.config.enableNewListingMode,
+        newListingMaxAgeMinutes: this.config.newListingMaxAgeMinutes,
+        newListingMaxHoldMinutes: this.config.newListingMaxHoldMinutes,
+        newListingMinBuySellRatio: this.config.newListingMinBuySellRatio,
+        riskLevel: this.config.riskLevel,
+        scanIntervalSeconds: this.config.scanIntervalSeconds,
+      },
     };
   }
 
@@ -299,6 +328,7 @@ export class ScalpingBot {
 
   private async runScanCycle(): Promise<void> {
     if (!this.running) return;
+    this._scanCycle++;
     if (this.isDailyLossHit()) {
       this.log("warn", "Daily loss limit hit — not scanning for new tokens", null);
       return;
@@ -454,7 +484,17 @@ export class ScalpingBot {
   private checkExitConditions(pos: PositionState, profitPercent: number, holdSeconds: number): string | null {
     const holdMinutes = holdSeconds / 60;
 
-    if (holdMinutes >= this.config.maxHoldMinutes) return "max_hold";
+    // New listing positions get shorter max hold time
+    const isNewListingPos = this.config.enableNewListingMode &&
+      holdSeconds < this.config.newListingMaxHoldMinutes * 60 * 2; // consider position as "new listing" for first 2x the hold window
+    const effectiveMaxHold = (this.config.enableNewListingMode && holdSeconds <= this.config.newListingMaxHoldMinutes * 60)
+      ? this.config.newListingMaxHoldMinutes
+      : this.config.maxHoldMinutes;
+
+    if (holdMinutes >= effectiveMaxHold) {
+      this.log("info", `${pos.tokenSymbol} max hold reached (${holdMinutes.toFixed(1)}min >= ${effectiveMaxHold}min)`, pos.tokenSymbol);
+      return "max_hold";
+    }
 
     if (profitPercent <= -this.config.stopLossPercent) return "stop_loss";
 
@@ -558,10 +598,25 @@ export class ScalpingBot {
     if (this.config.enableMemeScore && !memeScore.passed) {
       this.log(
         "info",
-        `${token.symbol} meme score too low: ${memeScore.score}/100 (min: ${this.config.minMemeScore})`,
+        `${token.symbol} meme score too low: ${memeScore.score}/100 (min: ${this.config.minMemeScore}) tier: ${memeScore.tier}`,
         token.symbol
       );
       return;
+    }
+
+    // ── New Listing Mode: extra filters for tokens < newListingMaxAgeMinutes ──
+    const isNewListing = this.config.enableNewListingMode && token.ageMinutes < this.config.newListingMaxAgeMinutes;
+    if (isNewListing) {
+      // Must have strong buy pressure on new listings (most get dumped on launch)
+      if (buySellRatio < this.config.newListingMinBuySellRatio) {
+        this.log(
+          "info",
+          `${token.symbol} [NEW LISTING] rejected: buy/sell ratio too weak (${buySellRatio.toFixed(2)} < ${this.config.newListingMinBuySellRatio} required)`,
+          token.symbol
+        );
+        return;
+      }
+      this.log("info", `${token.symbol} [NEW LISTING ${token.ageMinutes.toFixed(0)}min] buy/sell ratio ${buySellRatio.toFixed(2)} ✓`, token.symbol);
     }
 
     // 1h Momentum Confirmation
