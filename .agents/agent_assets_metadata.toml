@@ -1,0 +1,8 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "ZL9PT5W9maRzPl7vH5x5x"
+uri = "file://README.md"
+type = "text"
+title = "README — BASE Scalper VPS Install Guide"
