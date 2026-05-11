@@ -858,6 +858,7 @@ export class ScalpingBot {
       holdSeconds,
       exitReason: reason,
       txHash: sellResult.txHash,
+      mevProtected: sellResult.mevProtected ?? false,
     });
 
     if (profitEth < 0) {
@@ -1065,6 +1066,7 @@ export class ScalpingBot {
       holdSeconds: 0,
       exitReason: "manual_sell",
       txHash: sellResult.txHash,
+      mevProtected: sellResult.mevProtected ?? false,
     });
 
     this.log("sell", `MANUAL SELL SUCCESS: ${symbol} | received ${ethReceived.toFixed(6)} ETH | txHash: ${sellResult.txHash}`, symbol);

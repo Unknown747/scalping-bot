@@ -15,6 +15,8 @@ type Trade = {
   exitTime: string;
   holdSeconds: number;
   exitReason: string;
+  txHash?: string | null;
+  mevProtected: boolean;
 };
 
 type PaginatedTrades = {
@@ -38,6 +40,7 @@ const REASON_LABELS: Record<string, string> = {
   trailing_stop: "TRAIL",
   max_hold: "MAX",
   manual: "MANUAL",
+  manual_sell: "MANUAL",
   emergency: "EMRG",
   force_exit: "PEAK",
 };
@@ -53,6 +56,27 @@ function formatHold(s: number) {
   return m > 0 ? `${m}m${sec}s` : `${sec}s`;
 }
 
+function MevBadge({ protected: isProtected }: { protected: boolean }) {
+  if (isProtected) {
+    return (
+      <span
+        title="Trade masuk via MEV blocker — terlindungi dari sandwich attack"
+        className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold bg-primary/15 text-primary border border-primary/25"
+      >
+        ✓ MEV
+      </span>
+    );
+  }
+  return (
+    <span
+      title="Trade menggunakan RPC standar — tidak ada MEV protection"
+      className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-mono text-muted-foreground border border-border/50"
+    >
+      — STD
+    </span>
+  );
+}
+
 export function TradeHistory() {
   const [filter, setFilter] = useState<"today" | "week" | "all">("today");
 
@@ -61,13 +85,18 @@ export function TradeHistory() {
     { query: { refetchInterval: 10000, queryKey: getGetTradesQueryKey({ filter, limit: 100 }) } }
   );
 
-  // API returns paginated object {trades, total, page, totalPages}
   const paginated = raw as PaginatedTrades | undefined;
   const trades: Trade[] = paginated?.trades ?? (Array.isArray(raw) ? (raw as Trade[]) : []);
 
+  // MEV stats
+  const mevCount = trades.filter((t) => t.mevProtected).length;
+  const mevPct = trades.length > 0 ? Math.round((mevCount / trades.length) * 100) : 0;
+  const mevProfitEth = trades.filter((t) => t.mevProtected).reduce((s, t) => s + t.profitEth, 0);
+  const stdProfitEth = trades.filter((t) => !t.mevProtected).reduce((s, t) => s + t.profitEth, 0);
+
   const exportCsv = () => {
     if (!trades.length) return;
-    const headers = ["Time", "Token", "Entry", "Exit", "Profit%", "ProfitETH", "Hold", "Reason"];
+    const headers = ["Time", "Token", "Entry", "Exit", "Profit%", "ProfitETH", "Hold", "Reason", "MEV"];
     const rows = trades.map((t) => [
       new Date(t.exitTime).toLocaleString("id-ID"),
       t.tokenSymbol,
@@ -77,6 +106,7 @@ export function TradeHistory() {
       t.profitEth.toFixed(6),
       formatHold(t.holdSeconds),
       t.exitReason,
+      t.mevProtected ? "YES" : "NO",
     ]);
     const csv = [headers, ...rows].map((r) => r.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
@@ -90,6 +120,7 @@ export function TradeHistory() {
 
   return (
     <div className="bg-card border border-border rounded-lg p-4 space-y-3">
+      {/* Header */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="flex items-center gap-2">
           <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">Trade History</div>
@@ -124,6 +155,55 @@ export function TradeHistory() {
         </div>
       </div>
 
+      {/* MEV Summary Bar */}
+      {trades.length > 0 && (
+        <div className="grid grid-cols-3 gap-2 p-2.5 rounded-lg bg-muted/30 border border-border/50">
+          <div className="text-center">
+            <div className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider mb-0.5">MEV Protected</div>
+            <div className="text-sm font-bold font-mono text-primary">{mevPct}%</div>
+            <div className="text-[10px] text-muted-foreground font-mono">{mevCount}/{trades.length} trade</div>
+          </div>
+          <div className="text-center border-x border-border/50">
+            <div className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider mb-0.5">P&L via MEV</div>
+            <div className={`text-sm font-bold font-mono ${mevProfitEth >= 0 ? "text-profit" : "text-loss"}`}>
+              {mevProfitEth >= 0 ? "+" : ""}{mevProfitEth.toFixed(5)} ETH
+            </div>
+            <div className="text-[10px] text-muted-foreground font-mono">dRPC MEV Blocker</div>
+          </div>
+          <div className="text-center">
+            <div className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider mb-0.5">P&L via STD</div>
+            <div className={`text-sm font-bold font-mono ${stdProfitEth >= 0 ? "text-profit" : "text-loss"}`}>
+              {stdProfitEth >= 0 ? "+" : ""}{stdProfitEth.toFixed(5)} ETH
+            </div>
+            <div className="text-[10px] text-muted-foreground font-mono">Standard RPC</div>
+          </div>
+        </div>
+      )}
+
+      {/* MEV bar chart */}
+      {trades.length > 0 && (
+        <div className="space-y-1">
+          <div className="flex justify-between text-[10px] font-mono text-muted-foreground">
+            <span>MEV Protected</span>
+            <span>Standard RPC</span>
+          </div>
+          <div className="flex h-1.5 rounded-full overflow-hidden bg-muted">
+            <div
+              className="bg-primary transition-all duration-500"
+              style={{ width: `${mevPct}%` }}
+            />
+            <div
+              className="bg-border flex-1"
+            />
+          </div>
+          <div className="flex justify-between text-[10px] font-mono">
+            <span className="text-primary">{mevPct}% ✓ MEV</span>
+            <span className="text-muted-foreground">{100 - mevPct}% STD</span>
+          </div>
+        </div>
+      )}
+
+      {/* Table */}
       <div className="overflow-auto max-h-[320px]">
         <table className="w-full text-xs font-mono" data-testid="table-trade-history">
           <thead>
@@ -134,7 +214,8 @@ export function TradeHistory() {
               <th className="text-right pr-2">Exit</th>
               <th className="text-right pr-2">P%</th>
               <th className="text-right pr-2">Hold</th>
-              <th className="text-right">Reason</th>
+              <th className="text-right pr-2">Reason</th>
+              <th className="text-right">MEV</th>
             </tr>
           </thead>
           <tbody>
@@ -156,7 +237,7 @@ export function TradeHistory() {
                   {trade.profitPercent >= 0 ? "+" : ""}{trade.profitPercent.toFixed(2)}%
                 </td>
                 <td className="text-right pr-2 text-muted-foreground">{formatHold(trade.holdSeconds)}</td>
-                <td className="text-right">
+                <td className="text-right pr-2">
                   <span className={`px-1.5 py-0.5 rounded text-[10px] ${
                     trade.exitReason === "stop_loss" || trade.exitReason === "emergency"
                       ? "bg-loss/10 text-loss"
@@ -166,6 +247,9 @@ export function TradeHistory() {
                   }`}>
                     {REASON_LABELS[trade.exitReason] || trade.exitReason}
                   </span>
+                </td>
+                <td className="text-right">
+                  <MevBadge protected={trade.mevProtected} />
                 </td>
               </motion.tr>
             ))}

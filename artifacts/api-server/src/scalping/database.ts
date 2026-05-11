@@ -119,6 +119,13 @@ function initSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_bot_logs_level ON bot_logs(level);
     CREATE INDEX IF NOT EXISTS idx_positions_token_address ON positions(token_address);
   `);
+
+  // Migration: add mev_protected column if it doesn't exist yet
+  const cols = db.prepare("PRAGMA table_info(trades)").all() as { name: string }[];
+  if (!cols.some((c) => c.name === "mev_protected")) {
+    db.exec("ALTER TABLE trades ADD COLUMN mev_protected INTEGER NOT NULL DEFAULT 0");
+    logger.info({}, "Migration: added mev_protected column to trades table");
+  }
 }
 
 // Trade operations
@@ -137,18 +144,20 @@ export function insertTrade(trade: {
   holdSeconds: number;
   exitReason: string;
   txHash?: string | null;
+  mevProtected?: boolean;
 }): number {
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO trades (token_address, token_symbol, token_name, entry_price, exit_price, amount_eth, amount_tokens, profit_percent, profit_eth, entry_time, exit_time, hold_seconds, exit_reason, tx_hash)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO trades (token_address, token_symbol, token_name, entry_price, exit_price, amount_eth, amount_tokens, profit_percent, profit_eth, entry_time, exit_time, hold_seconds, exit_reason, tx_hash, mev_protected)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const result = stmt.run(
     trade.tokenAddress, trade.tokenSymbol, trade.tokenName,
     trade.entryPrice, trade.exitPrice, trade.amountEth,
     trade.amountTokens || 0, trade.profitPercent, trade.profitEth,
     trade.entryTime, trade.exitTime, trade.holdSeconds,
-    trade.exitReason, trade.txHash || null
+    trade.exitReason, trade.txHash || null,
+    trade.mevProtected ? 1 : 0
   );
   return result.lastInsertRowid as number;
 }
@@ -176,10 +185,16 @@ export function getTrades(
            entry_price as entryPrice, exit_price as exitPrice, amount_eth as amountEth,
            profit_percent as profitPercent, profit_eth as profitEth,
            entry_time as entryTime, exit_time as exitTime, hold_seconds as holdSeconds,
-           exit_reason as exitReason, tx_hash as txHash
+           exit_reason as exitReason, tx_hash as txHash,
+           mev_protected as mevProtected
     FROM trades ${whereClause}
     ORDER BY exit_time DESC LIMIT ? OFFSET ?
   `).all(limit, offset) as any[];
+
+  // Normalize SQLite integer (0/1) to boolean
+  for (const t of trades) {
+    t.mevProtected = t.mevProtected === 1;
+  }
 
   return { trades, total, page, totalPages };
 }
