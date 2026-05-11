@@ -470,21 +470,37 @@ export class ScalpingBot {
       }
     }
 
-    // Trailing stop
+    // Trailing stop check: exit if price hit the stop level
     if (pos.trailingStopActive && pos.trailingStopPrice && pos.currentPrice <= pos.trailingStopPrice) {
       return "trailing_stop";
     }
 
-    // Activate trailing stop
-    if (!pos.trailingStopActive && profitPercent >= this.config.trailingStopActivatePercent) {
+    // Advanced trailing stop activation:
+    // Only activates when profit has reached the configured minimum threshold (e.g. >5%)
+    // Uses both trailingStopActivatePercent (legacy) AND trailingStopMinProfitToActivate (new)
+    const trailingActivateThreshold = Math.max(
+      this.config.trailingStopActivatePercent,
+      this.config.trailingStopMinProfitToActivate
+    );
+    if (!pos.trailingStopActive && profitPercent >= trailingActivateThreshold) {
       pos.trailingStopActive = true;
-      pos.trailingStopPrice = pos.currentPrice * (1 - this.config.trailingStopDistancePercent / 100);
-      this.log("info", `Trailing stop activated for ${pos.tokenSymbol} at ${pos.trailingStopPrice?.toFixed(8)}`, pos.tokenSymbol);
+      // Lock minimum profit: stop price is max of (trailing distance) and (entry + lock min%)
+      const trailingStop = pos.currentPrice * (1 - this.config.trailingStopDistancePercent / 100);
+      const profitLockStop = pos.entryPrice * (1 + this.config.trailingStopLockMinProfitPercent / 100);
+      pos.trailingStopPrice = Math.max(trailingStop, profitLockStop);
+      this.log(
+        "info",
+        `Trailing stop ACTIVATED ${pos.tokenSymbol} at ${pos.trailingStopPrice?.toFixed(8)} (profit locked ≥${this.config.trailingStopLockMinProfitPercent}%)`,
+        pos.tokenSymbol
+      );
     }
 
-    // Update trailing stop price
+    // Update trailing stop price upward as price rises
+    // Always keep the stop at the higher of: trailing distance OR minimum profit lock
     if (pos.trailingStopActive && pos.trailingStopPrice) {
-      const newStop = pos.currentPrice * (1 - this.config.trailingStopDistancePercent / 100);
+      const trailingStop = pos.currentPrice * (1 - this.config.trailingStopDistancePercent / 100);
+      const profitLockStop = pos.entryPrice * (1 + this.config.trailingStopLockMinProfitPercent / 100);
+      const newStop = Math.max(trailingStop, profitLockStop);
       if (newStop > pos.trailingStopPrice) {
         pos.trailingStopPrice = newStop;
       }
@@ -898,7 +914,7 @@ export class ScalpingBot {
     const existing = this.positions.get(tokenAddress.toLowerCase());
     if (existing) {
       await this.closePosition(tokenAddress, 100, "manual");
-      const trades = db.getTrades(1, 1);
+      const { trades } = db.getTrades("all", 1);
       return { success: true, message: `Closed position for ${existing.tokenSymbol}`, txHash: trades[0]?.txHash ?? null };
     }
 

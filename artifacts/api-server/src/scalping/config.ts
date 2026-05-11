@@ -78,6 +78,10 @@ export interface ScalpingConfigData {
 
   // Optimization: 1h Momentum Confirmation
   require1hMomentum: boolean;
+
+  // Advanced Trailing Stop
+  trailingStopMinProfitToActivate: number;  // trailing stop only activates after profit >= this %
+  trailingStopLockMinProfitPercent: number; // stop price is always >= entryPrice × (1 + lockMin%), locking minimum profit
 }
 
 export const DEFAULT_CONFIG: ScalpingConfigData = {
@@ -160,6 +164,10 @@ export const DEFAULT_CONFIG: ScalpingConfigData = {
 
   // 1h Momentum Confirmation
   require1hMomentum: false,
+
+  // Advanced Trailing Stop
+  trailingStopMinProfitToActivate: 5,
+  trailingStopLockMinProfitPercent: 2,
 };
 
 // Risk level presets

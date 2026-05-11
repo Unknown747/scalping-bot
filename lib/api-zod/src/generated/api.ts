@@ -222,6 +222,8 @@ export const GetConfigResponse = zod.object({
   scanIntervalSeconds: zod.number(),
   riskLevel: zod.enum(["conservative", "moderate", "aggressive"]),
   mode: zod.enum(["live", "paper"]),
+  trailingStopMinProfitToActivate: zod.number().optional(),
+  trailingStopLockMinProfitPercent: zod.number().optional(),
 });
 
 /**
@@ -248,6 +250,8 @@ export const UpdateConfigBody = zod.object({
   scanIntervalSeconds: zod.number().optional(),
   riskLevel: zod.enum(["conservative", "moderate", "aggressive"]).optional(),
   mode: zod.enum(["live", "paper"]).optional(),
+  trailingStopMinProfitToActivate: zod.number().optional(),
+  trailingStopLockMinProfitPercent: zod.number().optional(),
 });
 
 export const UpdateConfigResponse = zod.object({
@@ -271,6 +275,8 @@ export const UpdateConfigResponse = zod.object({
   scanIntervalSeconds: zod.number(),
   riskLevel: zod.enum(["conservative", "moderate", "aggressive"]),
   mode: zod.enum(["live", "paper"]),
+  trailingStopMinProfitToActivate: zod.number().optional(),
+  trailingStopLockMinProfitPercent: zod.number().optional(),
 });
 
 /**

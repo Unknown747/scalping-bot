@@ -282,6 +282,29 @@ export function FullSettingsPanel() {
                         onChange={(v) => setPending((p) => ({ ...p, tokenBlacklistMinutes: Math.round(v) }))} />
                     </div>
 
+                    <SectionHeader title="Advanced Trailing Stop" badge="NEW" />
+                    <div className="p-2.5 rounded-lg border border-primary/20 bg-primary/5 mb-1">
+                      <div className="text-[9px] text-muted-foreground leading-relaxed font-mono">
+                        Trailing stop hanya aktif setelah profit melewati batas minimum, dan stop price selalu menjaga minimal profit yang dikunci.
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <NumInput
+                        label="Min Profit to Activate"
+                        value={pending.trailingStopMinProfitToActivate ?? cfg.trailingStopMinProfitToActivate ?? 5}
+                        unit="%" min={1} max={50} step={0.5}
+                        description="aktif setelah profit >"
+                        onChange={(v) => setPending((p) => ({ ...p, trailingStopMinProfitToActivate: v }))}
+                      />
+                      <NumInput
+                        label="Lock Min Profit"
+                        value={pending.trailingStopLockMinProfitPercent ?? cfg.trailingStopLockMinProfitPercent ?? 2}
+                        unit="%" min={0} max={20} step={0.5}
+                        description="profit minimum terkunci"
+                        onChange={(v) => setPending((p) => ({ ...p, trailingStopLockMinProfitPercent: v }))}
+                      />
+                    </div>
+
                     <SectionHeader title="Anti-FOMO" />
                     <div className="grid grid-cols-2 gap-3">
                       <NumInput label="Post-Close Cooldown" value={pending.cooldownAfterCloseSeconds ?? cfg.cooldownAfterCloseSeconds} unit="sec" min={0} max={600} step={5}

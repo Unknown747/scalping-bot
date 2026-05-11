@@ -29,4 +29,6 @@ export interface ScalpingConfigUpdate {
   scanIntervalSeconds?: number;
   riskLevel?: ScalpingConfigUpdateRiskLevel;
   mode?: ScalpingConfigUpdateMode;
+  trailingStopMinProfitToActivate?: number;
+  trailingStopLockMinProfitPercent?: number;
 }

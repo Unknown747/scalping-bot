@@ -147,6 +147,8 @@ export interface ScalpingConfig {
   scanIntervalSeconds: number;
   riskLevel: ScalpingConfigRiskLevel;
   mode: ScalpingConfigMode;
+  trailingStopMinProfitToActivate?: number;
+  trailingStopLockMinProfitPercent?: number;
 }
 
 export type ScalpingConfigUpdateRiskLevel =
@@ -187,6 +189,8 @@ export interface ScalpingConfigUpdate {
   scanIntervalSeconds?: number;
   riskLevel?: ScalpingConfigUpdateRiskLevel;
   mode?: ScalpingConfigUpdateMode;
+  trailingStopMinProfitToActivate?: number;
+  trailingStopLockMinProfitPercent?: number;
 }
 
 export interface WalletBalance {
