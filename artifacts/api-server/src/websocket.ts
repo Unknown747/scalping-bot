@@ -56,10 +56,6 @@ export function initWebSocket(httpServer: HTTPServer, scalpingBot: ScalpingBot):
   return io;
 }
 
-export function getSocketIO(): SocketIOServer | null {
-  return io;
-}
-
 export function broadcastEvent(event: string, data: unknown): void {
   if (io) {
     io.emit(event, data);

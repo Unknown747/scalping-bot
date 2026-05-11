@@ -10,6 +10,7 @@ type Token = {
   liquidityUsd: number;
   ageMinutes: number;
   safetyScore: number;
+  memeScore?: number;
   passedFilters: boolean;
   scannedAt: string;
   dexUrl?: string | null;
@@ -21,9 +22,11 @@ function fmt(n: number, digits = 1) {
   return `$${n.toFixed(digits)}`;
 }
 
-function SafeScore({ score }: { score: number }) {
+function ScoreBadge({ score, label }: { score: number; label: string }) {
   const c = score >= 70 ? "text-primary bg-primary/10" : score >= 50 ? "text-warn bg-warn/10" : "text-loss bg-loss/10";
-  return <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${c}`}>{score}</span>;
+  return (
+    <span title={label} className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${c}`}>{score}</span>
+  );
 }
 
 export function TokenScanner({ tokens }: { tokens: Token[] }) {
@@ -40,9 +43,10 @@ export function TokenScanner({ tokens }: { tokens: Token[] }) {
             <tr className="text-[10px] text-muted-foreground uppercase tracking-wider border-b border-border">
               <th className="text-left py-1.5 pr-2">Symbol</th>
               <th className="text-right pr-2">5m %</th>
-              <th className="text-right pr-2">Volume</th>
+              <th className="text-right pr-2">Vol</th>
               <th className="text-right pr-2">Liq</th>
               <th className="text-right pr-2">Age</th>
+              <th className="text-right pr-2">Meme</th>
               <th className="text-right pr-2">Safe</th>
               <th className="text-right">Pass</th>
             </tr>
@@ -72,7 +76,13 @@ export function TokenScanner({ tokens }: { tokens: Token[] }) {
                   <td className="text-right pr-2 text-muted-foreground">
                     {token.ageMinutes < 60 ? `${Math.floor(token.ageMinutes)}m` : `${(token.ageMinutes / 60).toFixed(1)}h`}
                   </td>
-                  <td className="text-right pr-2"><SafeScore score={token.safetyScore} /></td>
+                  <td className="text-right pr-2">
+                    {token.memeScore !== undefined
+                      ? <ScoreBadge score={token.memeScore} label="Meme Score" />
+                      : <span className="text-muted-foreground">—</span>
+                    }
+                  </td>
+                  <td className="text-right pr-2"><ScoreBadge score={token.safetyScore} label="Safety Score" /></td>
                   <td className="text-right">
                     <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${
                       token.passedFilters ? "text-primary bg-primary/10" : "text-muted-foreground bg-muted"

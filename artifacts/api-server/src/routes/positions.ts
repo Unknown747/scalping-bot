@@ -26,7 +26,7 @@ router.post("/positions/:address/close", async (req, res) => {
   const bot = getBot();
   await bot.closePosition(address, parsed.data.percent, "manual");
 
-  const trades = db.getTrades("all", 1);
+  const { trades } = db.getTrades("all", 1, 1);
   res.json(trades[0] || { id: 0, tokenAddress: address, tokenSymbol: "UNKNOWN", tokenName: "UNKNOWN", entryPrice: 0, exitPrice: 0, amountEth: 0, profitPercent: 0, profitEth: 0, entryTime: new Date().toISOString(), exitTime: new Date().toISOString(), holdSeconds: 0, exitReason: "manual" });
 });
 

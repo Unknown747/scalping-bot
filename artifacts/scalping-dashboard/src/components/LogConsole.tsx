@@ -13,6 +13,7 @@ const LEVEL_CONFIG: Record<string, { label: string; color: string }> = {
   buy: { label: "BUY", color: "text-profit" },
   sell: { label: "SELL", color: "text-warn" },
   stop_loss: { label: "SL", color: "text-loss" },
+  force_exit: { label: "PEAK", color: "text-warn" },
   error: { label: "ERR", color: "text-loss" },
   warn: { label: "WARN", color: "text-warn" },
   info: { label: "INFO", color: "text-muted-foreground" },

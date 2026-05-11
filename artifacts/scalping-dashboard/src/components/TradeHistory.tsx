@@ -17,6 +17,13 @@ type Trade = {
   exitReason: string;
 };
 
+type PaginatedTrades = {
+  trades: Trade[];
+  total: number;
+  page: number;
+  totalPages: number;
+};
+
 const FILTER_LABELS: Record<string, string> = {
   today: "Today",
   week: "This Week",
@@ -32,6 +39,7 @@ const REASON_LABELS: Record<string, string> = {
   max_hold: "MAX",
   manual: "MANUAL",
   emergency: "EMRG",
+  force_exit: "PEAK",
 };
 
 function formatTime(iso: string) {
@@ -48,15 +56,19 @@ function formatHold(s: number) {
 export function TradeHistory() {
   const [filter, setFilter] = useState<"today" | "week" | "all">("today");
 
-  const { data: trades } = useGetTrades(
-    { filter, limit: 200 },
-    { query: { refetchInterval: 10000, queryKey: getGetTradesQueryKey({ filter, limit: 200 }) } }
+  const { data: raw } = useGetTrades(
+    { filter, limit: 100 },
+    { query: { refetchInterval: 10000, queryKey: getGetTradesQueryKey({ filter, limit: 100 }) } }
   );
 
+  // API returns paginated object {trades, total, page, totalPages}
+  const paginated = raw as PaginatedTrades | undefined;
+  const trades: Trade[] = paginated?.trades ?? (Array.isArray(raw) ? (raw as Trade[]) : []);
+
   const exportCsv = () => {
-    if (!trades?.length) return;
+    if (!trades.length) return;
     const headers = ["Time", "Token", "Entry", "Exit", "Profit%", "ProfitETH", "Hold", "Reason"];
-    const rows = (trades as Trade[]).map((t) => [
+    const rows = trades.map((t) => [
       new Date(t.exitTime).toLocaleString("id-ID"),
       t.tokenSymbol,
       t.entryPrice.toFixed(8),
@@ -79,7 +91,12 @@ export function TradeHistory() {
   return (
     <div className="bg-card border border-border rounded-lg p-4 space-y-3">
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">Trade History</div>
+        <div className="flex items-center gap-2">
+          <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">Trade History</div>
+          {paginated?.total !== undefined && (
+            <span className="text-[10px] text-muted-foreground font-mono">({paginated.total} total)</span>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           <div className="flex rounded overflow-hidden border border-border">
             {(["today", "week", "all"] as const).map((f) => (
@@ -121,7 +138,7 @@ export function TradeHistory() {
             </tr>
           </thead>
           <tbody>
-            {(trades as Trade[] | undefined)?.map((trade) => (
+            {trades.map((trade) => (
               <motion.tr
                 key={trade.id}
                 initial={{ opacity: 0 }}
@@ -143,7 +160,7 @@ export function TradeHistory() {
                   <span className={`px-1.5 py-0.5 rounded text-[10px] ${
                     trade.exitReason === "stop_loss" || trade.exitReason === "emergency"
                       ? "bg-loss/10 text-loss"
-                      : trade.exitReason === "trailing_stop"
+                      : trade.exitReason === "trailing_stop" || trade.exitReason === "force_exit"
                       ? "bg-warn/10 text-warn"
                       : "bg-primary/10 text-primary"
                   }`}>
@@ -155,7 +172,7 @@ export function TradeHistory() {
           </tbody>
         </table>
 
-        {(!trades || (trades as Trade[]).length === 0) && (
+        {trades.length === 0 && (
           <div className="py-8 text-center text-muted-foreground text-[11px] font-mono" data-testid="text-no-trades">
             No trades for {FILTER_LABELS[filter].toLowerCase()}
           </div>
