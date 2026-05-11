@@ -11,12 +11,14 @@ services:
       - scalping_data:/data
     environment:
       - SQLITE_PATH=/data/scalping.db
+    networks:
+      - internal
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/api/healthz"]
       interval: 30s
       timeout: 10s
-      retries: 3
-      start_period: 15s
+      retries: 5
+      start_period: 20s
 
   dashboard:
     build:
@@ -28,6 +30,12 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    networks:
+      - internal
+
+networks:
+  internal:
+    driver: bridge
 
 volumes:
   scalping_data:

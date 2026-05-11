@@ -2,28 +2,53 @@ FROM node:24-alpine AS build
 RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /app
 
-COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
+COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json ./
 COPY lib/ ./lib/
 COPY artifacts/scalping-dashboard/package.json ./artifacts/scalping-dashboard/
 
-RUN pnpm install --frozen-lockfile --filter @workspace/scalping-dashboard --filter @workspace/api-client-react --filter @workspace/api-zod
+RUN pnpm install --frozen-lockfile --filter @workspace/scalping-dashboard...
 
 COPY artifacts/scalping-dashboard/ ./artifacts/scalping-dashboard/
 
 WORKDIR /app/artifacts/scalping-dashboard
 RUN pnpm run build
 
-# ── Runtime: nginx ────────────────────────────────────────────
 FROM nginx:alpine AS runtime
 COPY --from=build /app/artifacts/scalping-dashboard/dist /usr/share/nginx/html
 
-# Rewrite all routes to index.html (SPA)
-RUN printf 'server { \n\
+RUN printf 'server {\n\
   listen 80;\n\
   root /usr/share/nginx/html;\n\
   index index.html;\n\
-  location / { try_files $uri $uri/ /index.html; }\n\
-  location /api/ { proxy_pass http://api:8080/api/; proxy_set_header Host $host; }\n\
+\n\
+  gzip on;\n\
+  gzip_types text/plain text/css application/json application/javascript text/xml application/xml text/javascript;\n\
+  gzip_min_length 1024;\n\
+\n\
+  # WebSocket proxy for Socket.io — REQUIRED for real-time dashboard\n\
+  location /socket.io/ {\n\
+    proxy_pass http://api:8080/socket.io/;\n\
+    proxy_http_version 1.1;\n\
+    proxy_set_header Upgrade $http_upgrade;\n\
+    proxy_set_header Connection "upgrade";\n\
+    proxy_set_header Host $host;\n\
+    proxy_cache_bypass $http_upgrade;\n\
+    proxy_read_timeout 86400;\n\
+  }\n\
+\n\
+  # REST API proxy\n\
+  location /api/ {\n\
+    proxy_pass http://api:8080/api/;\n\
+    proxy_set_header Host $host;\n\
+    proxy_set_header X-Real-IP $remote_addr;\n\
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n\
+    proxy_set_header X-Forwarded-Proto $scheme;\n\
+  }\n\
+\n\
+  # SPA routing\n\
+  location / {\n\
+    try_files $uri $uri/ /index.html;\n\
+  }\n\
 }\n' > /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
