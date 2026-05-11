@@ -91,37 +91,37 @@ export interface ScalpingConfigData {
 
 export const DEFAULT_CONFIG: ScalpingConfigData = {
   totalCapitalEth: 0.04,
-  maxTradeAmountEth: 0.0003,
+  maxTradeAmountEth: 0.0005,
   maxConcurrentPositions: 3,
   minPositionEth: 0.0001,
-  min5mVolumeUsd: 5000,
-  minLiquidityUsd: 10000,
-  maxTokenAgeMinutes: 30,
-  minMomentumPercent: 15,
+  min5mVolumeUsd: 3000,
+  minLiquidityUsd: 8000,
+  maxTokenAgeMinutes: 60,
+  minMomentumPercent: 10,
   tp1Percent: 3,
-  tp1SellPercent: 50,
-  tp2Percent: 6,
-  tp2SellPercent: 30,
-  tp3Percent: 10,
-  tp3SellPercent: 20,
-  stopLossPercent: 5,
+  tp1SellPercent: 40,
+  tp2Percent: 8,
+  tp2SellPercent: 35,
+  tp3Percent: 15,
+  tp3SellPercent: 25,
+  stopLossPercent: 6,
   trailingStopActivatePercent: 4,
-  trailingStopDistancePercent: 2,
-  maxHoldMinutes: 15,
-  maxDailyLossEth: 0.003,
-  cooldownMinutesAfterLoss: 120,
-  maxSlippagePercent: 5,
-  maxPriorityFeeGwei: 0.05,
-  maxFeePerGasGwei: 0.1,
-  minSafetyScore: 70,
-  maxSellTaxPercent: 10,
+  trailingStopDistancePercent: 2.5,
+  maxHoldMinutes: 20,
+  maxDailyLossEth: 0.005,
+  cooldownMinutesAfterLoss: 60,
+  maxSlippagePercent: 8,
+  maxPriorityFeeGwei: 0.1,
+  maxFeePerGasGwei: 0.5,
+  minSafetyScore: 60,
+  maxSellTaxPercent: 12,
   scanIntervalSeconds: 8,
   priceCheckIntervalSeconds: 2,
-  riskLevel: "conservative",
+  riskLevel: "moderate",
   mode: "live",
 
-  // Meme Score Filter
-  minMemeScore: 70,
+  // Meme Score Filter — lebih longgar untuk uji coba
+  minMemeScore: 55,
   enableMemeScore: true,
 
   // TWAP Execution
@@ -133,31 +133,31 @@ export const DEFAULT_CONFIG: ScalpingConfigData = {
   enableDynamicSlippage: true,
 
   // Multi-DEX Router
-  enableMultiDEX: false,
+  enableMultiDEX: true,
 
   // Cooldown & Anti-FOMO
-  cooldownAfterCloseSeconds: 30,
-  maxBuysPerFiveMinutes: 3,
+  cooldownAfterCloseSeconds: 20,
+  maxBuysPerFiveMinutes: 4,
 
   // Force Exit
   enablePeakProfitExit: true,
-  peakProfitDropPercent: 50,
+  peakProfitDropPercent: 45,
 
-  // Telegram Alert
-  enableTelegram: false,
-  telegramBotToken: "",
-  telegramChatId: "",
+  // Telegram Alert — aktifkan via env vars
+  enableTelegram: !!(process.env["TELEGRAM_BOT_TOKEN"] && process.env["TELEGRAM_CHAT_ID"]),
+  telegramBotToken: process.env["TELEGRAM_BOT_TOKEN"] || "",
+  telegramChatId: process.env["TELEGRAM_CHAT_ID"] || "",
 
   // Deployer Reputation
   enableDeployerCheck: true,
-  maxDeployerTokens24h: 3,
+  maxDeployerTokens24h: 5,
 
   // Auto-Compounding
   enableAutoCompound: false,
   compoundThresholdEth: 0.005,
 
   // Dynamic Position Sizing
-  enableDynamicPositionSizing: false,
+  enableDynamicPositionSizing: true,
   maxPositionSizeMultiplier: 1.5,
 
   // Break-even stop after TP1
@@ -165,18 +165,18 @@ export const DEFAULT_CONFIG: ScalpingConfigData = {
 
   // Token Blacklist
   enableTokenBlacklist: true,
-  tokenBlacklistMinutes: 30,
+  tokenBlacklistMinutes: 20,
 
-  // 1h Momentum Confirmation
+  // 1h Momentum Confirmation — nonaktifkan untuk lebih banyak peluang
   require1hMomentum: false,
 
   // Advanced Trailing Stop
-  trailingStopMinProfitToActivate: 5,
-  trailingStopLockMinProfitPercent: 2,
+  trailingStopMinProfitToActivate: 4,
+  trailingStopLockMinProfitPercent: 1.5,
 
-  // AI Filter
-  enableAIFilter: false,
-  aiFilterMinConfidence: 65,
+  // AI Filter — aktifkan jika Gemini key tersedia
+  enableAIFilter: !!process.env["AI_INTEGRATIONS_GEMINI_API_KEY"],
+  aiFilterMinConfidence: 60,
   aiPrimaryProvider: "gemini",
 };
 

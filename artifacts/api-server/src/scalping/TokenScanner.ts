@@ -1,6 +1,7 @@
 import axios from "axios";
 import { logger } from "../lib/logger.js";
 import type { ScalpingConfigData } from "./config.js";
+import { scanGeckoTerminal } from "./GeckoTerminalScanner.js";
 
 export interface TokenData {
   address: string;
@@ -19,6 +20,7 @@ export interface TokenData {
   dexUrl: string | null;
   pairAddress: string;
   txns5m: { buys: number; sells: number };
+  source?: "dexscreener" | "geckoterminal";
 }
 
 const DEXSCREENER_URL = "https://api.dexscreener.com";
@@ -48,9 +50,13 @@ const SEARCH_TERMS = [
   "mochi",
   "pepe base",
   "dog base",
+  "frog",
+  "moon",
+  "pump",
+  "base meme",
 ];
 
-let searchTermIndex = 0; // Rotate through search terms each cycle
+let searchTermIndex = 0;
 
 export class TokenScanner {
   private config: ScalpingConfigData;
@@ -77,26 +83,32 @@ export class TokenScanner {
       }
     };
 
-    // Run all scan strategies in parallel
-    const [profileTokens, searchTokens, seedTokens] = await Promise.allSettled([
+    // Run ALL scan strategies in parallel (DexScreener + GeckoTerminal)
+    const [profileTokens, searchTokens, seedTokens, geckoTokens] = await Promise.allSettled([
       this.scanDexScreenerProfiles(),
       this.scanDexScreenerSearch(),
       this.scanSeedAddresses(),
+      this.scanGeckoTerminalAll(),
     ]);
 
     if (profileTokens.status === "fulfilled") addUnique(profileTokens.value);
     if (searchTokens.status === "fulfilled") addUnique(searchTokens.value);
     if (seedTokens.status === "fulfilled") addUnique(seedTokens.value);
+    if (geckoTokens.status === "fulfilled") addUnique(geckoTokens.value);
 
-    // Sort by momentum (highest 5m price change first) for better signal
+    // Sort by momentum (highest 5m price change first)
     results.sort((a, b) => b.priceChange5m - a.priceChange5m);
+
+    logger.info(
+      { total: results.length, dexscreener: results.filter(t => t.source !== "geckoterminal").length, geckoterminal: results.filter(t => t.source === "geckoterminal").length },
+      "Combined token scan complete"
+    );
 
     return results;
   }
 
   /**
    * Strategy 1: DexScreener token profiles + boosts → batch pair lookup.
-   * Fetches recently listed/promoted tokens, then gets their full market data.
    */
   private async scanDexScreenerProfiles(): Promise<TokenData[]> {
     const cacheKey = "dex_profiles";
@@ -147,7 +159,6 @@ export class TokenScanner {
 
   /**
    * Strategy 2: Rotate through search keywords to find trending pairs on Base.
-   * Uses a rotating index so each scan cycle covers different keywords.
    */
   private async scanDexScreenerSearch(): Promise<TokenData[]> {
     const term = SEARCH_TERMS[searchTermIndex % SEARCH_TERMS.length];
@@ -167,7 +178,6 @@ export class TokenScanner {
       const pairs: any[] = res.data?.pairs || [];
       const basePairs = pairs.filter((p: any) => p?.chainId === "base");
 
-      // Pick best pair per token address
       const bestPairs = new Map<string, any>();
       for (const pair of basePairs) {
         const addr = pair?.baseToken?.address?.toLowerCase();
@@ -194,17 +204,35 @@ export class TokenScanner {
   }
 
   /**
-   * Strategy 3: Lookup pairs for known seed addresses to always have active tokens.
-   * Also discovers new tokens paired alongside known tokens.
+   * Strategy 3: Lookup pairs for known seed addresses.
    */
   private async scanSeedAddresses(): Promise<TokenData[]> {
     const cacheKey = "dex_seeds";
     const cached = tokenCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS * 3) return cached.data; // longer cache for seeds
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS * 3) return cached.data;
 
     const tokens = await this.fetchPairsForAddresses(BASE_SEED_ADDRESSES);
     tokenCache.set(cacheKey, { data: tokens, timestamp: Date.now() });
     return tokens;
+  }
+
+  /**
+   * Strategy 4: GeckoTerminal — new_pools, trending_pools, trending tokens, top_gainers.
+   */
+  private async scanGeckoTerminalAll(): Promise<TokenData[]> {
+    const cacheKey = "gecko_all";
+    const cached = tokenCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) return cached.data;
+
+    try {
+      const tokens = await scanGeckoTerminal();
+      const tagged = tokens.map((t) => ({ ...t, source: "geckoterminal" as const }));
+      tokenCache.set(cacheKey, { data: tagged, timestamp: Date.now() });
+      return tagged;
+    } catch (err) {
+      logger.warn({ err }, "GeckoTerminal scan failed");
+      return [];
+    }
   }
 
   /**
@@ -226,7 +254,6 @@ export class TokenScanner {
         const pairs: any[] = res.data?.pairs || [];
         const basePairs = pairs.filter((p: any) => p?.chainId === "base");
 
-        // One best pair per token (highest liquidity)
         const bestPairs = new Map<string, any>();
         for (const pair of basePairs) {
           const addr = pair?.baseToken?.address?.toLowerCase();
@@ -250,9 +277,6 @@ export class TokenScanner {
     return tokens;
   }
 
-  /**
-   * Convert a DexScreener pair object into TokenData.
-   */
   private pairToTokenData(pair: any): TokenData | null {
     const addr = pair?.baseToken?.address;
     if (!addr) return null;
@@ -285,6 +309,7 @@ export class TokenScanner {
         buys: pair.txns?.m5?.buys || 0,
         sells: pair.txns?.m5?.sells || 0,
       },
+      source: "dexscreener",
     };
   }
 
