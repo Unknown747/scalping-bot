@@ -613,6 +613,23 @@ export class ScalpingBot {
           `AI [${aiResult.provider}] ${token.symbol}: ${aiResult.decision.toUpperCase()} (confidence: ${aiResult.confidence}%) — ${aiResult.reasons.slice(0,2).join(" | ")} [${aiResult.latencyMs}ms]`,
           token.symbol
         );
+        // Broadcast AI decision to dashboard in real-time
+        this.emit("ai-decision", {
+          symbol: token.symbol,
+          name: token.name,
+          decision: aiResult.decision,
+          verdict,
+          confidence: aiResult.confidence,
+          provider: aiResult.provider,
+          model: aiResult.model,
+          latencyMs: aiResult.latencyMs,
+          reasons: aiResult.reasons,
+          safetyScore: safety.score,
+          memeScore: memeScore.score,
+          priceChange5m: token.priceChange5m,
+          liquidityUsd: token.liquidityUsd,
+          timestamp: new Date().toISOString(),
+        });
         if (!verdict) return;
       }
     }

@@ -3,13 +3,13 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useGetBotStatus, useGetStats, useGetPositions,
-  useGetWalletBalance, useGetScannedTokens, useGetLogs,
+  useGetWalletBalance, useGetScannedTokens, useGetLogs, useGetConfig,
   useStartBot, useStopBot, useEmergencyStop, useClosePosition, useUpdateConfig,
   getGetBotStatusQueryKey, getGetStatsQueryKey, getGetPositionsQueryKey,
   getGetTradesQueryKey, getGetConfigQueryKey,
   getGetScannedTokensQueryKey, getGetLogsQueryKey, getGetWalletBalanceQueryKey,
 } from "@workspace/api-client-react";
-import { useSocket } from "../hooks/useSocket";
+import { useSocket, type AIDecisionEntry } from "../hooks/useSocket";
 import { useAuth } from "../hooks/useAuth";
 import { StatsRow } from "../components/StatsRow";
 import { ControlPanel } from "../components/ControlPanel";
@@ -20,6 +20,7 @@ import { TradeHistory } from "../components/TradeHistory";
 import { LogConsole } from "../components/LogConsole";
 import { PnlChart } from "../components/PnlChart";
 import { FullSettingsPanel } from "../components/FullSettingsPanel";
+import { AIDecisionLog } from "../components/AIDecisionLog";
 import { toast } from "sonner";
 
 type LogEntry = { id: number; level: string; message: string; tokenSymbol?: string | null; timestamp: string };
@@ -33,6 +34,7 @@ type TokenEntry = {
 export function Dashboard() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [liveTokens, setLiveTokens] = useState<TokenEntry[]>([]);
+  const [aiDecisions, setAIDecisions] = useState<AIDecisionEntry[]>([]);
   const queryClient = useQueryClient();
   const { logout } = useAuth();
 
@@ -56,6 +58,9 @@ export function Dashboard() {
     { limit: 200 },
     { query: { refetchInterval: 5000, queryKey: getGetLogsQueryKey({ limit: 200 }) } }
   );
+  const { data: config } = useGetConfig({
+    query: { refetchInterval: 15000, queryKey: getGetConfigQueryKey() },
+  });
 
   const startBot = useStartBot();
   const stopBot = useStopBot();
@@ -101,6 +106,9 @@ export function Dashboard() {
           return true;
         }).slice(0, 50);
       });
+    },
+    onAIDecision: (entry) => {
+      setAIDecisions((prev) => [entry, ...prev].slice(0, 100));
     },
   });
 
@@ -269,10 +277,15 @@ export function Dashboard() {
 
         <PnlChart />
 
-        <div className="grid grid-cols-1 xl:grid-cols-[1fr_400px] gap-4">
-          <TradeHistory />
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+          <AIDecisionLog
+            entries={aiDecisions}
+            enabled={!!(config as any)?.enableAIFilter}
+          />
           <LogConsole logs={logs} />
         </div>
+
+        <TradeHistory />
       </main>
     </div>
   );

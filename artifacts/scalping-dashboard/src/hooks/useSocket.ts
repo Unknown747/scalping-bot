@@ -27,10 +27,28 @@ type TokenEntry = {
   dexUrl?: string | null;
 };
 
+export type AIDecisionEntry = {
+  symbol: string;
+  name: string;
+  decision: "buy" | "skip";
+  verdict: boolean;
+  confidence: number;
+  provider: string;
+  model: string;
+  latencyMs: number;
+  reasons: string[];
+  safetyScore: number;
+  memeScore: number;
+  priceChange5m: number;
+  liquidityUsd: number;
+  timestamp: string;
+};
+
 type SocketCallbacks = {
   onTradeExecuted?: (data: { tokenSymbol: string; profitPercent: number; exitTime: string }) => void;
   onLogs?: (logs: LogEntry[]) => void;
   onTokens?: (tokens: TokenEntry[]) => void;
+  onAIDecision?: (entry: AIDecisionEntry) => void;
 };
 
 let socketInstance: Socket | null = null;
@@ -78,6 +96,10 @@ export function useSocket(callbacks: SocketCallbacks) {
       callbacksRef.current.onTokens?.([token]);
     });
 
+    socket.on("ai-decision", (entry: AIDecisionEntry) => {
+      callbacksRef.current.onAIDecision?.(entry);
+    });
+
     return () => {
       socket.off("bot-status");
       socket.off("position-update");
@@ -85,6 +107,7 @@ export function useSocket(callbacks: SocketCallbacks) {
       socket.off("stats-update");
       socket.off("log");
       socket.off("new-token");
+      socket.off("ai-decision");
     };
   }, [queryClient]);
 
