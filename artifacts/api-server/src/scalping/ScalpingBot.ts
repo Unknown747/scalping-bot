@@ -86,6 +86,7 @@ export class ScalpingBot {
   private positions = new Map<string, PositionState>();
   private dailyLossEth = 0;
   private cooldownUntil: Date | null = null;
+  private tokenBlacklist = new Map<string, Date>();
   private scanInterval: NodeJS.Timeout | null = null;
   private priceInterval: NodeJS.Timeout | null = null;
   private dailySummaryInterval: NodeJS.Timeout | null = null;
@@ -445,6 +446,12 @@ export class ScalpingBot {
 
     if (profitPercent <= -this.config.stopLossPercent) return "stop_loss";
 
+    // Break-even stop: after TP1 is hit, exit if price drops back to entry
+    if (this.config.enableBreakEvenAfterTP1 && pos.tp1Hit && profitPercent <= 0) {
+      this.log("info", `Break-even exit ${pos.tokenSymbol}: price returned to entry after TP1`, pos.tokenSymbol);
+      return "stop_loss";
+    }
+
     // Force exit: profit dropped more than X% from peak
     if (
       this.config.enablePeakProfitExit &&
@@ -529,6 +536,18 @@ export class ScalpingBot {
       return;
     }
 
+    // 1h Momentum Confirmation
+    if (this.config.require1hMomentum && token.priceChange1h <= 0) {
+      this.log("info", `${token.symbol} rejected: 1h momentum negative (${token.priceChange1h.toFixed(1)}%)`, token.symbol);
+      return;
+    }
+
+    // Token Blacklist: skip recent stop-loss tokens
+    if (this.isBlacklisted(token.address)) {
+      this.log("info", `${token.symbol} blacklisted — cooling off after recent stop-loss`, token.symbol);
+      return;
+    }
+
     this.log(
       "info",
       `Evaluating ${token.symbol} — MemeScore: ${memeScore.score}/100 | 5m: ${token.priceChange5m.toFixed(1)}% | liq: $${token.liquidityUsd.toFixed(0)}`,
@@ -550,7 +569,7 @@ export class ScalpingBot {
     };
     const bestRoute = await this.dexAggregator.getBestRoute(token.address, this.config.maxTradeAmountEth);
 
-    const amountEth = this.config.maxTradeAmountEth;
+    const amountEth = this.getDynamicPositionSize(safety.score, memeScore.score);
     let buyResult;
 
     // TWAP vs single buy
@@ -684,6 +703,10 @@ export class ScalpingBot {
       db.deletePosition(tokenAddress);
       // Record close for cooldown
       this.cooldownManager.recordClose();
+      // Blacklist token if it hit stop-loss to avoid re-entering
+      if ((reason === "stop_loss" || reason === "emergency") && this.config.tokenBlacklistMinutes > 0) {
+        this.addToBlacklist(tokenAddress);
+      }
     }
 
     const sellResult = await this.swapExecutor.sellToken(
@@ -819,6 +842,35 @@ export class ScalpingBot {
       return false;
     }
     return true;
+  }
+
+  private isBlacklisted(tokenAddress: string): boolean {
+    const until = this.tokenBlacklist.get(tokenAddress.toLowerCase());
+    if (!until) return false;
+    if (new Date() >= until) {
+      this.tokenBlacklist.delete(tokenAddress.toLowerCase());
+      return false;
+    }
+    return true;
+  }
+
+  private addToBlacklist(tokenAddress: string): void {
+    if (this.config.tokenBlacklistMinutes <= 0) return;
+    const until = new Date(Date.now() + this.config.tokenBlacklistMinutes * 60 * 1000);
+    this.tokenBlacklist.set(tokenAddress.toLowerCase(), until);
+    this.log("info", `${tokenAddress.slice(0, 8)}… blacklisted for ${this.config.tokenBlacklistMinutes}m`, null);
+  }
+
+  private getDynamicPositionSize(safetyScore: number, memeScore: number): number {
+    if (!this.config.enableDynamicPositionSizing) return this.config.maxTradeAmountEth;
+    // Combined confidence: 0.0 (both 0) → 1.0 (both 100)
+    const confidence = (safetyScore + memeScore) / 200;
+    // Scale linearly: base × (1 + confidence × (multiplier - 1))
+    const boost = confidence * (this.config.maxPositionSizeMultiplier - 1);
+    const amount = this.config.maxTradeAmountEth * (1 + boost);
+    // Hard cap: 10% of total capital per trade
+    const capped = Math.min(amount, this.config.totalCapitalEth * 0.1);
+    return Math.round(capped * 1e6) / 1e6;
   }
 
   private log(level: string, message: string, tokenSymbol: string | null): void {

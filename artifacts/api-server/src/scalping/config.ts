@@ -64,6 +64,19 @@ export interface ScalpingConfigData {
   // Feature: Auto-Compounding
   enableAutoCompound: boolean;
   compoundThresholdEth: number;
+
+  // Optimization: Dynamic Position Sizing
+  enableDynamicPositionSizing: boolean;
+  maxPositionSizeMultiplier: number;
+
+  // Optimization: Break-even stop after TP1
+  enableBreakEvenAfterTP1: boolean;
+
+  // Optimization: Token Blacklist (avoid re-entering recent losers)
+  tokenBlacklistMinutes: number;
+
+  // Optimization: 1h Momentum Confirmation
+  require1hMomentum: boolean;
 }
 
 export const DEFAULT_CONFIG: ScalpingConfigData = {
@@ -132,6 +145,19 @@ export const DEFAULT_CONFIG: ScalpingConfigData = {
   // Auto-Compounding
   enableAutoCompound: false,
   compoundThresholdEth: 0.005,
+
+  // Dynamic Position Sizing
+  enableDynamicPositionSizing: false,
+  maxPositionSizeMultiplier: 1.5,
+
+  // Break-even stop after TP1
+  enableBreakEvenAfterTP1: true,
+
+  // Token Blacklist
+  tokenBlacklistMinutes: 30,
+
+  // 1h Momentum Confirmation
+  require1hMomentum: false,
 };
 
 // Risk level presets
@@ -151,6 +177,10 @@ export const RISK_PRESETS: Record<string, Partial<ScalpingConfigData>> = {
     peakProfitDropPercent: 40,
     cooldownAfterCloseSeconds: 45,
     maxBuysPerFiveMinutes: 2,
+    enableBreakEvenAfterTP1: true,
+    tokenBlacklistMinutes: 45,
+    require1hMomentum: true,
+    enableDynamicPositionSizing: false,
   },
   moderate: {
     maxTradeAmountEth: 0.002,
@@ -167,6 +197,10 @@ export const RISK_PRESETS: Record<string, Partial<ScalpingConfigData>> = {
     peakProfitDropPercent: 50,
     cooldownAfterCloseSeconds: 30,
     maxBuysPerFiveMinutes: 3,
+    enableBreakEvenAfterTP1: true,
+    tokenBlacklistMinutes: 30,
+    require1hMomentum: false,
+    enableDynamicPositionSizing: false,
   },
   aggressive: {
     maxTradeAmountEth: 0.003,
@@ -184,6 +218,11 @@ export const RISK_PRESETS: Record<string, Partial<ScalpingConfigData>> = {
     cooldownAfterCloseSeconds: 15,
     maxBuysPerFiveMinutes: 4,
     enableAutoCompound: true,
+    enableBreakEvenAfterTP1: true,
+    tokenBlacklistMinutes: 15,
+    require1hMomentum: false,
+    enableDynamicPositionSizing: true,
+    maxPositionSizeMultiplier: 1.5,
   },
 };
 

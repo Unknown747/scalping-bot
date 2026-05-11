@@ -18,6 +18,7 @@ import { ActivePositions } from "../components/ActivePositions";
 import { TokenScanner } from "../components/TokenScanner";
 import { TradeHistory } from "../components/TradeHistory";
 import { LogConsole } from "../components/LogConsole";
+import { PnlChart } from "../components/PnlChart";
 import { toast } from "sonner";
 
 type LogEntry = { id: number; level: string; message: string; tokenSymbol?: string | null; timestamp: string };
@@ -263,6 +264,8 @@ export function Dashboard() {
             <TokenScanner tokens={liveTokens} />
           </div>
         </div>
+
+        <PnlChart />
 
         <div className="grid grid-cols-1 xl:grid-cols-[1fr_400px] gap-4">
           <TradeHistory />
