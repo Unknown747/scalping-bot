@@ -1,6 +1,6 @@
 import { logger } from "../lib/logger.js";
 import type { ScalpingConfigData } from "./config.js";
-import { BASE_CONTRACTS } from "./config.js";
+import { BASE_CONTRACTS, calculateDynamicSlippage } from "./config.js";
 
 export interface SwapResult {
   success: boolean;
@@ -9,6 +9,16 @@ export interface SwapResult {
   amountOut: bigint;
   gasUsed: bigint;
   error?: string;
+}
+
+export interface TWAPResult {
+  successfulSlices: number;
+  totalSlices: number;
+  results: SwapResult[];
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 export class SwapExecutor {
@@ -54,7 +64,71 @@ export class SwapExecutor {
     }
   }
 
-  async buyToken(tokenAddress: string, amountEth: number): Promise<SwapResult> {
+  // TWAP Execution: splits a buy into multiple slices over time
+  async executeTWAP(
+    tokenAddress: string,
+    totalAmountEth: number,
+    routerAddress?: string,
+    marketData?: { volume5mUsd: number; liquidityUsd: number; priceChange5m: number }
+  ): Promise<TWAPResult> {
+    const slices = this.config.twapSlices || 4;
+    const intervalMs = this.config.twapIntervalMs || 10000;
+    const sliceAmount = totalAmountEth / slices;
+    const results: SwapResult[] = [];
+
+    logger.info(
+      { tokenAddress, slices, sliceAmount, intervalMs },
+      "TWAP execution started"
+    );
+
+    for (let i = 0; i < slices; i++) {
+      try {
+        const result = await this.buyToken(tokenAddress, sliceAmount, routerAddress, marketData);
+        results.push(result);
+
+        if (result.success) {
+          logger.info(
+            { slice: `${i + 1}/${slices}`, amount: sliceAmount },
+            "TWAP slice executed"
+          );
+        } else {
+          logger.warn(
+            { slice: `${i + 1}/${slices}`, error: result.error },
+            "TWAP slice failed — continuing"
+          );
+        }
+      } catch (err) {
+        logger.error({ err, slice: i + 1 }, "TWAP slice threw error");
+        results.push({
+          success: false,
+          txHash: null,
+          amountIn: 0n,
+          amountOut: 0n,
+          gasUsed: 0n,
+          error: String(err),
+        });
+      }
+
+      if (i < slices - 1) {
+        await sleep(intervalMs);
+      }
+    }
+
+    const successfulSlices = results.filter((r) => r.success).length;
+    logger.info(
+      { successfulSlices, totalSlices: slices },
+      "TWAP execution completed"
+    );
+
+    return { successfulSlices, totalSlices: slices, results };
+  }
+
+  async buyToken(
+    tokenAddress: string,
+    amountEth: number,
+    routerAddress?: string,
+    marketData?: { volume5mUsd: number; liquidityUsd: number; priceChange5m: number }
+  ): Promise<SwapResult> {
     if (this.isPaperMode) {
       return this.simulateBuy(tokenAddress, amountEth);
     }
@@ -72,25 +146,30 @@ export class SwapExecutor {
 
     try {
       const { ethers } = await import("ethers");
-      
-      // Use MEV protection RPC if available
+
       const mevRpc = process.env["MEV_PROTECTION_RPC"] || this.rpcUrl;
       const provider = new ethers.JsonRpcProvider(mevRpc);
       const wallet = new ethers.Wallet(this.privateKey, provider);
 
-      // Uniswap V3 SwapRouter ABI (minimal)
+      // Dynamic slippage
+      let slippagePct = this.config.maxSlippagePercent;
+      if (this.config.enableDynamicSlippage && marketData) {
+        slippagePct = calculateDynamicSlippage(
+          marketData.volume5mUsd,
+          marketData.liquidityUsd,
+          marketData.priceChange5m
+        );
+        logger.info({ slippagePct }, "Dynamic slippage calculated");
+      }
+
+      const targetRouter = routerAddress || BASE_CONTRACTS.UNISWAP_V3_ROUTER;
+
       const routerAbi = [
         "function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96) params) external payable returns (uint256 amountOut)",
       ];
-      const router = new ethers.Contract(BASE_CONTRACTS.UNISWAP_V3_ROUTER, routerAbi, wallet);
+      const router = new ethers.Contract(targetRouter, routerAbi, wallet);
 
       const amountInWei = ethers.parseEther(amountEth.toString());
-      const slippage = this.config.maxSlippagePercent / 100;
-      const amountOutMin = 0n; // For simplicity; in production use quoter
-
-      const deadline = Math.floor(Date.now() / 1000) + 300; // 5 min
-      
-      const feeData = await provider.getFeeData();
       const maxPriorityFee = ethers.parseUnits(this.config.maxPriorityFeeGwei.toString(), "gwei");
       const maxFee = ethers.parseUnits(this.config.maxFeePerGasGwei.toString(), "gwei");
 
@@ -98,10 +177,10 @@ export class SwapExecutor {
         {
           tokenIn: BASE_CONTRACTS.WETH,
           tokenOut: tokenAddress,
-          fee: 3000, // 0.3% pool fee
+          fee: 3000,
           recipient: this.walletAddress,
           amountIn: amountInWei,
-          amountOutMinimum: amountOutMin,
+          amountOutMinimum: 0n,
           sqrtPriceLimitX96: 0,
         },
         {
@@ -112,12 +191,12 @@ export class SwapExecutor {
       );
 
       const receipt = await tx.wait();
-      
+
       return {
         success: receipt.status === 1,
         txHash: receipt.hash,
         amountIn: amountInWei,
-        amountOut: 0n, // Parse from logs in production
+        amountOut: 0n,
         gasUsed: receipt.gasUsed,
       };
     } catch (err: any) {
@@ -155,14 +234,13 @@ export class SwapExecutor {
       const provider = new ethers.JsonRpcProvider(mevRpc);
       const wallet = new ethers.Wallet(this.privateKey, provider);
 
-      // First approve router to spend tokens
       const erc20Abi = [
         "function approve(address spender, uint256 amount) returns (bool)",
         "function allowance(address owner, address spender) view returns (uint256)",
       ];
       const token = new ethers.Contract(tokenAddress, erc20Abi, wallet);
       const allowance = await token.allowance(this.walletAddress, BASE_CONTRACTS.UNISWAP_V3_ROUTER);
-      
+
       if (allowance < amountTokens) {
         const approveTx = await token.approve(BASE_CONTRACTS.UNISWAP_V3_ROUTER, ethers.MaxUint256);
         await approveTx.wait();

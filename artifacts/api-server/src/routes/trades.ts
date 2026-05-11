@@ -5,11 +5,12 @@ const router = Router();
 
 router.get("/trades", (req, res) => {
   const filter = (req.query["filter"] as string) || "today";
-  const limit = parseInt((req.query["limit"] as string) || "100", 10);
+  const limit = Math.min(parseInt((req.query["limit"] as string) || "100", 10), 500);
+  const page = Math.max(parseInt((req.query["page"] as string) || "1", 10), 1);
   const validFilters = ["today", "week", "all"];
   const safeFilter = validFilters.includes(filter) ? (filter as "today" | "week" | "all") : "today";
-  const trades = db.getTrades(safeFilter, limit);
-  res.json(trades);
+  const result = db.getTrades(safeFilter, limit, page);
+  res.json(result);
 });
 
 export default router;

@@ -28,6 +28,42 @@ export interface ScalpingConfigData {
   priceCheckIntervalSeconds: number;
   riskLevel: "conservative" | "moderate" | "aggressive";
   mode: "live" | "paper";
+
+  // Feature: Meme Score Filter
+  minMemeScore: number;
+  enableMemeScore: boolean;
+
+  // Feature: TWAP Execution
+  enableTWAP: boolean;
+  twapSlices: number;
+  twapIntervalMs: number;
+
+  // Feature: Dynamic Slippage
+  enableDynamicSlippage: boolean;
+
+  // Feature: Multi-DEX Router
+  enableMultiDEX: boolean;
+
+  // Feature: Cooldown & Anti-FOMO
+  cooldownAfterCloseSeconds: number;
+  maxBuysPerFiveMinutes: number;
+
+  // Feature: Force Exit (Peak Profit Tracking)
+  enablePeakProfitExit: boolean;
+  peakProfitDropPercent: number;
+
+  // Feature: Telegram Alert
+  enableTelegram: boolean;
+  telegramBotToken: string;
+  telegramChatId: string;
+
+  // Feature: Deployer Reputation Check
+  enableDeployerCheck: boolean;
+  maxDeployerTokens24h: number;
+
+  // Feature: Auto-Compounding
+  enableAutoCompound: boolean;
+  compoundThresholdEth: number;
 }
 
 export const DEFAULT_CONFIG: ScalpingConfigData = {
@@ -60,6 +96,42 @@ export const DEFAULT_CONFIG: ScalpingConfigData = {
   priceCheckIntervalSeconds: 2,
   riskLevel: "conservative",
   mode: "paper",
+
+  // Meme Score Filter
+  minMemeScore: 70,
+  enableMemeScore: true,
+
+  // TWAP Execution
+  enableTWAP: false,
+  twapSlices: 4,
+  twapIntervalMs: 10000,
+
+  // Dynamic Slippage
+  enableDynamicSlippage: true,
+
+  // Multi-DEX Router
+  enableMultiDEX: false,
+
+  // Cooldown & Anti-FOMO
+  cooldownAfterCloseSeconds: 30,
+  maxBuysPerFiveMinutes: 3,
+
+  // Force Exit
+  enablePeakProfitExit: true,
+  peakProfitDropPercent: 50,
+
+  // Telegram Alert
+  enableTelegram: false,
+  telegramBotToken: "",
+  telegramChatId: "",
+
+  // Deployer Reputation
+  enableDeployerCheck: true,
+  maxDeployerTokens24h: 3,
+
+  // Auto-Compounding
+  enableAutoCompound: false,
+  compoundThresholdEth: 0.005,
 };
 
 // Risk level presets
@@ -74,6 +146,11 @@ export const RISK_PRESETS: Record<string, Partial<ScalpingConfigData>> = {
     tp2Percent: 6,
     tp3Percent: 10,
     maxHoldMinutes: 10,
+    minMemeScore: 75,
+    enablePeakProfitExit: true,
+    peakProfitDropPercent: 40,
+    cooldownAfterCloseSeconds: 45,
+    maxBuysPerFiveMinutes: 2,
   },
   moderate: {
     maxTradeAmountEth: 0.002,
@@ -85,6 +162,11 @@ export const RISK_PRESETS: Record<string, Partial<ScalpingConfigData>> = {
     tp2Percent: 6,
     tp3Percent: 10,
     maxHoldMinutes: 15,
+    minMemeScore: 70,
+    enablePeakProfitExit: true,
+    peakProfitDropPercent: 50,
+    cooldownAfterCloseSeconds: 30,
+    maxBuysPerFiveMinutes: 3,
   },
   aggressive: {
     maxTradeAmountEth: 0.003,
@@ -96,6 +178,12 @@ export const RISK_PRESETS: Record<string, Partial<ScalpingConfigData>> = {
     tp2Percent: 10,
     tp3Percent: 15,
     maxHoldMinutes: 20,
+    minMemeScore: 60,
+    enablePeakProfitExit: true,
+    peakProfitDropPercent: 60,
+    cooldownAfterCloseSeconds: 15,
+    maxBuysPerFiveMinutes: 4,
+    enableAutoCompound: true,
   },
 };
 
@@ -106,3 +194,30 @@ export const BASE_CONTRACTS = {
   UNISWAP_V3_FACTORY: "0x33128a8fC17869897dcE68Ed026d694621f6FDfD",
   UNISWAP_V3_QUOTER: "0x3d4e44Eb1374240CE5F1B136041212501e4a0439",
 } as const;
+
+export function calculateDynamicSlippage(
+  volume5mUSD: number,
+  liquidityUSD: number,
+  priceChange5m: number
+): number {
+  if (liquidityUSD <= 0) return 8;
+
+  const volLiqRatio = volume5mUSD / liquidityUSD;
+
+  let slippage = 5; // default
+
+  // Low volatility + healthy liquidity = tighter slippage
+  if (volLiqRatio > 2 && liquidityUSD > 20000) slippage = 3;
+  else if (volLiqRatio > 1 && liquidityUSD > 15000) slippage = 4;
+
+  // High volatility = needs more room
+  if (Math.abs(priceChange5m) > 30) slippage = Math.max(slippage, 10);
+  else if (Math.abs(priceChange5m) > 20) slippage = Math.max(slippage, 8);
+  else if (Math.abs(priceChange5m) > 10) slippage = Math.max(slippage, 6);
+
+  // Very low liquidity = higher slippage risk
+  if (liquidityUSD < 5000) slippage = Math.max(slippage, 9);
+  else if (liquidityUSD < 10000) slippage = Math.max(slippage, 7);
+
+  return Math.min(10, Math.max(2, slippage));
+}

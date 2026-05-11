@@ -13,6 +13,8 @@ export function getDb(): Database.Database {
     _db = new Database(DB_PATH);
     _db.pragma("journal_mode = WAL");
     _db.pragma("foreign_keys = ON");
+    _db.pragma("cache_size = -8000"); // 8MB cache
+    _db.pragma("temp_store = MEMORY");
     initSchema(_db);
     logger.info({ path: DB_PATH }, "SQLite database initialized");
   }
@@ -107,9 +109,15 @@ function initSchema(db: Database.Database): void {
       updated_at TEXT DEFAULT (datetime('now'))
     );
 
+    -- Core indices
     CREATE INDEX IF NOT EXISTS idx_trades_exit_time ON trades(exit_time);
+    CREATE INDEX IF NOT EXISTS idx_trades_token_address ON trades(token_address);
+    CREATE INDEX IF NOT EXISTS idx_trades_created_at ON trades(created_at);
     CREATE INDEX IF NOT EXISTS idx_scanned_tokens_scanned_at ON scanned_tokens(scanned_at);
+    CREATE INDEX IF NOT EXISTS idx_scanned_tokens_address ON scanned_tokens(address);
     CREATE INDEX IF NOT EXISTS idx_bot_logs_timestamp ON bot_logs(timestamp);
+    CREATE INDEX IF NOT EXISTS idx_bot_logs_level ON bot_logs(level);
+    CREATE INDEX IF NOT EXISTS idx_positions_token_address ON positions(token_address);
   `);
 }
 
@@ -145,7 +153,11 @@ export function insertTrade(trade: {
   return result.lastInsertRowid as number;
 }
 
-export function getTrades(filter: "today" | "week" | "all" = "today", limit = 100): any[] {
+export function getTrades(
+  filter: "today" | "week" | "all" = "today",
+  limit = 100,
+  page = 1
+): { trades: any[]; total: number; page: number; totalPages: number } {
   const db = getDb();
   let whereClause = "";
   if (filter === "today") {
@@ -153,15 +165,23 @@ export function getTrades(filter: "today" | "week" | "all" = "today", limit = 10
   } else if (filter === "week") {
     whereClause = "WHERE exit_time >= datetime('now', '-7 days')";
   }
-  return db.prepare(`
+
+  const offset = (page - 1) * limit;
+  const countRow = db.prepare(`SELECT COUNT(*) as total FROM trades ${whereClause}`).get() as any;
+  const total = countRow?.total || 0;
+  const totalPages = Math.ceil(total / limit);
+
+  const trades = db.prepare(`
     SELECT id, token_address as tokenAddress, token_symbol as tokenSymbol, token_name as tokenName,
            entry_price as entryPrice, exit_price as exitPrice, amount_eth as amountEth,
            profit_percent as profitPercent, profit_eth as profitEth,
            entry_time as entryTime, exit_time as exitTime, hold_seconds as holdSeconds,
            exit_reason as exitReason, tx_hash as txHash
     FROM trades ${whereClause}
-    ORDER BY exit_time DESC LIMIT ?
-  `).all(limit) as any[];
+    ORDER BY exit_time DESC LIMIT ? OFFSET ?
+  `).all(limit, offset) as any[];
+
+  return { trades, total, page, totalPages };
 }
 
 // Position operations
@@ -260,8 +280,9 @@ export function insertScannedToken(token: {
   );
 }
 
-export function getScannedTokens(limit = 20): any[] {
+export function getScannedTokens(limit = 20, page = 1): any[] {
   const db = getDb();
+  const offset = (page - 1) * limit;
   return db.prepare(`
     SELECT id, address, symbol, name, price_usd as priceUsd,
            price_change_5m as priceChangePercent5m, price_change_1h as priceChangePercent1h,
@@ -271,8 +292,8 @@ export function getScannedTokens(limit = 20): any[] {
            passed_filters as passedFilters, dex_url as dexUrl,
            scanned_at as scannedAt
     FROM scanned_tokens
-    ORDER BY scanned_at DESC LIMIT ?
-  `).all(limit).map((r: any) => ({ ...r, passedFilters: r.passedFilters === 1 })) as any[];
+    ORDER BY scanned_at DESC LIMIT ? OFFSET ?
+  `).all(limit, offset).map((r: any) => ({ ...r, passedFilters: r.passedFilters === 1 })) as any[];
 }
 
 // Bot logs
@@ -289,12 +310,17 @@ export function insertLog(log: {
   `).run(log.level, log.message, log.tokenSymbol || null, log.data || null);
 }
 
-export function getLogs(limit = 100): any[] {
+export function getLogs(limit = 100, page = 1, level?: string): any[] {
   const db = getDb();
+  const offset = (page - 1) * limit;
+  const whereClause = level ? "WHERE level = ?" : "";
+  const params: any[] = level ? [level, limit, offset] : [limit, offset];
+
   return db.prepare(`
     SELECT id, level, message, token_symbol as tokenSymbol, data, timestamp
-    FROM bot_logs ORDER BY timestamp DESC LIMIT ?
-  `).all(limit) as any[];
+    FROM bot_logs ${whereClause}
+    ORDER BY timestamp DESC LIMIT ? OFFSET ?
+  `).all(...params) as any[];
 }
 
 // Daily stats

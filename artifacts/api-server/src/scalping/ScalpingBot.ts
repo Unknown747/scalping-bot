@@ -3,6 +3,9 @@ import { TokenScanner, type TokenData } from "./TokenScanner.js";
 import { SafetyChecker } from "./SafetyChecker.js";
 import { PriceMonitor } from "./PriceMonitor.js";
 import { SwapExecutor } from "./SwapExecutor.js";
+import { DEXAggregator } from "./DEXAggregator.js";
+import { TelegramNotifier } from "./TelegramNotifier.js";
+import { calculateMemeScore } from "./MemeScorer.js";
 import type { ScalpingConfigData } from "./config.js";
 import { DEFAULT_CONFIG } from "./config.js";
 import * as db from "./database.js";
@@ -21,8 +24,57 @@ export interface PositionState {
   trailingStopActive: boolean;
   trailingStopPrice: number | null;
   safetyScore: number;
+  memeScore: number;
   liquidityUsd: number;
   status: "open" | "closing";
+  peakProfitPercent: number;
+  dexUsed?: string;
+  dexUrl?: string | null;
+  marketData?: {
+    volume5mUsd: number;
+    liquidityUsd: number;
+    priceChange5m: number;
+  };
+}
+
+// CooldownManager: tracks per-close cooldown and buy-rate limiting
+class CooldownManager {
+  private lastCloseTime: number | null = null;
+  private recentBuyTimes: number[] = [];
+
+  recordClose(): void {
+    this.lastCloseTime = Date.now();
+  }
+
+  recordBuy(): void {
+    this.recentBuyTimes.push(Date.now());
+    // Keep only last 10 entries to prevent unbounded growth
+    if (this.recentBuyTimes.length > 10) {
+      this.recentBuyTimes = this.recentBuyTimes.slice(-10);
+    }
+  }
+
+  isInPostCloseCooldown(cooldownSeconds: number): boolean {
+    if (!this.lastCloseTime) return false;
+    return Date.now() - this.lastCloseTime < cooldownSeconds * 1000;
+  }
+
+  getRemainingCooldown(cooldownSeconds: number): number {
+    if (!this.lastCloseTime) return 0;
+    const elapsed = Date.now() - this.lastCloseTime;
+    const remaining = cooldownSeconds * 1000 - elapsed;
+    return Math.max(0, Math.ceil(remaining / 1000));
+  }
+
+  getBuysInWindow(windowMs = 300000): number {
+    const cutoff = Date.now() - windowMs;
+    this.recentBuyTimes = this.recentBuyTimes.filter((t) => t > cutoff);
+    return this.recentBuyTimes.length;
+  }
+
+  isOverBuyRate(maxBuys: number, windowMs = 300000): boolean {
+    return this.getBuysInWindow(windowMs) >= maxBuys;
+  }
 }
 
 type EventEmitter = (event: string, data: unknown) => void;
@@ -36,11 +88,17 @@ export class ScalpingBot {
   private cooldownUntil: Date | null = null;
   private scanInterval: NodeJS.Timeout | null = null;
   private priceInterval: NodeJS.Timeout | null = null;
+  private dailySummaryInterval: NodeJS.Timeout | null = null;
 
   private tokenScanner: TokenScanner;
   private safetyChecker: SafetyChecker;
   private priceMonitor: PriceMonitor;
   private swapExecutor: SwapExecutor;
+  private dexAggregator: DEXAggregator;
+  private telegram: TelegramNotifier;
+  private cooldownManager: CooldownManager;
+
+  private accumulatedProfitEth = 0;
 
   private emit: EventEmitter;
 
@@ -48,9 +106,21 @@ export class ScalpingBot {
     this.config = this.loadConfig();
     this.emit = emit;
     this.tokenScanner = new TokenScanner(this.config);
-    this.safetyChecker = new SafetyChecker(this.config.minSafetyScore, this.config.maxSellTaxPercent);
+    this.safetyChecker = new SafetyChecker(
+      this.config.minSafetyScore,
+      this.config.maxSellTaxPercent,
+      this.config.enableDeployerCheck,
+      this.config.maxDeployerTokens24h
+    );
     this.priceMonitor = new PriceMonitor();
     this.swapExecutor = new SwapExecutor(this.config);
+    this.dexAggregator = new DEXAggregator(this.config.enableMultiDEX);
+    this.telegram = new TelegramNotifier({
+      botToken: this.config.telegramBotToken,
+      chatId: this.config.telegramChatId,
+      enabled: this.config.enableTelegram,
+    });
+    this.cooldownManager = new CooldownManager();
   }
 
   private loadConfig(): ScalpingConfigData {
@@ -73,6 +143,18 @@ export class ScalpingBot {
     `).run(JSON.stringify(this.config));
     this.tokenScanner.updateConfig(this.config);
     this.swapExecutor.updateConfig(this.config);
+    this.dexAggregator.setEnabled(this.config.enableMultiDEX);
+    this.safetyChecker.updateSettings(
+      this.config.minSafetyScore,
+      this.config.maxSellTaxPercent,
+      this.config.enableDeployerCheck,
+      this.config.maxDeployerTokens24h
+    );
+    this.telegram.updateConfig({
+      botToken: this.config.telegramBotToken,
+      chatId: this.config.telegramChatId,
+      enabled: this.config.enableTelegram,
+    });
     return this.config;
   }
 
@@ -86,6 +168,9 @@ export class ScalpingBot {
 
   getStatus() {
     const today = db.getTodayStats();
+    const buysInWindow = this.cooldownManager.getBuysInWindow();
+    const postCloseCooldown = this.cooldownManager.getRemainingCooldown(this.config.cooldownAfterCloseSeconds);
+
     return {
       running: this.running,
       mode: this.config.mode,
@@ -96,6 +181,9 @@ export class ScalpingBot {
       totalTradesDay: today.totalTrades,
       winRateDay: today.totalTrades > 0 ? (today.winningTrades / today.totalTrades) * 100 : 0,
       walletAddress: this.swapExecutor.getWalletAddress(),
+      buysInLastFiveMin: buysInWindow,
+      postCloseCooldownSeconds: postCloseCooldown,
+      accumulatedProfitEth: this.accumulatedProfitEth,
     };
   }
 
@@ -123,13 +211,14 @@ export class ScalpingBot {
         trailingStopActive: p.trailingStopActive === 1,
         trailingStopPrice: null,
         safetyScore: p.safetyScore,
+        memeScore: 0,
         liquidityUsd: p.liquidityUsd,
         status: p.status,
+        peakProfitPercent: 0,
       });
       this.priceMonitor.addToken(p.tokenAddress);
     }
 
-    // Start intervals
     this.scanInterval = setInterval(
       () => this.runScanCycle().catch((e) => logger.error({ e }, "Scan cycle error")),
       this.config.scanIntervalSeconds * 1000
@@ -140,7 +229,9 @@ export class ScalpingBot {
       this.config.priceCheckIntervalSeconds * 1000
     );
 
-    // Run immediately
+    // Daily summary at midnight
+    this.scheduleDailySummary();
+
     this.runScanCycle().catch(() => {});
     this.runPriceCycle().catch(() => {});
   }
@@ -151,8 +242,10 @@ export class ScalpingBot {
     this.startedAt = null;
     if (this.scanInterval) clearInterval(this.scanInterval);
     if (this.priceInterval) clearInterval(this.priceInterval);
+    if (this.dailySummaryInterval) clearInterval(this.dailySummaryInterval);
     this.scanInterval = null;
     this.priceInterval = null;
+    this.dailySummaryInterval = null;
     this.log("info", "Scalping bot stopped", null);
     this.emit("bot-status", this.getStatus());
   }
@@ -168,6 +261,29 @@ export class ScalpingBot {
     this.stop();
   }
 
+  private scheduleDailySummary(): void {
+    // Send daily summary every 24 hours
+    this.dailySummaryInterval = setInterval(async () => {
+      try {
+        const today = db.getTodayStats();
+        const ethPrice = await this.priceMonitor.getEthPrice();
+        const usdToIdr = 16000;
+
+        await this.telegram.sendDailySummary({
+          totalPnlEth: today.pnlEth,
+          totalPnlIdr: today.pnlEth * ethPrice * usdToIdr,
+          totalTrades: today.totalTrades,
+          winningTrades: today.winningTrades,
+          losingTrades: today.losingTrades,
+          winRate: today.totalTrades > 0 ? (today.winningTrades / today.totalTrades) * 100 : 0,
+          ethPrice,
+        });
+      } catch (err) {
+        logger.warn({ err }, "Daily summary failed");
+      }
+    }, 24 * 60 * 60 * 1000);
+  }
+
   private async runScanCycle(): Promise<void> {
     if (!this.running) return;
     if (this.isDailyLossHit()) {
@@ -177,11 +293,24 @@ export class ScalpingBot {
     if (this.isInCooldown()) return;
     if (this.positions.size >= this.config.maxConcurrentPositions) return;
 
+    // Anti-FOMO: post-close cooldown
+    if (this.cooldownManager.isInPostCloseCooldown(this.config.cooldownAfterCloseSeconds)) {
+      const remaining = this.cooldownManager.getRemainingCooldown(this.config.cooldownAfterCloseSeconds);
+      this.log("info", `Post-close cooldown active — ${remaining}s remaining`, null);
+      return;
+    }
+
+    // Anti-FOMO: max buys per 5 min
+    if (this.cooldownManager.isOverBuyRate(this.config.maxBuysPerFiveMinutes)) {
+      const buys = this.cooldownManager.getBuysInWindow();
+      this.log("info", `Buy rate limit reached (${buys}/${this.config.maxBuysPerFiveMinutes} per 5m)`, null);
+      return;
+    }
+
     try {
       const allTokens = await this.tokenScanner.scanNewTokens();
       const filtered = this.tokenScanner.filterTokens(allTokens);
 
-      // Save all scanned tokens to DB
       for (const token of allTokens.slice(0, 30)) {
         const passed = filtered.some((f) => f.address.toLowerCase() === token.address.toLowerCase());
         db.insertScannedToken({
@@ -199,6 +328,24 @@ export class ScalpingBot {
           dexUrl: token.dexUrl,
         });
 
+        // Calculate meme score for display
+        const buySellRatio =
+          token.txns5m.sells > 0
+            ? token.txns5m.buys / token.txns5m.sells
+            : token.txns5m.buys > 0
+            ? 3
+            : 1;
+        const memeScoreResult = calculateMemeScore(
+          {
+            ageMinutes: token.ageMinutes,
+            liquidityUSD: token.liquidityUsd,
+            volume5mUSD: token.volume5mUsd,
+            priceChange5m: token.priceChange5m,
+            buySellRatio5m: buySellRatio,
+          },
+          this.config.minMemeScore
+        );
+
         this.emit("new-token", {
           address: token.address,
           symbol: token.symbol,
@@ -210,13 +357,13 @@ export class ScalpingBot {
           liquidityUsd: token.liquidityUsd,
           ageMinutes: token.ageMinutes,
           safetyScore: 0,
+          memeScore: memeScoreResult.score,
           passedFilters: passed,
           scannedAt: new Date().toISOString(),
           dexUrl: token.dexUrl,
         });
       }
 
-      // Try to enter positions for filtered tokens
       for (const token of filtered) {
         if (this.positions.size >= this.config.maxConcurrentPositions) break;
         if (this.positions.has(token.address.toLowerCase())) continue;
@@ -224,7 +371,6 @@ export class ScalpingBot {
         await this.tryEnter(token);
       }
 
-      // Emit stats update
       this.emit("stats-update", await this.buildStats());
     } catch (err) {
       logger.error({ err }, "Scan cycle error");
@@ -245,10 +391,13 @@ export class ScalpingBot {
       const profitPercent = ((position.currentPrice - position.entryPrice) / position.entryPrice) * 100;
       const holdSeconds = Math.floor((Date.now() - position.entryTime.getTime()) / 1000);
 
-      // Check exit conditions
+      // Peak profit tracking
+      if (profitPercent > position.peakProfitPercent) {
+        position.peakProfitPercent = profitPercent;
+      }
+
       const exitReason = this.checkExitConditions(position, profitPercent, holdSeconds);
 
-      // Save updated position
       db.upsertPosition({
         tokenAddress: position.tokenAddress,
         tokenSymbol: position.tokenSymbol,
@@ -273,6 +422,16 @@ export class ScalpingBot {
       this.emit("position-update", this.serializePosition(position, profitPercent, holdSeconds));
 
       if (exitReason) {
+        // Send force-exit specific Telegram alert
+        if (exitReason === "force_exit") {
+          await this.telegram.sendForceExitAlert({
+            symbol: position.tokenSymbol,
+            profitPercent,
+            peakProfitPercent: position.peakProfitPercent,
+            profitEth: position.amountEth * (profitPercent / 100),
+          });
+        }
+
         const sellPercent = this.getSellPercent(exitReason, position);
         await this.closePosition(address, sellPercent, exitReason);
       }
@@ -282,11 +441,27 @@ export class ScalpingBot {
   private checkExitConditions(pos: PositionState, profitPercent: number, holdSeconds: number): string | null {
     const holdMinutes = holdSeconds / 60;
 
-    // Max hold time
     if (holdMinutes >= this.config.maxHoldMinutes) return "max_hold";
 
-    // Stop loss
     if (profitPercent <= -this.config.stopLossPercent) return "stop_loss";
+
+    // Force exit: profit dropped more than X% from peak
+    if (
+      this.config.enablePeakProfitExit &&
+      pos.peakProfitPercent > 0 &&
+      profitPercent > 0
+    ) {
+      const dropFromPeak = pos.peakProfitPercent - profitPercent;
+      const dropPercent = (dropFromPeak / pos.peakProfitPercent) * 100;
+      if (dropPercent >= this.config.peakProfitDropPercent) {
+        this.log(
+          "warn",
+          `Force exit ${pos.tokenSymbol}: peak ${pos.peakProfitPercent.toFixed(2)}% → now ${profitPercent.toFixed(2)}% (drop: ${dropPercent.toFixed(0)}%)`,
+          pos.tokenSymbol
+        );
+        return "force_exit";
+      }
+    }
 
     // Trailing stop
     if (pos.trailingStopActive && pos.trailingStopPrice && pos.currentPrice <= pos.trailingStopPrice) {
@@ -321,12 +496,44 @@ export class ScalpingBot {
       case "tp1": return this.config.tp1SellPercent;
       case "tp2": return this.config.tp2SellPercent;
       case "tp3": return this.config.tp3SellPercent;
-      default: return 100; // stop_loss, trailing_stop, max_hold, emergency
+      default: return 100;
     }
   }
 
   private async tryEnter(token: TokenData): Promise<void> {
-    this.log("info", `Evaluating ${token.symbol} — 5m: ${token.priceChange5m.toFixed(1)}%, liq: $${token.liquidityUsd.toFixed(0)}`, token.symbol);
+    // Meme Score Filter
+    const buySellRatio =
+      token.txns5m.sells > 0
+        ? token.txns5m.buys / token.txns5m.sells
+        : token.txns5m.buys > 0
+        ? 3
+        : 1;
+
+    const memeScore = calculateMemeScore(
+      {
+        ageMinutes: token.ageMinutes,
+        liquidityUSD: token.liquidityUsd,
+        volume5mUSD: token.volume5mUsd,
+        priceChange5m: token.priceChange5m,
+        buySellRatio5m: buySellRatio,
+      },
+      this.config.minMemeScore
+    );
+
+    if (this.config.enableMemeScore && !memeScore.passed) {
+      this.log(
+        "info",
+        `${token.symbol} meme score too low: ${memeScore.score}/100 (min: ${this.config.minMemeScore})`,
+        token.symbol
+      );
+      return;
+    }
+
+    this.log(
+      "info",
+      `Evaluating ${token.symbol} — MemeScore: ${memeScore.score}/100 | 5m: ${token.priceChange5m.toFixed(1)}% | liq: $${token.liquidityUsd.toFixed(0)}`,
+      token.symbol
+    );
 
     // Safety check
     const safety = await this.safetyChecker.check(token.address);
@@ -335,16 +542,62 @@ export class ScalpingBot {
       return;
     }
 
-    // Execute buy
+    // DEX Aggregator: find best route
+    const marketData = {
+      volume5mUsd: token.volume5mUsd,
+      liquidityUsd: token.liquidityUsd,
+      priceChange5m: token.priceChange5m,
+    };
+    const bestRoute = await this.dexAggregator.getBestRoute(token.address, this.config.maxTradeAmountEth);
+
     const amountEth = this.config.maxTradeAmountEth;
-    const buyResult = await this.swapExecutor.buyToken(token.address, amountEth);
+    let buyResult;
+
+    // TWAP vs single buy
+    if (this.config.enableTWAP) {
+      const twapResult = await this.swapExecutor.executeTWAP(
+        token.address,
+        amountEth,
+        bestRoute.routerAddress,
+        marketData
+      );
+      if (twapResult.successfulSlices === 0) {
+        this.log("error", `TWAP buy failed for ${token.symbol}: all slices failed`, token.symbol);
+        return;
+      }
+      // Aggregate results into a single SwapResult
+      const totalAmountOut = twapResult.results
+        .filter((r) => r.success)
+        .reduce((sum, r) => sum + r.amountOut, 0n);
+      buyResult = {
+        success: true,
+        txHash: twapResult.results.find((r) => r.success)?.txHash || null,
+        amountIn: BigInt(Math.floor(amountEth * 1e18)),
+        amountOut: totalAmountOut,
+        gasUsed: 0n,
+      };
+      this.log(
+        "info",
+        `TWAP completed for ${token.symbol}: ${twapResult.successfulSlices}/${twapResult.totalSlices} slices via ${bestRoute.dex}`,
+        token.symbol
+      );
+    } else {
+      buyResult = await this.swapExecutor.buyToken(
+        token.address,
+        amountEth,
+        bestRoute.routerAddress,
+        marketData
+      );
+    }
 
     if (!buyResult.success) {
       this.log("error", `Buy failed for ${token.symbol}: ${buyResult.error}`, token.symbol);
       return;
     }
 
-    // Record position
+    // Track buy for rate limiting
+    this.cooldownManager.recordBuy();
+
     const position: PositionState = {
       tokenAddress: token.address,
       tokenSymbol: token.symbol,
@@ -359,8 +612,13 @@ export class ScalpingBot {
       trailingStopActive: false,
       trailingStopPrice: null,
       safetyScore: safety.score,
+      memeScore: memeScore.score,
       liquidityUsd: token.liquidityUsd,
       status: "open",
+      peakProfitPercent: 0,
+      dexUsed: bestRoute.dex,
+      dexUrl: token.dexUrl,
+      marketData,
     };
 
     this.positions.set(token.address.toLowerCase(), position);
@@ -386,9 +644,22 @@ export class ScalpingBot {
       status: "open",
     });
 
-    this.log("buy", `Bought ${token.symbol} @ $${token.priceUsd.toFixed(8)} | ${amountEth} ETH | Safety: ${safety.score}/100`, token.symbol);
+    const logMsg = `Bought ${token.symbol} @ $${token.priceUsd.toFixed(8)} | ${amountEth} ETH | Safety: ${safety.score}/100 | Meme: ${memeScore.score}/100 | DEX: ${bestRoute.dex}`;
+    this.log("buy", logMsg, token.symbol);
     this.emit("scalp-alert", { type: "buy", message: `Bought ${token.symbol}` });
     this.emit("position-update", this.serializePosition(position, 0, 0));
+
+    // Telegram buy alert
+    await this.telegram.sendBuyAlert({
+      symbol: token.symbol,
+      tokenAddress: token.address,
+      priceUsd: token.priceUsd,
+      amountEth,
+      safetyScore: safety.score,
+      memeScore: memeScore.score,
+      dex: bestRoute.dex,
+      dexUrl: token.dexUrl,
+    });
   }
 
   async closePosition(tokenAddress: string, sellPercent: number, reason: string): Promise<void> {
@@ -400,30 +671,27 @@ export class ScalpingBot {
     const profitPercent = ((pos.currentPrice - pos.entryPrice) / pos.entryPrice) * 100;
     const profitEth = pos.amountEth * (profitPercent / 100) * (sellPercent / 100);
 
-    // Mark TP hits
     if (reason === "tp1") pos.tp1Hit = true;
     if (reason === "tp2") pos.tp2Hit = true;
 
     if (sellPercent < 100) {
-      // Partial sell — keep position open
       pos.amountEth -= pos.amountEth * (sellPercent / 100);
       pos.amountTokens -= pos.amountTokens * (sellPercent / 100);
       pos.status = "open";
     } else {
-      // Full close
       this.positions.delete(tokenAddress.toLowerCase());
       this.priceMonitor.removeToken(tokenAddress);
       db.deletePosition(tokenAddress);
+      // Record close for cooldown
+      this.cooldownManager.recordClose();
     }
 
-    // Execute sell
     const sellResult = await this.swapExecutor.sellToken(
       tokenAddress,
       BigInt(Math.floor(pos.amountTokens * (sellPercent / 100))),
       pos.amountEth * (sellPercent / 100)
     );
 
-    // Record trade
     const exitTime = new Date().toISOString();
     db.insertTrade({
       tokenAddress,
@@ -441,14 +709,45 @@ export class ScalpingBot {
       txHash: sellResult.txHash,
     });
 
-    // Track daily loss
     if (profitEth < 0) {
       this.dailyLossEth += Math.abs(profitEth);
     }
 
+    // Auto-compounding: accumulate profits and grow trade size
+    if (this.config.enableAutoCompound && profitEth > 0) {
+      this.accumulatedProfitEth += profitEth;
+      if (this.accumulatedProfitEth >= this.config.compoundThresholdEth) {
+        this.compoundProfit();
+      }
+    }
+
     const logLevel = profitPercent > 0 ? "sell" : "stop_loss";
     const sign = profitPercent > 0 ? "+" : "";
-    this.log(logLevel, `${reason.toUpperCase()} ${pos.tokenSymbol} | ${sign}${profitPercent.toFixed(2)}% | ${sign}${profitEth.toFixed(6)} ETH`, pos.tokenSymbol);
+    this.log(
+      logLevel,
+      `${reason.toUpperCase()} ${pos.tokenSymbol} | ${sign}${profitPercent.toFixed(2)}% | ${sign}${profitEth.toFixed(6)} ETH`,
+      pos.tokenSymbol
+    );
+
+    // Telegram sell alert (only for full closes, not partial)
+    if (sellPercent === 100) {
+      if (reason === "stop_loss") {
+        await this.telegram.sendStopLossAlert({
+          symbol: pos.tokenSymbol,
+          profitPercent,
+          profitEth,
+        });
+      } else if (reason !== "force_exit") {
+        // force_exit alert sent before close
+        await this.telegram.sendSellAlert({
+          symbol: pos.tokenSymbol,
+          profitPercent,
+          profitEth,
+          reason,
+          txHash: sellResult.txHash,
+        });
+      }
+    }
 
     this.emit("trade-executed", {
       tokenSymbol: pos.tokenSymbol,
@@ -459,6 +758,29 @@ export class ScalpingBot {
     });
 
     this.emit("stats-update", await this.buildStats());
+  }
+
+  private compoundProfit(): void {
+    const addedEth = this.accumulatedProfitEth;
+    const newTradeSize = Math.min(
+      this.config.maxTradeAmountEth + addedEth,
+      this.config.totalCapitalEth * 0.1 // cap at 10% of capital per trade
+    );
+    this.accumulatedProfitEth = 0;
+
+    this.log(
+      "info",
+      `Auto-compound: +${addedEth.toFixed(6)} ETH profit → new trade size: ${newTradeSize.toFixed(6)} ETH`,
+      null
+    );
+
+    this.saveConfig({ maxTradeAmountEth: newTradeSize });
+
+    this.telegram
+      .sendRawMessage(
+        `🔄 *Auto-Compound*\nProfit compounded: +${addedEth.toFixed(6)} ETH\nNew trade size: ${newTradeSize.toFixed(6)} ETH`
+      )
+      .catch(() => {});
   }
 
   async buildStats() {
@@ -482,6 +804,7 @@ export class ScalpingBot {
       ethPriceUsd: ethPrice,
       capitalEth: this.config.totalCapitalEth,
       capitalIdr: this.config.totalCapitalEth * ethPrice * usdToIdr,
+      accumulatedProfitEth: this.accumulatedProfitEth,
     };
   }
 
@@ -527,7 +850,10 @@ export class ScalpingBot {
       tp2Hit: pos.tp2Hit,
       trailingStopActive: pos.trailingStopActive,
       safetyScore: pos.safetyScore,
+      memeScore: pos.memeScore,
+      peakProfitPercent: pos.peakProfitPercent,
       liquidityUsd: pos.liquidityUsd,
+      dexUsed: pos.dexUsed,
       status: pos.status,
     };
   }
