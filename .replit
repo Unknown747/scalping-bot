@@ -43,4 +43,4 @@ channel = "stable-25_05"
 [userenv.shared]
 LOG_LEVEL = "debug"
 NODE_ENV = "production"
-MEV_PROTECTION_RPC = "https://base.drpc.org"
+MEV_PROTECTION_RPC = "https://mev-blocker.drpc.org"
