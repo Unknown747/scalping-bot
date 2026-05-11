@@ -17,5 +17,7 @@ export const TradeExitReason = {
   trailing_stop: "trailing_stop",
   max_hold: "max_hold",
   manual: "manual",
+  manual_sell: "manual_sell",
   emergency: "emergency",
+  force_exit: "force_exit",
 } as const;

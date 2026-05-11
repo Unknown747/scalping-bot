@@ -23,4 +23,6 @@ export interface Trade {
   exitReason: TradeExitReason;
   /** @nullable */
   txHash?: string | null;
+  /** True jika transaksi dikirim via MEV blocker (dRPC atau Flashbots) */
+  mevProtected: boolean;
 }

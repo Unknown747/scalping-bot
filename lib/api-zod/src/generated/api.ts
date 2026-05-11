@@ -133,9 +133,16 @@ export const ClosePositionResponse = zod.object({
     "trailing_stop",
     "max_hold",
     "manual",
+    "manual_sell",
     "emergency",
+    "force_exit",
   ]),
   txHash: zod.string().nullish(),
+  mevProtected: zod
+    .boolean()
+    .describe(
+      "True jika transaksi dikirim via MEV blocker (dRPC atau Flashbots)",
+    ),
 });
 
 /**
@@ -172,9 +179,16 @@ export const GetTradesResponseItem = zod.object({
     "trailing_stop",
     "max_hold",
     "manual",
+    "manual_sell",
     "emergency",
+    "force_exit",
   ]),
   txHash: zod.string().nullish(),
+  mevProtected: zod
+    .boolean()
+    .describe(
+      "True jika transaksi dikirim via MEV blocker (dRPC atau Flashbots)",
+    ),
 });
 export const GetTradesResponse = zod.array(GetTradesResponseItem);
 

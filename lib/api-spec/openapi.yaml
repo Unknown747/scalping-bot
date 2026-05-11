@@ -400,9 +400,12 @@ components:
           type: integer
         exitReason:
           type: string
-          enum: [tp1, tp2, tp3, stop_loss, trailing_stop, max_hold, manual, emergency]
+          enum: [tp1, tp2, tp3, stop_loss, trailing_stop, max_hold, manual, manual_sell, emergency, force_exit]
         txHash:
           type: ["string", "null"]
+        mevProtected:
+          type: boolean
+          description: True jika transaksi dikirim via MEV blocker (dRPC atau Flashbots)
       required:
         - id
         - tokenAddress
@@ -417,6 +420,7 @@ components:
         - exitTime
         - holdSeconds
         - exitReason
+        - mevProtected
 
     TradingStats:
       type: object

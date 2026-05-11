@@ -71,7 +71,9 @@ export const TradeExitReason = {
   trailing_stop: "trailing_stop",
   max_hold: "max_hold",
   manual: "manual",
+  manual_sell: "manual_sell",
   emergency: "emergency",
+  force_exit: "force_exit",
 } as const;
 
 export interface Trade {
@@ -90,6 +92,8 @@ export interface Trade {
   exitReason: TradeExitReason;
   /** @nullable */
   txHash?: string | null;
+  /** True jika transaksi dikirim via MEV blocker (dRPC atau Flashbots) */
+  mevProtected: boolean;
 }
 
 export interface TradingStats {

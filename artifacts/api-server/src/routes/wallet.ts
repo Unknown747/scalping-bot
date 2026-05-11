@@ -38,7 +38,7 @@ router.get("/wallet/balance", async (req, res) => {
 router.get("/wallet/rpc-health", (_req, res) => {
   try {
     const report = getRpcHealthReport();
-    const mevEndpoint = report.find((r) => r.role === "write-mev");
+    const mevEndpoint = report.find((r) => r.role === "write-mev-primary" || r.role === "write-mev-backup");
     const readEndpoint = report.find((r) => r.role === "write-fallback");
 
     res.json({

@@ -614,7 +614,7 @@ export function FullSettingsPanel() {
 
                     {/* Secret list */}
                     <div className="space-y-2">
-                      {(secretsData?.secrets ?? []).map((s) => (
+                      {(secretsData?.secrets ?? []).map((s: { key: string; label: string; set: boolean; required: boolean; note?: string; maskedValue?: string | null }) => (
                         <div
                           key={s.key}
                           className={`p-2.5 rounded-lg border ${
