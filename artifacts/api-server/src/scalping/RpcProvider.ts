@@ -7,8 +7,12 @@ import { logger } from "../lib/logger.js";
  * writeProvider = MEV_PROTECTION_RPC  (all swap / approve transactions)
  *
  * Fallback chain:
- *   write: MEV_PROTECTION_RPC → BASE_RPC_URL → public RPCs
+ *   write: MEV_PROTECTION_RPC (primary) → MEV_PROTECTION_RPC_BACKUP (Flashbots) → BASE_RPC_URL → public RPCs
  *   read:  BASE_RPC_URL → public RPCs (never touches MEV endpoint)
+ *
+ * MEV RPCs — keduanya dianggap "mevActive = true":
+ *   primary : MEV_PROTECTION_RPC        (default: https://mev-blocker.drpc.org)
+ *   backup  : MEV_PROTECTION_RPC_BACKUP (default: https://rpc.flashbots.net/fast)
  */
 
 // ─── Public fallback RPCs (read only) ─────────────────────────────────────────
@@ -68,13 +72,25 @@ function getReadRpcList(): string[] {
   return list;
 }
 
-// ─── Write RPC list (MEV first → BASE_RPC_URL → public) ──────────────────────
+// ─── MEV RPC defaults ────────────────────────────────────────────────────────
+const DEFAULT_MEV_PRIMARY = "https://mev-blocker.drpc.org";
+const DEFAULT_MEV_BACKUP   = "https://rpc.flashbots.net/fast";
+
+function getMevRpcSet(): { primary: string; backup: string } {
+  return {
+    primary: process.env["MEV_PROTECTION_RPC"]        || DEFAULT_MEV_PRIMARY,
+    backup:  process.env["MEV_PROTECTION_RPC_BACKUP"] || DEFAULT_MEV_BACKUP,
+  };
+}
+
+// ─── Write RPC list (MEV primary → MEV backup → BASE_RPC_URL → public) ───────
 function getWriteRpcList(): string[] {
-  const mev = process.env["MEV_PROTECTION_RPC"];
-  const primary = process.env["BASE_RPC_URL"];
+  const { primary, backup } = getMevRpcSet();
+  const base = process.env["BASE_RPC_URL"];
   const list: string[] = [];
-  if (mev) list.push(mev);
-  if (primary && primary !== mev) list.push(primary);
+  list.push(primary);
+  if (backup && backup !== primary) list.push(backup);
+  if (base && !list.includes(base)) list.push(base);
   for (const pub of PUBLIC_READ_RPCS) {
     if (!list.includes(pub)) list.push(pub);
   }
@@ -120,12 +136,14 @@ export interface WriteProviderResult {
 
 export async function getWriteProvider(): Promise<WriteProviderResult> {
   const { ethers } = await import("ethers");
-  const mevRpc = process.env["MEV_PROTECTION_RPC"];
+  const { primary: mevPrimary, backup: mevBackup } = getMevRpcSet();
   const primaryRpc = process.env["BASE_RPC_URL"] || "https://mainnet.base.org";
   const rpcs = getWriteRpcList();
 
   for (const rpc of rpcs) {
-    const isMev = rpc === mevRpc;
+    const isMevPrimary = rpc === mevPrimary;
+    const isMevBackup  = rpc === mevBackup;
+    const isMev        = isMevPrimary || isMevBackup;
     if (!isHealthy(rpc)) continue;
 
     try {
@@ -134,20 +152,24 @@ export async function getWriteProvider(): Promise<WriteProviderResult> {
       await provider.getBlockNumber();
       recordSuccess(rpc, Date.now() - start);
 
-      if (isMev) {
-        logger.info({ rpc: maskKey(rpc) }, "MEV protection active — using MEV RPC for write");
+      if (isMevPrimary) {
+        logger.info({ rpc: maskKey(rpc) }, "MEV protection active — dRPC MEV Blocker (primary)");
+      } else if (isMevBackup) {
+        logger.warn({ rpc: maskKey(rpc) }, "MEV protection active — Flashbots (backup, primary down)");
       } else {
         logger.warn(
-          { rpc: maskKey(rpc), mevRpc: mevRpc ? maskKey(mevRpc) : "not set" },
-          "MEV protection failed, using standard RPC for write"
+          { rpc: maskKey(rpc), mevPrimary: maskKey(mevPrimary), mevBackup: maskKey(mevBackup) },
+          "MEV protection unavailable — both MEV RPCs down, using standard RPC"
         );
       }
 
       return { provider, ethers, rpcUrl: rpc, mevActive: isMev };
     } catch (err: any) {
       recordFailure(rpc);
-      if (isMev) {
-        logger.warn({ err: err?.message, rpc: maskKey(rpc) }, "MEV RPC unreachable, falling back");
+      if (isMevPrimary) {
+        logger.warn({ err: err?.message }, "dRPC MEV Blocker unreachable, trying Flashbots backup");
+      } else if (isMevBackup) {
+        logger.warn({ err: err?.message }, "Flashbots backup unreachable, falling back to standard RPC");
       }
     }
   }
@@ -194,22 +216,22 @@ export async function withRpcRetry<T>(
 // ─── Health report ─────────────────────────────────────────────────────────
 export function getRpcHealthReport(): Array<{
   rpc: string;
-  role: "read" | "write-mev" | "write-fallback" | "backup";
+  role: "write-mev-primary" | "write-mev-backup" | "write-fallback" | "read" | "backup";
   failures: number;
   latencyMs: number;
   healthy: boolean;
 }> {
-  const mevRpc = process.env["MEV_PROTECTION_RPC"] || "";
+  const { primary: mevPrimary, backup: mevBackup } = getMevRpcSet();
   const primaryRpc = process.env["BASE_RPC_URL"] || "";
 
   const allRpcs = [...new Set([...getWriteRpcList(), ...getReadRpcList()])];
 
   return allRpcs.map((rpc) => {
     const h = rpcHealth.get(rpc);
-    let role: "read" | "write-mev" | "write-fallback" | "backup" = "backup";
-    if (rpc === mevRpc) role = "write-mev";
-    else if (rpc === primaryRpc) role = "write-fallback";
-    else if (rpc === primaryRpc) role = "read";
+    let role: "write-mev-primary" | "write-mev-backup" | "write-fallback" | "read" | "backup" = "backup";
+    if (rpc === mevPrimary)  role = "write-mev-primary";
+    else if (rpc === mevBackup)   role = "write-mev-backup";
+    else if (rpc === primaryRpc)  role = "write-fallback";
 
     return {
       rpc: maskKey(rpc),
