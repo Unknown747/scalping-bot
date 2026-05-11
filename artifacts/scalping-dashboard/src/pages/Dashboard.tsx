@@ -19,6 +19,7 @@ import { TokenScanner } from "../components/TokenScanner";
 import { TradeHistory } from "../components/TradeHistory";
 import { LogConsole } from "../components/LogConsole";
 import { PnlChart } from "../components/PnlChart";
+import { SettingsPanel } from "../components/SettingsPanel";
 import { toast } from "sonner";
 
 type LogEntry = { id: number; level: string; message: string; tokenSymbol?: string | null; timestamp: string };
@@ -253,6 +254,7 @@ export function Dashboard() {
               isStopping={stopBot.isPending}
               isEmergencyStopping={emergencyStop.isPending}
             />
+            <SettingsPanel />
             <WalletCard wallet={wallet as any} />
           </div>
 

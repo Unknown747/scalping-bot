@@ -704,7 +704,7 @@ export class ScalpingBot {
       // Record close for cooldown
       this.cooldownManager.recordClose();
       // Blacklist token if it hit stop-loss to avoid re-entering
-      if ((reason === "stop_loss" || reason === "emergency") && this.config.tokenBlacklistMinutes > 0) {
+      if ((reason === "stop_loss" || reason === "emergency") && this.config.enableTokenBlacklist && this.config.tokenBlacklistMinutes > 0) {
         this.addToBlacklist(tokenAddress);
       }
     }

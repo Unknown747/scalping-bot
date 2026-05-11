@@ -73,6 +73,7 @@ export interface ScalpingConfigData {
   enableBreakEvenAfterTP1: boolean;
 
   // Optimization: Token Blacklist (avoid re-entering recent losers)
+  enableTokenBlacklist: boolean;
   tokenBlacklistMinutes: number;
 
   // Optimization: 1h Momentum Confirmation
@@ -154,6 +155,7 @@ export const DEFAULT_CONFIG: ScalpingConfigData = {
   enableBreakEvenAfterTP1: true,
 
   // Token Blacklist
+  enableTokenBlacklist: true,
   tokenBlacklistMinutes: 30,
 
   // 1h Momentum Confirmation
@@ -178,6 +180,7 @@ export const RISK_PRESETS: Record<string, Partial<ScalpingConfigData>> = {
     cooldownAfterCloseSeconds: 45,
     maxBuysPerFiveMinutes: 2,
     enableBreakEvenAfterTP1: true,
+    enableTokenBlacklist: true,
     tokenBlacklistMinutes: 45,
     require1hMomentum: true,
     enableDynamicPositionSizing: false,
@@ -198,6 +201,7 @@ export const RISK_PRESETS: Record<string, Partial<ScalpingConfigData>> = {
     cooldownAfterCloseSeconds: 30,
     maxBuysPerFiveMinutes: 3,
     enableBreakEvenAfterTP1: true,
+    enableTokenBlacklist: true,
     tokenBlacklistMinutes: 30,
     require1hMomentum: false,
     enableDynamicPositionSizing: false,
@@ -219,6 +223,7 @@ export const RISK_PRESETS: Record<string, Partial<ScalpingConfigData>> = {
     maxBuysPerFiveMinutes: 4,
     enableAutoCompound: true,
     enableBreakEvenAfterTP1: true,
+    enableTokenBlacklist: true,
     tokenBlacklistMinutes: 15,
     require1hMomentum: false,
     enableDynamicPositionSizing: true,
