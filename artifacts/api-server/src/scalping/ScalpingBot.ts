@@ -783,6 +783,167 @@ export class ScalpingBot {
     this.emit("stats-update", await this.buildStats());
   }
 
+  /**
+   * Manual buy: force-enter a position for a specific token address.
+   * Bypasses all filters. Used for testing live trade execution.
+   */
+  async manualBuy(tokenAddress: string, amountEthOverride?: number): Promise<{ success: boolean; message: string; txHash?: string | null }> {
+    // Fetch token data from DexScreener
+    const { default: axios } = await import("axios");
+    const res = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`, { timeout: 8000 });
+    const pairs: any[] = (res.data?.pairs || []).filter((p: any) => p?.chainId === "base");
+    if (pairs.length === 0) {
+      return { success: false, message: `No Base pairs found for ${tokenAddress}` };
+    }
+
+    // Pick highest-liquidity pair
+    const best = pairs.reduce((a: any, b: any) =>
+      (b.liquidity?.usd || 0) > (a.liquidity?.usd || 0) ? b : a
+    );
+
+    const token: TokenData = {
+      address: tokenAddress,
+      symbol: best.baseToken?.symbol || "UNKNOWN",
+      name: best.baseToken?.name || "UNKNOWN",
+      priceUsd: parseFloat(best.priceUsd) || 0,
+      priceChange5m: best.priceChange?.m5 || 0,
+      priceChange1h: best.priceChange?.h1 || 0,
+      priceChange24h: best.priceChange?.h24 || 0,
+      volume5mUsd: best.volume?.m5 || 0,
+      volume1hUsd: best.volume?.h1 || 0,
+      liquidityUsd: best.liquidity?.usd || 0,
+      marketCapUsd: null,
+      ageMinutes: best.pairCreatedAt ? (Date.now() - best.pairCreatedAt) / 60000 : 9999,
+      holderCount: null,
+      dexUrl: best.url || null,
+      pairAddress: best.pairAddress || "",
+      txns5m: { buys: best.txns?.m5?.buys || 0, sells: best.txns?.m5?.sells || 0 },
+    };
+
+    if (token.priceUsd <= 0) {
+      return { success: false, message: `Invalid price for ${token.symbol}` };
+    }
+
+    const amountEth = amountEthOverride || this.config.maxTradeAmountEth;
+    const marketData = { volume5mUsd: token.volume5mUsd, liquidityUsd: token.liquidityUsd, priceChange5m: token.priceChange5m };
+    const bestRoute = await this.dexAggregator.getBestRoute(token.address, amountEth);
+
+    this.log("info", `MANUAL BUY: ${token.symbol} @ $${token.priceUsd} | ${amountEth} ETH | liq: $${token.liquidityUsd.toFixed(0)}`, token.symbol);
+
+    const buyResult = await this.swapExecutor.buyToken(token.address, amountEth, bestRoute.routerAddress, marketData);
+
+    if (!buyResult.success) {
+      this.log("error", `Manual buy FAILED for ${token.symbol}: ${buyResult.error}`, token.symbol);
+      return { success: false, message: buyResult.error || "Buy failed", txHash: null };
+    }
+
+    this.cooldownManager.recordBuy();
+
+    const position: PositionState = {
+      tokenAddress: token.address,
+      tokenSymbol: token.symbol,
+      tokenName: token.name,
+      entryPrice: token.priceUsd,
+      currentPrice: token.priceUsd,
+      amountEth,
+      amountTokens: Number(buyResult.amountOut),
+      entryTime: new Date(),
+      tp1Hit: false,
+      tp2Hit: false,
+      trailingStopActive: false,
+      trailingStopPrice: null,
+      safetyScore: 99,
+      memeScore: 99,
+      liquidityUsd: token.liquidityUsd,
+      status: "open",
+      peakProfitPercent: 0,
+      dexUsed: bestRoute.dex,
+      dexUrl: token.dexUrl,
+      marketData,
+    };
+
+    this.positions.set(token.address.toLowerCase(), position);
+    this.priceMonitor.addToken(token.address);
+
+    db.upsertPosition({
+      tokenAddress: token.address,
+      tokenSymbol: token.symbol,
+      tokenName: token.name,
+      entryPrice: token.priceUsd,
+      currentPrice: token.priceUsd,
+      amountEth,
+      amountTokens: Number(buyResult.amountOut),
+      profitPercent: 0,
+      profitEth: 0,
+      entryTime: new Date().toISOString(),
+      holdSeconds: 0,
+      tp1Hit: false,
+      tp2Hit: false,
+      trailingStopActive: false,
+      safetyScore: 99,
+      liquidityUsd: token.liquidityUsd,
+      status: "open",
+    });
+
+    this.log("buy", `MANUAL BUY SUCCESS: ${token.symbol} @ $${token.priceUsd} | txHash: ${buyResult.txHash}`, token.symbol);
+    this.emit("position-update", this.serializePosition(position, 0, 0));
+    this.emit("stats-update", await this.buildStats());
+
+    return { success: true, message: `Bought ${token.symbol} @ $${token.priceUsd} | ${amountEth} ETH`, txHash: buyResult.txHash };
+  }
+
+  // Manual sell: sell tokens from wallet even if no active position tracked
+  async manualSell(tokenAddress: string, amountEthEstimate?: number): Promise<{ success: boolean; message: string; txHash?: string | null }> {
+    // Check if there's an active position for it — use closePosition if yes
+    const existing = this.positions.get(tokenAddress.toLowerCase());
+    if (existing) {
+      await this.closePosition(tokenAddress, 100, "manual");
+      const trades = db.getTrades(1, 1);
+      return { success: true, message: `Closed position for ${existing.tokenSymbol}`, txHash: trades[0]?.txHash ?? null };
+    }
+
+    // No tracked position — sell directly using SwapExecutor with on-chain balance
+    const { ethers } = await import("ethers");
+    const walletAddr = this.swapExecutor.getWalletAddress() || process.env["WALLET_ADDRESS"] || "";
+    const rpcUrl = process.env["RPC_URL"] || "https://mainnet.base.org";
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const erc20 = new ethers.Contract(tokenAddress, ["function balanceOf(address) view returns (uint256)", "function symbol() view returns (string)", "function name() view returns (string)"], provider);
+    const balance: bigint = await erc20.balanceOf(walletAddr);
+    if (balance === 0n) {
+      return { success: false, message: "No token balance in wallet" };
+    }
+    let symbol = "UNKNOWN", name = "UNKNOWN";
+    try { symbol = await erc20.symbol(); name = await erc20.name(); } catch {}
+
+    this.log("info", `MANUAL SELL (no position): ${symbol} balance=${balance.toString()} tokens`, symbol);
+    const sellResult = await this.swapExecutor.sellToken(tokenAddress, balance, amountEthEstimate || 0.001);
+
+    if (!sellResult.success) {
+      return { success: false, message: sellResult.error || "Sell failed", txHash: null };
+    }
+
+    const ethReceived = Number(sellResult.amountOut) / 1e18;
+    db.insertTrade({
+      tokenAddress,
+      tokenSymbol: symbol,
+      tokenName: name,
+      entryPrice: 0,
+      exitPrice: ethReceived / (Number(balance) / 1e18),
+      amountEth: ethReceived,
+      profitPercent: 0,
+      profitEth: ethReceived,
+      entryTime: new Date().toISOString(),
+      exitTime: new Date().toISOString(),
+      holdSeconds: 0,
+      exitReason: "manual_sell",
+      txHash: sellResult.txHash,
+    });
+
+    this.log("sell", `MANUAL SELL SUCCESS: ${symbol} | received ${ethReceived.toFixed(6)} ETH | txHash: ${sellResult.txHash}`, symbol);
+    this.emit("stats-update", await this.buildStats());
+    return { success: true, message: `Sold ${symbol} | received ${ethReceived.toFixed(6)} ETH`, txHash: sellResult.txHash };
+  }
+
   private compoundProfit(): void {
     const addedEth = this.accumulatedProfitEth;
     const newTradeSize = Math.min(

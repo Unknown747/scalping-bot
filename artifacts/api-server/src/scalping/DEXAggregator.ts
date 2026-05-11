@@ -19,7 +19,7 @@ export const DEX_ROUTERS = {
   UNISWAP_V3: {
     name: "Uniswap V3",
     router: BASE_CONTRACTS.UNISWAP_V3_ROUTER,
-    quoter: BASE_CONTRACTS.UNISWAP_V3_QUOTER,
+    quoter: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e", // QuoterV2 verified on Base
     type: "v3" as const,
   },
   AERODROME: {

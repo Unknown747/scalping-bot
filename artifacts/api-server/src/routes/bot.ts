@@ -26,4 +26,40 @@ router.post("/bot/emergency-stop", async (req, res) => {
   res.json(bot.getStatus());
 });
 
+// Manual trade endpoint: force buy a specific token
+router.post("/bot/manual-buy", async (req, res) => {
+  const bot = getBot();
+  const { tokenAddress, amountEth } = req.body as { tokenAddress?: string; amountEth?: number };
+
+  if (!tokenAddress) {
+    res.status(400).json({ error: "tokenAddress required" });
+    return;
+  }
+
+  try {
+    const result = await bot.manualBuy(tokenAddress, amountEth);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Manual buy failed" });
+  }
+});
+
+// Manual sell: sell token directly from wallet (even without tracked position)
+router.post("/bot/manual-sell", async (req, res) => {
+  const bot = getBot();
+  const { tokenAddress, amountEthEstimate } = req.body as { tokenAddress?: string; amountEthEstimate?: number };
+
+  if (!tokenAddress) {
+    res.status(400).json({ error: "tokenAddress required" });
+    return;
+  }
+
+  try {
+    const result = await bot.manualSell(tokenAddress, amountEthEstimate);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || "Manual sell failed" });
+  }
+});
+
 export default router;

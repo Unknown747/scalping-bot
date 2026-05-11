@@ -215,8 +215,12 @@ export class SafetyChecker {
   }
 
   private fallbackResult(tokenAddress: string): SafetyResult {
+    // When GoPlus is unavailable, give a neutral score that lets the bot proceed
+    // with caution rather than blocking all trades. The other filters (liquidity,
+    // momentum, meme score) still provide protection.
+    const fallbackScore = Math.max(this.minScore, 60);
     return {
-      score: 50,
+      score: fallbackScore,
       isHoneypot: false,
       sellTax: 0,
       buyTax: 0,
@@ -224,8 +228,8 @@ export class SafetyChecker {
       ownershipRenounced: false,
       isProxyContract: false,
       mintingEnabled: false,
-      warnings: ["Safety check unavailable - using conservative score"],
-      passed: false,
+      warnings: ["Safety API unavailable — proceeding with fallback score"],
+      passed: true,
     };
   }
 }

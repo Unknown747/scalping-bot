@@ -21,16 +21,39 @@ export interface TokenData {
   txns5m: { buys: number; sells: number };
 }
 
-const DEXSCREENER_URL = "https://api.dexscreener.com/latest/dex";
-const GECKO_URL = "https://api.geckoterminal.com/api/v2";
+const DEXSCREENER_URL = "https://api.dexscreener.com";
 
-// Simple in-memory cache to avoid rate limits
 const tokenCache = new Map<string, { data: TokenData[]; timestamp: number }>();
-const CACHE_TTL_MS = 5000;
+const CACHE_TTL_MS = 10000; // 10 seconds
+
+// Known active memecoins/tokens on Base — used as seed for finding active pairs
+const BASE_SEED_ADDRESSES = [
+  "0x532f27101965dd16442E59d40670FaF5eBB142E4", // BRETT
+  "0x4ed4E862860beD51a9570b96d89aF5E1B0Efefed", // DEGEN
+  "0xAC1Bd2486aaf3B5C0fc3Fd868558b082a531B2B3", // TOSHI
+  "0x9a26F5433671751C3276a065f57e5a02D2817973", // KEYCAT
+  "0xB4fDe59a779991bfB6a52253B51947828b982be3", // MOCHI
+  "0x940181a94A35A4569E4529A3CDfB74e38FD98631", // AERO
+  "0x768BE13e1680b5ebE0024C42c896E3dB59ec0149", // SKI
+  "0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA", // USDbC
+];
+
+// DexScreener search terms covering different meme/trend categories
+const SEARCH_TERMS = [
+  "based",
+  "coinbase",
+  "brett",
+  "toshi",
+  "degen",
+  "mochi",
+  "pepe base",
+  "dog base",
+];
+
+let searchTermIndex = 0; // Rotate through search terms each cycle
 
 export class TokenScanner {
   private config: ScalpingConfigData;
-  private seenAddresses = new Set<string>();
 
   constructor(config: ScalpingConfigData) {
     this.config = config;
@@ -42,147 +65,227 @@ export class TokenScanner {
 
   async scanNewTokens(): Promise<TokenData[]> {
     const results: TokenData[] = [];
-    
-    try {
-      const dexScreenerTokens = await this.scanDexScreener();
-      results.push(...dexScreenerTokens);
-    } catch (err) {
-      logger.warn({ err }, "DexScreener scan failed");
-    }
+    const seen = new Set<string>();
 
-    try {
-      const geckoTokens = await this.scanGeckoTerminal();
-      // Deduplicate by address
-      for (const token of geckoTokens) {
-        if (!results.find(r => r.address.toLowerCase() === token.address.toLowerCase())) {
-          results.push(token);
+    const addUnique = (tokens: TokenData[]) => {
+      for (const t of tokens) {
+        const key = t.address.toLowerCase();
+        if (!seen.has(key) && t.address && t.priceUsd > 0) {
+          seen.add(key);
+          results.push(t);
         }
       }
-    } catch (err) {
-      logger.warn({ err }, "GeckoTerminal scan failed");
-    }
+    };
+
+    // Run all scan strategies in parallel
+    const [profileTokens, searchTokens, seedTokens] = await Promise.allSettled([
+      this.scanDexScreenerProfiles(),
+      this.scanDexScreenerSearch(),
+      this.scanSeedAddresses(),
+    ]);
+
+    if (profileTokens.status === "fulfilled") addUnique(profileTokens.value);
+    if (searchTokens.status === "fulfilled") addUnique(searchTokens.value);
+    if (seedTokens.status === "fulfilled") addUnique(seedTokens.value);
+
+    // Sort by momentum (highest 5m price change first) for better signal
+    results.sort((a, b) => b.priceChange5m - a.priceChange5m);
 
     return results;
   }
 
-  private async scanDexScreener(): Promise<TokenData[]> {
-    const cacheKey = "dexscreener_base_new";
+  /**
+   * Strategy 1: DexScreener token profiles + boosts → batch pair lookup.
+   * Fetches recently listed/promoted tokens, then gets their full market data.
+   */
+  private async scanDexScreenerProfiles(): Promise<TokenData[]> {
+    const cacheKey = "dex_profiles";
     const cached = tokenCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
-      return cached.data;
-    }
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) return cached.data;
 
     try {
-      // Get new/trending pairs on Base network
-      const response = await axios.get(`${DEXSCREENER_URL}/pairs/base`, {
-        params: { q: "meme" },
-        timeout: 8000,
-      });
+      const [profilesRes, boostsRes] = await Promise.allSettled([
+        axios.get(`${DEXSCREENER_URL}/token-profiles/latest/v1`, {
+          timeout: 7000,
+          headers: { Accept: "application/json" },
+        }),
+        axios.get(`${DEXSCREENER_URL}/token-boosts/latest/v1`, {
+          timeout: 7000,
+          headers: { Accept: "application/json" },
+        }),
+      ]);
 
-      const pairs = response.data?.pairs || [];
-      const tokens: TokenData[] = [];
+      const allAddresses = new Set<string>();
 
-      for (const pair of pairs) {
-        if (!pair?.baseToken?.address) continue;
-
-        const ageMinutes = this.calcAgeMinutes(pair.pairCreatedAt);
-        if (ageMinutes > this.config.maxTokenAgeMinutes * 2) continue;
-
-        const token: TokenData = {
-          address: pair.baseToken.address,
-          symbol: pair.baseToken.symbol || "UNKNOWN",
-          name: pair.baseToken.name || pair.baseToken.symbol || "UNKNOWN",
-          priceUsd: parseFloat(pair.priceUsd) || 0,
-          priceChange5m: pair.priceChange?.m5 || 0,
-          priceChange1h: pair.priceChange?.h1 || 0,
-          priceChange24h: pair.priceChange?.h24 || 0,
-          volume5mUsd: pair.volume?.m5 || 0,
-          volume1hUsd: pair.volume?.h1 || 0,
-          liquidityUsd: pair.liquidity?.usd || 0,
-          marketCapUsd: pair.marketCap ? parseFloat(pair.marketCap) : null,
-          ageMinutes,
-          holderCount: null,
-          dexUrl: pair.url || null,
-          pairAddress: pair.pairAddress || "",
-          txns5m: {
-            buys: pair.txns?.m5?.buys || 0,
-            sells: pair.txns?.m5?.sells || 0,
-          },
-        };
-
-        tokens.push(token);
+      if (profilesRes.status === "fulfilled") {
+        const profiles: any[] = Array.isArray(profilesRes.value.data) ? profilesRes.value.data : [];
+        profiles
+          .filter((p) => p?.chainId === "base" && p?.tokenAddress)
+          .forEach((p) => allAddresses.add(p.tokenAddress));
       }
 
+      if (boostsRes.status === "fulfilled") {
+        const boosts: any[] = Array.isArray(boostsRes.value.data) ? boostsRes.value.data : [];
+        boosts
+          .filter((b) => b?.chainId === "base" && b?.tokenAddress)
+          .forEach((b) => allAddresses.add(b.tokenAddress));
+      }
+
+      if (allAddresses.size === 0) {
+        tokenCache.set(cacheKey, { data: [], timestamp: Date.now() });
+        return [];
+      }
+
+      const tokens = await this.fetchPairsForAddresses(Array.from(allAddresses));
       tokenCache.set(cacheKey, { data: tokens, timestamp: Date.now() });
       return tokens;
     } catch (err) {
-      logger.warn({ err }, "DexScreener API error");
+      logger.debug({ err }, "DexScreener profiles scan failed");
       return [];
     }
   }
 
-  private async scanGeckoTerminal(): Promise<TokenData[]> {
-    const cacheKey = "gecko_base_new";
+  /**
+   * Strategy 2: Rotate through search keywords to find trending pairs on Base.
+   * Uses a rotating index so each scan cycle covers different keywords.
+   */
+  private async scanDexScreenerSearch(): Promise<TokenData[]> {
+    const term = SEARCH_TERMS[searchTermIndex % SEARCH_TERMS.length];
+    searchTermIndex++;
+
+    const cacheKey = `dex_search_${term}`;
     const cached = tokenCache.get(cacheKey);
-    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
-      return cached.data;
-    }
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) return cached.data;
 
     try {
-      const response = await axios.get(
-        `${GECKO_URL}/networks/base/new_pools`,
-        {
-          params: { page: 1 },
-          timeout: 8000,
-          headers: { Accept: "application/json" },
-        }
-      );
+      const res = await axios.get(`${DEXSCREENER_URL}/latest/dex/search`, {
+        params: { q: term },
+        timeout: 7000,
+        headers: { Accept: "application/json" },
+      });
 
-      const pools = response.data?.data || [];
+      const pairs: any[] = res.data?.pairs || [];
+      const basePairs = pairs.filter((p: any) => p?.chainId === "base");
+
+      // Pick best pair per token address
+      const bestPairs = new Map<string, any>();
+      for (const pair of basePairs) {
+        const addr = pair?.baseToken?.address?.toLowerCase();
+        if (!addr) continue;
+        const liq = pair?.liquidity?.usd || 0;
+        const existing = bestPairs.get(addr);
+        if (!existing || liq > (existing?.liquidity?.usd || 0)) {
+          bestPairs.set(addr, pair);
+        }
+      }
+
       const tokens: TokenData[] = [];
-
-      for (const pool of pools) {
-        const attrs = pool.attributes;
-        if (!attrs) continue;
-
-        const baseToken = pool.relationships?.base_token?.data;
-        if (!baseToken) continue;
-
-        const ageMinutes = this.calcAgeFromStr(attrs.pool_created_at);
-
-        const token: TokenData = {
-          address: baseToken.id?.split("_")[1] || "",
-          symbol: attrs.name?.split(" / ")[0] || "UNKNOWN",
-          name: attrs.name?.split(" / ")[0] || "UNKNOWN",
-          priceUsd: parseFloat(attrs.base_token_price_usd) || 0,
-          priceChange5m: parseFloat(attrs.price_change_percentage?.m5) || 0,
-          priceChange1h: parseFloat(attrs.price_change_percentage?.h1) || 0,
-          priceChange24h: parseFloat(attrs.price_change_percentage?.h24) || 0,
-          volume5mUsd: parseFloat(attrs.volume_usd?.m5) || 0,
-          volume1hUsd: parseFloat(attrs.volume_usd?.h1) || 0,
-          liquidityUsd: parseFloat(attrs.reserve_in_usd) || 0,
-          marketCapUsd: null,
-          ageMinutes,
-          holderCount: null,
-          dexUrl: `https://www.geckoterminal.com/base/pools/${pool.id?.split("_")[1]}`,
-          pairAddress: pool.id?.split("_")[1] || "",
-          txns5m: {
-            buys: parseInt(attrs.transactions?.m5?.buys) || 0,
-            sells: parseInt(attrs.transactions?.m5?.sells) || 0,
-          },
-        };
-
-        if (token.address) {
-          tokens.push(token);
-        }
+      for (const pair of bestPairs.values()) {
+        const token = this.pairToTokenData(pair);
+        if (token) tokens.push(token);
       }
 
       tokenCache.set(cacheKey, { data: tokens, timestamp: Date.now() });
       return tokens;
     } catch (err) {
-      logger.warn({ err }, "GeckoTerminal API error");
+      logger.debug({ err, term }, "DexScreener search failed");
       return [];
     }
+  }
+
+  /**
+   * Strategy 3: Lookup pairs for known seed addresses to always have active tokens.
+   * Also discovers new tokens paired alongside known tokens.
+   */
+  private async scanSeedAddresses(): Promise<TokenData[]> {
+    const cacheKey = "dex_seeds";
+    const cached = tokenCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS * 3) return cached.data; // longer cache for seeds
+
+    const tokens = await this.fetchPairsForAddresses(BASE_SEED_ADDRESSES);
+    tokenCache.set(cacheKey, { data: tokens, timestamp: Date.now() });
+    return tokens;
+  }
+
+  /**
+   * Batch lookup pair market data for a list of token addresses.
+   * DexScreener allows up to 30 addresses per request.
+   */
+  private async fetchPairsForAddresses(addresses: string[]): Promise<TokenData[]> {
+    if (addresses.length === 0) return [];
+    const tokens: TokenData[] = [];
+
+    for (let i = 0; i < addresses.length; i += 30) {
+      const batch = addresses.slice(i, i + 30);
+      try {
+        const res = await axios.get(
+          `${DEXSCREENER_URL}/latest/dex/tokens/${batch.join(",")}`,
+          { timeout: 8000, headers: { Accept: "application/json" } }
+        );
+
+        const pairs: any[] = res.data?.pairs || [];
+        const basePairs = pairs.filter((p: any) => p?.chainId === "base");
+
+        // One best pair per token (highest liquidity)
+        const bestPairs = new Map<string, any>();
+        for (const pair of basePairs) {
+          const addr = pair?.baseToken?.address?.toLowerCase();
+          if (!addr) continue;
+          const liq = pair?.liquidity?.usd || 0;
+          const existing = bestPairs.get(addr);
+          if (!existing || liq > (existing?.liquidity?.usd || 0)) {
+            bestPairs.set(addr, pair);
+          }
+        }
+
+        for (const pair of bestPairs.values()) {
+          const token = this.pairToTokenData(pair);
+          if (token) tokens.push(token);
+        }
+      } catch (err) {
+        logger.debug({ err }, "Batch token pair fetch failed");
+      }
+    }
+
+    return tokens;
+  }
+
+  /**
+   * Convert a DexScreener pair object into TokenData.
+   */
+  private pairToTokenData(pair: any): TokenData | null {
+    const addr = pair?.baseToken?.address;
+    if (!addr) return null;
+
+    const priceUsd = parseFloat(pair.priceUsd) || 0;
+    if (priceUsd <= 0) return null;
+
+    const pairCreatedAt: number | null = pair.pairCreatedAt || null;
+    const ageMinutes = pairCreatedAt
+      ? (Date.now() - pairCreatedAt) / 60000
+      : 99999;
+
+    return {
+      address: addr,
+      symbol: pair.baseToken?.symbol || "UNKNOWN",
+      name: pair.baseToken?.name || pair.baseToken?.symbol || "UNKNOWN",
+      priceUsd,
+      priceChange5m: pair.priceChange?.m5 || 0,
+      priceChange1h: pair.priceChange?.h1 || 0,
+      priceChange24h: pair.priceChange?.h24 || 0,
+      volume5mUsd: pair.volume?.m5 || 0,
+      volume1hUsd: pair.volume?.h1 || 0,
+      liquidityUsd: pair.liquidity?.usd || 0,
+      marketCapUsd: pair.marketCap ? parseFloat(pair.marketCap) : null,
+      ageMinutes,
+      holderCount: null,
+      dexUrl: pair.url || null,
+      pairAddress: pair.pairAddress || "",
+      txns5m: {
+        buys: pair.txns?.m5?.buys || 0,
+        sells: pair.txns?.m5?.sells || 0,
+      },
+    };
   }
 
   filterTokens(tokens: TokenData[]): TokenData[] {
@@ -194,15 +297,5 @@ export class TokenScanner {
       if (token.priceUsd <= 0) return false;
       return true;
     });
-  }
-
-  private calcAgeMinutes(pairCreatedAt: number | null): number {
-    if (!pairCreatedAt) return 9999;
-    return (Date.now() - pairCreatedAt) / 60000;
-  }
-
-  private calcAgeFromStr(createdAt: string | null): number {
-    if (!createdAt) return 9999;
-    return (Date.now() - new Date(createdAt).getTime()) / 60000;
   }
 }
