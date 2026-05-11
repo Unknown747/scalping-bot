@@ -8,6 +8,7 @@ import walletRouter from "./wallet.js";
 import tokensRouter from "./tokens.js";
 import logsRouter from "./logs.js";
 import healthRouter from "./health.js";
+import secretsRouter from "./secrets.js";
 
 const router: IRouter = Router();
 
@@ -20,5 +21,6 @@ router.use(configRouter);
 router.use(walletRouter);
 router.use(tokensRouter);
 router.use(logsRouter);
+router.use(secretsRouter);
 
 export default router;

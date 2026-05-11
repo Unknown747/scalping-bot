@@ -24,6 +24,8 @@ tags:
     description: Wallet info
   - name: tokens
     description: Token scanner
+  - name: secrets
+    description: Secrets/environment status
 
 paths:
   /healthz:
@@ -255,6 +257,19 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/BotLog"
+
+  /secrets-status:
+    get:
+      operationId: getSecretsStatus
+      tags: [secrets]
+      summary: Get status of all required environment variables / secrets
+      responses:
+        "200":
+          description: Secrets status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecretsStatusResponse"
 
 components:
   schemas:
@@ -687,3 +702,53 @@ components:
           maximum: 100
       required:
         - percent
+
+    SecretStatus:
+      type: object
+      properties:
+        key:
+          type: string
+        label:
+          type: string
+        set:
+          type: boolean
+        required:
+          type: boolean
+        note:
+          type: string
+        maskedValue:
+          type: ["string", "null"]
+      required:
+        - key
+        - label
+        - set
+        - required
+
+    SecretsStatusResponse:
+      type: object
+      properties:
+        secrets:
+          type: array
+          items:
+            $ref: "#/components/schemas/SecretStatus"
+        summary:
+          type: object
+          properties:
+            total:
+              type: integer
+            set:
+              type: integer
+            missingRequired:
+              type: array
+              items:
+                type: string
+            readyForLive:
+              type: boolean
+          required:
+            - total
+            - set
+            - missingRequired
+            - readyForLive
+      required:
+        - secrets
+        - summary

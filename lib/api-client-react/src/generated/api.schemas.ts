@@ -280,6 +280,28 @@ export interface ClosePositionInput {
   percent: number;
 }
 
+export interface SecretStatus {
+  key: string;
+  label: string;
+  set: boolean;
+  required: boolean;
+  note?: string;
+  /** @nullable */
+  maskedValue?: string | null;
+}
+
+export type SecretsStatusResponseSummary = {
+  total: number;
+  set: number;
+  missingRequired: string[];
+  readyForLive: boolean;
+};
+
+export interface SecretsStatusResponse {
+  secrets: SecretStatus[];
+  summary: SecretsStatusResponseSummary;
+}
+
 export type GetTradesParams = {
   filter?: GetTradesFilter;
   limit?: number;

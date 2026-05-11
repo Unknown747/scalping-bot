@@ -347,3 +347,25 @@ export const GetLogsResponseItem = zod.object({
   timestamp: zod.string(),
 });
 export const GetLogsResponse = zod.array(GetLogsResponseItem);
+
+/**
+ * @summary Get status of all required environment variables / secrets
+ */
+export const GetSecretsStatusResponse = zod.object({
+  secrets: zod.array(
+    zod.object({
+      key: zod.string(),
+      label: zod.string(),
+      set: zod.boolean(),
+      required: zod.boolean(),
+      note: zod.string().optional(),
+      maskedValue: zod.string().nullish(),
+    }),
+  ),
+  summary: zod.object({
+    total: zod.number(),
+    set: zod.number(),
+    missingRequired: zod.array(zod.string()),
+    readyForLive: zod.boolean(),
+  }),
+});

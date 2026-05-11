@@ -28,6 +28,7 @@ import type {
   ScalpingConfig,
   ScalpingConfigUpdate,
   ScannedToken,
+  SecretsStatusResponse,
   Trade,
   TradingStats,
   WalletBalance,
@@ -1157,6 +1158,81 @@ export function useGetLogs<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetLogsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Get status of all required environment variables / secrets
+ */
+export const getGetSecretsStatusUrl = () => {
+  return `/api/secrets-status`;
+};
+
+export const getSecretsStatus = async (
+  options?: RequestInit,
+): Promise<SecretsStatusResponse> => {
+  return customFetch<SecretsStatusResponse>(getGetSecretsStatusUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetSecretsStatusQueryKey = () => {
+  return [`/api/secrets-status`] as const;
+};
+
+export const getGetSecretsStatusQueryOptions = <
+  TData = Awaited<ReturnType<typeof getSecretsStatus>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getSecretsStatus>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetSecretsStatusQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getSecretsStatus>>
+  > = ({ signal }) => getSecretsStatus({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getSecretsStatus>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetSecretsStatusQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getSecretsStatus>>
+>;
+export type GetSecretsStatusQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get status of all required environment variables / secrets
+ */
+
+export function useGetSecretsStatus<
+  TData = Awaited<ReturnType<typeof getSecretsStatus>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getSecretsStatus>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetSecretsStatusQueryOptions(options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

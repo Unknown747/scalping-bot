@@ -1,0 +1,33 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: artifacts/api-server/Dockerfile
+    restart: unless-stopped
+    env_file: artifacts/api-server/.env
+    ports:
+      - "8080:8080"
+    volumes:
+      - scalping_data:/data
+    environment:
+      - SQLITE_PATH=/data/scalping.db
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/api/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: artifacts/scalping-dashboard/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  scalping_data:

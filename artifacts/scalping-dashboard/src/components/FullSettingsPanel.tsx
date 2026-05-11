@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useQueryClient } from "@tanstack/react-query";
-import { useGetConfig, useUpdateConfig, getGetConfigQueryKey } from "@workspace/api-client-react";
+import { useGetConfig, useUpdateConfig, getGetConfigQueryKey, useGetSecretsStatus, getGetSecretsStatusQueryKey } from "@workspace/api-client-react";
 import { toast } from "sonner";
 
 function Toggle({ enabled, onToggle, disabled }: { enabled: boolean; onToggle: () => void; disabled?: boolean }) {
@@ -97,7 +97,7 @@ function TextInput({
   );
 }
 
-type Tab = "optimizations" | "trading" | "safety" | "ai" | "telegram" | "rpc";
+type Tab = "optimizations" | "trading" | "safety" | "ai" | "telegram" | "rpc" | "secrets";
 
 export function FullSettingsPanel() {
   const [open, setOpen] = useState(false);
@@ -134,6 +134,9 @@ export function FullSettingsPanel() {
 
   const isSaving = updateConfig.isPending;
 
+  const { data: secretsData } = useGetSecretsStatus({ query: { refetchInterval: 30000, queryKey: getGetSecretsStatusQueryKey() } });
+  const secretsMissingCount = secretsData?.summary?.missingRequired?.length ?? 0;
+
   const TABS: { id: Tab; label: string }[] = [
     { id: "optimizations", label: "Optim" },
     { id: "trading", label: "Trading" },
@@ -141,6 +144,7 @@ export function FullSettingsPanel() {
     { id: "ai", label: "🤖 AI" },
     { id: "telegram", label: "Telegram" },
     { id: "rpc", label: "RPC/Gas" },
+    { id: "secrets", label: secretsMissingCount > 0 ? `🔑 ${secretsMissingCount}⚠` : "🔑 Secrets" },
   ];
 
   if (!cfg) return null;
@@ -235,14 +239,43 @@ export function FullSettingsPanel() {
                 {/* ── TRADING ── */}
                 {tab === "trading" && (
                   <div className="space-y-4">
+                    <SectionHeader title="Mode" />
+                    <div className="grid grid-cols-2 gap-2">
+                      {(["live", "paper"] as const).map((m) => (
+                        <button
+                          key={m}
+                          onClick={() => save({ mode: m })}
+                          disabled={isSaving}
+                          className={`py-2.5 rounded-lg text-xs font-mono font-bold capitalize transition-colors border ${
+                            cfg.mode === m
+                              ? m === "live"
+                                ? "bg-loss/20 text-loss border-loss/50"
+                                : "bg-warn/20 text-warn border-warn/50"
+                              : "bg-muted/10 text-muted-foreground border-border hover:bg-muted/20"
+                          }`}
+                        >
+                          {m === "live" ? "⚡ LIVE (Mainnet)" : "📄 Paper (Simulasi)"}
+                        </button>
+                      ))}
+                    </div>
+                    {cfg.mode === "live" && (
+                      <div className="text-[9px] text-loss/80 font-mono bg-loss/5 border border-loss/20 rounded p-2">
+                        Mode LIVE aktif — dana nyata digunakan. Pastikan PRIVATE_KEY & WALLET_ADDRESS sudah diset di tab Secrets.
+                      </div>
+                    )}
+
                     <SectionHeader title="Capital" />
                     <div className="grid grid-cols-2 gap-3">
-                      <NumInput label="Total Capital" value={cfg.totalCapitalEth} unit="ETH"
+                      <NumInput label="Total Capital" value={pending.totalCapitalEth ?? cfg.totalCapitalEth} unit="ETH"
                         min={0.001} max={100} step={0.001}
                         onChange={(v) => setPending((p) => ({ ...p, totalCapitalEth: v }))} />
                       <NumInput label="Max Per Trade" value={pending.maxTradeAmountEth ?? cfg.maxTradeAmountEth} unit="ETH"
                         min={0.0001} max={10} step={0.0001}
+                        description="~$1 = 0.0003 ETH"
                         onChange={(v) => setPending((p) => ({ ...p, maxTradeAmountEth: v }))} />
+                      <NumInput label="Min Per Trade" value={pending.minPositionEth ?? cfg.minPositionEth} unit="ETH"
+                        min={0.00001} max={1} step={0.00001}
+                        onChange={(v) => setPending((p) => ({ ...p, minPositionEth: v }))} />
                       <NumInput label="Max Positions" value={pending.maxConcurrentPositions ?? cfg.maxConcurrentPositions}
                         min={1} max={10} step={1}
                         onChange={(v) => setPending((p) => ({ ...p, maxConcurrentPositions: Math.round(v) }))} />
@@ -306,12 +339,16 @@ export function FullSettingsPanel() {
                       />
                     </div>
 
-                    <SectionHeader title="Anti-FOMO" />
+                    <SectionHeader title="Anti-FOMO & Cooldown" />
                     <div className="grid grid-cols-2 gap-3">
                       <NumInput label="Post-Close Cooldown" value={pending.cooldownAfterCloseSeconds ?? cfg.cooldownAfterCloseSeconds} unit="sec" min={0} max={600} step={5}
+                        description="jeda setelah tiap close"
                         onChange={(v) => setPending((p) => ({ ...p, cooldownAfterCloseSeconds: Math.round(v) }))} />
                       <NumInput label="Max Buys / 5min" value={pending.maxBuysPerFiveMinutes ?? cfg.maxBuysPerFiveMinutes} min={1} max={20} step={1}
                         onChange={(v) => setPending((p) => ({ ...p, maxBuysPerFiveMinutes: Math.round(v) }))} />
+                      <NumInput label="Cooldown Setelah Stop-Loss" value={pending.cooldownMinutesAfterLoss ?? cfg.cooldownMinutesAfterLoss} unit="min" min={0} max={1440} step={5}
+                        description="jeda setelah stop-loss"
+                        onChange={(v) => setPending((p) => ({ ...p, cooldownMinutesAfterLoss: Math.round(v) }))} />
                     </div>
 
                     {Object.keys(pending).length > 0 && (
@@ -546,6 +583,95 @@ export function FullSettingsPanel() {
                         {isSaving ? "Menyimpan..." : `Simpan ${Object.keys(pending).length} perubahan`}
                       </motion.button>
                     )}
+                  </div>
+                )}
+
+                {/* ── SECRETS ── */}
+                {tab === "secrets" && (
+                  <div className="space-y-4">
+                    {/* Summary banner */}
+                    {secretsData && (
+                      <div className={`p-3 rounded-lg border ${
+                        secretsData.summary.readyForLive
+                          ? "border-primary/30 bg-primary/5"
+                          : "border-loss/30 bg-loss/5"
+                      }`}>
+                        <div className={`text-[10px] font-mono font-bold mb-1 ${secretsData.summary.readyForLive ? "text-primary" : "text-loss"}`}>
+                          {secretsData.summary.readyForLive
+                            ? "✅ Semua secret wajib sudah diset — siap VPS"
+                            : `⚠ ${secretsData.summary.missingRequired.length} secret wajib belum diset`}
+                        </div>
+                        <div className="text-[9px] text-muted-foreground font-mono">
+                          {secretsData.summary.set}/{secretsData.summary.total} environment variable aktif
+                        </div>
+                        {!secretsData.summary.readyForLive && (
+                          <div className="mt-1.5 text-[9px] text-loss/80 font-mono">
+                            Missing: {secretsData.summary.missingRequired.join(", ")}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Secret list */}
+                    <div className="space-y-2">
+                      {(secretsData?.secrets ?? []).map((s) => (
+                        <div
+                          key={s.key}
+                          className={`p-2.5 rounded-lg border ${
+                            s.set
+                              ? "bg-primary/5 border-primary/15"
+                              : s.required
+                              ? "bg-loss/5 border-loss/30"
+                              : "bg-muted/10 border-border"
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className={`text-[9px] font-mono ${s.set ? "text-primary" : s.required ? "text-loss" : "text-muted-foreground"}`}>
+                                  {s.set ? "✅" : s.required ? "❌" : "○"}
+                                </span>
+                                <span className={`text-[11px] font-mono font-bold ${s.set ? "text-foreground" : s.required ? "text-loss" : "text-muted-foreground"}`}>
+                                  {s.label}
+                                </span>
+                                {s.required && (
+                                  <span className="text-[8px] px-1 py-0.5 rounded bg-loss/10 text-loss border border-loss/20 font-mono">
+                                    wajib
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-[8px] font-mono text-muted-foreground/60 mt-0.5">{s.key}</div>
+                              {s.maskedValue && (
+                                <div className="text-[9px] font-mono text-muted-foreground/70 mt-0.5 truncate">{s.maskedValue}</div>
+                              )}
+                              {s.note && (
+                                <div className={`text-[9px] font-mono mt-0.5 leading-relaxed ${s.note.startsWith("⚠") ? "text-warn/80" : "text-muted-foreground/60"}`}>
+                                  {s.note}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* VPS setup instructions */}
+                    <div className="p-3 rounded-lg border border-border bg-muted/5 space-y-2">
+                      <div className="text-[10px] font-mono font-bold text-muted-foreground">CARA SET DI VPS</div>
+                      <div className="text-[9px] font-mono text-muted-foreground/70 leading-relaxed space-y-1">
+                        <div>1. Copy file <span className="text-primary">.env.example</span> → <span className="text-primary">.env</span></div>
+                        <div>2. Isi semua nilai di .env</div>
+                        <div>3. Jalankan: <span className="text-primary">docker compose up -d</span></div>
+                        <div>4. Dashboard tersedia di port <span className="text-primary">80</span>, API di port <span className="text-primary">8080</span></div>
+                      </div>
+                    </div>
+
+                    <div className="p-3 rounded-lg border border-border bg-muted/5 space-y-2">
+                      <div className="text-[10px] font-mono font-bold text-muted-foreground">DI REPLIT</div>
+                      <div className="text-[9px] font-mono text-muted-foreground/70 leading-relaxed">
+                        Set secret di <span className="text-primary">Tools → Secrets</span>. AI keys (Gemini, OpenRouter) sudah auto-set via Replit AI Integrations.
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
