@@ -1,0 +1,345 @@
+import Database from "better-sqlite3";
+import path from "path";
+import { fileURLToPath } from "url";
+import { logger } from "../lib/logger.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const DB_PATH = process.env["SQLITE_PATH"] || path.join(__dirname, "../../scalping.db");
+
+let _db: Database.Database | null = null;
+
+export function getDb(): Database.Database {
+  if (!_db) {
+    _db = new Database(DB_PATH);
+    _db.pragma("journal_mode = WAL");
+    _db.pragma("foreign_keys = ON");
+    initSchema(_db);
+    logger.info({ path: DB_PATH }, "SQLite database initialized");
+  }
+  return _db;
+}
+
+function initSchema(db: Database.Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS trades (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      token_address TEXT NOT NULL,
+      token_symbol TEXT NOT NULL,
+      token_name TEXT NOT NULL,
+      entry_price REAL NOT NULL,
+      exit_price REAL NOT NULL,
+      amount_eth REAL NOT NULL,
+      amount_tokens REAL NOT NULL DEFAULT 0,
+      profit_percent REAL NOT NULL,
+      profit_eth REAL NOT NULL,
+      entry_time TEXT NOT NULL,
+      exit_time TEXT NOT NULL,
+      hold_seconds INTEGER NOT NULL,
+      exit_reason TEXT NOT NULL,
+      tx_hash TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS positions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      token_address TEXT NOT NULL UNIQUE,
+      token_symbol TEXT NOT NULL,
+      token_name TEXT NOT NULL,
+      entry_price REAL NOT NULL,
+      current_price REAL NOT NULL,
+      amount_eth REAL NOT NULL,
+      amount_tokens REAL NOT NULL DEFAULT 0,
+      profit_percent REAL NOT NULL DEFAULT 0,
+      profit_eth REAL NOT NULL DEFAULT 0,
+      entry_time TEXT NOT NULL,
+      hold_seconds INTEGER NOT NULL DEFAULT 0,
+      tp1_hit INTEGER NOT NULL DEFAULT 0,
+      tp2_hit INTEGER NOT NULL DEFAULT 0,
+      trailing_stop_active INTEGER NOT NULL DEFAULT 0,
+      trailing_stop_price REAL,
+      safety_score INTEGER NOT NULL DEFAULT 0,
+      liquidity_usd REAL NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'open',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS scanned_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      address TEXT NOT NULL,
+      symbol TEXT NOT NULL,
+      name TEXT NOT NULL,
+      price_usd REAL NOT NULL,
+      price_change_5m REAL NOT NULL DEFAULT 0,
+      price_change_1h REAL NOT NULL DEFAULT 0,
+      volume_5m_usd REAL NOT NULL DEFAULT 0,
+      liquidity_usd REAL NOT NULL DEFAULT 0,
+      market_cap_usd REAL,
+      age_minutes REAL NOT NULL DEFAULT 0,
+      holder_count INTEGER,
+      safety_score INTEGER NOT NULL DEFAULT 0,
+      passed_filters INTEGER NOT NULL DEFAULT 0,
+      dex_url TEXT,
+      scanned_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS bot_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      level TEXT NOT NULL DEFAULT 'info',
+      message TEXT NOT NULL,
+      token_symbol TEXT,
+      data TEXT,
+      timestamp TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS bot_config (
+      id INTEGER PRIMARY KEY DEFAULT 1,
+      config_json TEXT NOT NULL,
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS daily_stats (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      date TEXT NOT NULL UNIQUE,
+      pnl_eth REAL NOT NULL DEFAULT 0,
+      total_trades INTEGER NOT NULL DEFAULT 0,
+      winning_trades INTEGER NOT NULL DEFAULT 0,
+      losing_trades INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_trades_exit_time ON trades(exit_time);
+    CREATE INDEX IF NOT EXISTS idx_scanned_tokens_scanned_at ON scanned_tokens(scanned_at);
+    CREATE INDEX IF NOT EXISTS idx_bot_logs_timestamp ON bot_logs(timestamp);
+  `);
+}
+
+// Trade operations
+export function insertTrade(trade: {
+  tokenAddress: string;
+  tokenSymbol: string;
+  tokenName: string;
+  entryPrice: number;
+  exitPrice: number;
+  amountEth: number;
+  amountTokens?: number;
+  profitPercent: number;
+  profitEth: number;
+  entryTime: string;
+  exitTime: string;
+  holdSeconds: number;
+  exitReason: string;
+  txHash?: string | null;
+}): number {
+  const db = getDb();
+  const stmt = db.prepare(`
+    INSERT INTO trades (token_address, token_symbol, token_name, entry_price, exit_price, amount_eth, amount_tokens, profit_percent, profit_eth, entry_time, exit_time, hold_seconds, exit_reason, tx_hash)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const result = stmt.run(
+    trade.tokenAddress, trade.tokenSymbol, trade.tokenName,
+    trade.entryPrice, trade.exitPrice, trade.amountEth,
+    trade.amountTokens || 0, trade.profitPercent, trade.profitEth,
+    trade.entryTime, trade.exitTime, trade.holdSeconds,
+    trade.exitReason, trade.txHash || null
+  );
+  return result.lastInsertRowid as number;
+}
+
+export function getTrades(filter: "today" | "week" | "all" = "today", limit = 100): any[] {
+  const db = getDb();
+  let whereClause = "";
+  if (filter === "today") {
+    whereClause = "WHERE date(exit_time) = date('now')";
+  } else if (filter === "week") {
+    whereClause = "WHERE exit_time >= datetime('now', '-7 days')";
+  }
+  return db.prepare(`
+    SELECT id, token_address as tokenAddress, token_symbol as tokenSymbol, token_name as tokenName,
+           entry_price as entryPrice, exit_price as exitPrice, amount_eth as amountEth,
+           profit_percent as profitPercent, profit_eth as profitEth,
+           entry_time as entryTime, exit_time as exitTime, hold_seconds as holdSeconds,
+           exit_reason as exitReason, tx_hash as txHash
+    FROM trades ${whereClause}
+    ORDER BY exit_time DESC LIMIT ?
+  `).all(limit) as any[];
+}
+
+// Position operations
+export function upsertPosition(pos: {
+  tokenAddress: string;
+  tokenSymbol: string;
+  tokenName: string;
+  entryPrice: number;
+  currentPrice: number;
+  amountEth: number;
+  amountTokens?: number;
+  profitPercent: number;
+  profitEth: number;
+  entryTime: string;
+  holdSeconds: number;
+  tp1Hit: boolean;
+  tp2Hit: boolean;
+  trailingStopActive: boolean;
+  trailingStopPrice?: number | null;
+  safetyScore: number;
+  liquidityUsd: number;
+  status: string;
+}): void {
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO positions (token_address, token_symbol, token_name, entry_price, current_price, amount_eth, amount_tokens, profit_percent, profit_eth, entry_time, hold_seconds, tp1_hit, tp2_hit, trailing_stop_active, trailing_stop_price, safety_score, liquidity_usd, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(token_address) DO UPDATE SET
+      current_price = excluded.current_price,
+      profit_percent = excluded.profit_percent,
+      profit_eth = excluded.profit_eth,
+      hold_seconds = excluded.hold_seconds,
+      tp1_hit = excluded.tp1_hit,
+      tp2_hit = excluded.tp2_hit,
+      trailing_stop_active = excluded.trailing_stop_active,
+      trailing_stop_price = excluded.trailing_stop_price,
+      status = excluded.status
+  `).run(
+    pos.tokenAddress, pos.tokenSymbol, pos.tokenName,
+    pos.entryPrice, pos.currentPrice, pos.amountEth,
+    pos.amountTokens || 0, pos.profitPercent, pos.profitEth,
+    pos.entryTime, pos.holdSeconds,
+    pos.tp1Hit ? 1 : 0, pos.tp2Hit ? 1 : 0,
+    pos.trailingStopActive ? 1 : 0, pos.trailingStopPrice || null,
+    pos.safetyScore, pos.liquidityUsd, pos.status
+  );
+}
+
+export function getPositions(): any[] {
+  const db = getDb();
+  return db.prepare(`
+    SELECT id, token_address as tokenAddress, token_symbol as tokenSymbol, token_name as tokenName,
+           entry_price as entryPrice, current_price as currentPrice, amount_eth as amountEth,
+           amount_tokens as amountTokens, profit_percent as profitPercent, profit_eth as profitEth,
+           entry_time as entryTime, hold_seconds as holdSeconds,
+           tp1_hit as tp1Hit, tp2_hit as tp2Hit,
+           trailing_stop_active as trailingStopActive, safety_score as safetyScore,
+           liquidity_usd as liquidityUsd, status
+    FROM positions WHERE status IN ('open', 'closing')
+    ORDER BY entry_time DESC
+  `).all() as any[];
+}
+
+export function deletePosition(tokenAddress: string): void {
+  const db = getDb();
+  db.prepare("DELETE FROM positions WHERE token_address = ?").run(tokenAddress);
+}
+
+// Scanned tokens
+export function insertScannedToken(token: {
+  address: string;
+  symbol: string;
+  name: string;
+  priceUsd: number;
+  priceChange5m: number;
+  priceChange1h: number;
+  volume5mUsd: number;
+  liquidityUsd: number;
+  marketCapUsd?: number | null;
+  ageMinutes: number;
+  holderCount?: number | null;
+  safetyScore: number;
+  passedFilters: boolean;
+  dexUrl?: string | null;
+}): void {
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO scanned_tokens (address, symbol, name, price_usd, price_change_5m, price_change_1h, volume_5m_usd, liquidity_usd, market_cap_usd, age_minutes, holder_count, safety_score, passed_filters, dex_url)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    token.address, token.symbol, token.name, token.priceUsd,
+    token.priceChange5m, token.priceChange1h, token.volume5mUsd,
+    token.liquidityUsd, token.marketCapUsd || null,
+    token.ageMinutes, token.holderCount || null,
+    token.safetyScore, token.passedFilters ? 1 : 0, token.dexUrl || null
+  );
+}
+
+export function getScannedTokens(limit = 20): any[] {
+  const db = getDb();
+  return db.prepare(`
+    SELECT id, address, symbol, name, price_usd as priceUsd,
+           price_change_5m as priceChangePercent5m, price_change_1h as priceChangePercent1h,
+           volume_5m_usd as volumeUsd5m, liquidity_usd as liquidityUsd,
+           market_cap_usd as marketCapUsd, age_minutes as ageMinutes,
+           holder_count as holderCount, safety_score as safetyScore,
+           passed_filters as passedFilters, dex_url as dexUrl,
+           scanned_at as scannedAt
+    FROM scanned_tokens
+    ORDER BY scanned_at DESC LIMIT ?
+  `).all(limit).map((r: any) => ({ ...r, passedFilters: r.passedFilters === 1 })) as any[];
+}
+
+// Bot logs
+export function insertLog(log: {
+  level: string;
+  message: string;
+  tokenSymbol?: string | null;
+  data?: string | null;
+}): void {
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO bot_logs (level, message, token_symbol, data)
+    VALUES (?, ?, ?, ?)
+  `).run(log.level, log.message, log.tokenSymbol || null, log.data || null);
+}
+
+export function getLogs(limit = 100): any[] {
+  const db = getDb();
+  return db.prepare(`
+    SELECT id, level, message, token_symbol as tokenSymbol, data, timestamp
+    FROM bot_logs ORDER BY timestamp DESC LIMIT ?
+  `).all(limit) as any[];
+}
+
+// Daily stats
+export function getTodayStats(): { pnlEth: number; totalTrades: number; winningTrades: number; losingTrades: number } {
+  const db = getDb();
+  const row = db.prepare(`
+    SELECT 
+      COALESCE(SUM(profit_eth), 0) as pnlEth,
+      COUNT(*) as totalTrades,
+      SUM(CASE WHEN profit_eth > 0 THEN 1 ELSE 0 END) as winningTrades,
+      SUM(CASE WHEN profit_eth <= 0 THEN 1 ELSE 0 END) as losingTrades
+    FROM trades WHERE date(exit_time) = date('now')
+  `).get() as any;
+  return {
+    pnlEth: row?.pnlEth || 0,
+    totalTrades: row?.totalTrades || 0,
+    winningTrades: row?.winningTrades || 0,
+    losingTrades: row?.losingTrades || 0,
+  };
+}
+
+export function getAllTimeStats(): { totalPnlEth: number; avgProfitPercent: number; avgHoldSeconds: number; largestWin: number; largestLoss: number } {
+  const db = getDb();
+  const row = db.prepare(`
+    SELECT 
+      COALESCE(SUM(profit_eth), 0) as totalPnlEth,
+      COALESCE(AVG(profit_percent), 0) as avgProfitPercent,
+      COALESCE(AVG(hold_seconds), 0) as avgHoldSeconds,
+      COALESCE(MAX(profit_percent), 0) as largestWin,
+      COALESCE(MIN(profit_percent), 0) as largestLoss
+    FROM trades
+  `).get() as any;
+  return {
+    totalPnlEth: row?.totalPnlEth || 0,
+    avgProfitPercent: row?.avgProfitPercent || 0,
+    avgHoldSeconds: row?.avgHoldSeconds || 0,
+    largestWin: row?.largestWin || 0,
+    largestLoss: row?.largestLoss || 0,
+  };
+}
+
+export function cleanOldLogs(keepDays = 7): void {
+  const db = getDb();
+  db.prepare("DELETE FROM bot_logs WHERE timestamp < datetime('now', ?)")
+    .run(`-${keepDays} days`);
+  db.prepare("DELETE FROM scanned_tokens WHERE scanned_at < datetime('now', ?)")
+    .run("-1 days");
+}

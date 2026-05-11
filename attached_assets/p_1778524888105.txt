@@ -1,0 +1,579 @@
+Buatkan aplikasi web FULL-STACK untuk SCALPING MEME COIN di BASE NETWORK dengan spesifikasi berikut:
+
+## 🎯 TARGET SPESIFIK
+- Modal: 200.000 Rupiah (~0.04 ETH)
+- Target profit per trade: 3-8% (realistis)
+- Hold time maksimal: 5-15 menit
+- Maksimal posisi bersamaan: 3-4 token
+- Minimal win rate untuk profit: 60% (dengan risk-reward 1:1)
+
+## 🛠️ TECH STACK
+- Backend: Node.js + Express + TypeScript
+- Frontend: React + Vite + TailwindCSS + Framer Motion
+- Blockchain: ethers.js v6
+- Database: SQLite (via better-sqlite3)
+- Real-time: WebSocket (Socket.io)
+
+## 📁 STRUKTUR PROJECT (Replit compatible)
+```
+/
+├── backend/
+│   ├── src/
+│   │   ├── index.ts
+│   │   ├── scalping-engine/
+│   │   │   ├── ScalpingBot.ts        # Main orchestrator
+│   │   │   ├── TokenScanner.ts       # Scan token baru
+│   │   │   ├── RiskManager.ts        # Position sizing + SL/TP
+│   │   │   ├── SwapExecutor.ts       # Uniswap V3 execution
+│   │   │   └── PriceMonitor.ts       # Real-time price tracking
+│   │   ├── strategies/
+│   │   │   └── ScalpingStrategy.ts   # Entry/exit logic
+│   │   ├── utils/
+│   │   │   ├── gasOptimizer.ts       # Base gas optimization
+│   │   │   ├── safetyChecker.ts      # Honeypot + rugpull detection
+│   │   │   └── logger.ts
+│   │   └── api/
+│   │       ├── routes.ts
+│   │       └── websocket.ts
+│   ├── package.json
+│   ├── tsconfig.json
+│   └── .env
+├── frontend/
+│   ├── src/
+│   │   ├── App.tsx
+│   │   ├── components/
+│   │   │   ├── Dashboard.tsx
+│   │   │   ├── ScalpingControl.tsx
+│   │   │   ├── ActivePositions.tsx
+│   │   │   ├── TradeHistory.tsx
+│   │   │   ├── LiveChart.tsx
+│   │   │   └── SettingsPanel.tsx
+│   │   ├── hooks/
+│   │   │   └── useWebSocket.ts
+│   │   └── index.css
+│   ├── package.json
+│   ├── vite.config.ts
+│   └── index.html
+├── replit.nix
+├── .replit
+└── start.sh
+```
+
+## 🔧 FITUR WAJIB (Scalping Focus)
+
+### Backend Features:
+1. **Token Scanner Cepat**
+   - Scan token baru setiap 8 detik
+   - Filter: umur < 30 menit, liquidity > $10k, volume 5m > $5k
+   - Sumber data: DexScreener API + GeckoTerminal
+
+2. **Scalping Entry Logic**
+   ```
+   IF momentum_5m > 15% 
+   AND volume_spike > 2x average
+   AND holders_growth > 20% in 5m
+   AND safety_score > 70
+   THEN BUY 0.002 ETH
+   ```
+
+3. **Exit Strategy (Kunci Scalping)**
+   - Take Profit 1: +3% → jual 50%
+   - Take Profit 2: +6% → jual 30%
+   - Take Profit 3: +10% → jual 20%
+   - Stop Loss: -5% → jual semua
+   - Trailing Stop: aktif setelah profit >4%, trail 2%
+
+4. **Risk Management untuk Modal 200rb**
+   - Per trade: 0.002 ETH (5% modal)
+   - Max concurrent: 3 positions
+   - Daily loss limit: 0.003 ETH (stop trading 2 jam jika kena)
+   - Max slippage: 5% (karena meme coin volatile)
+
+5. **Gas Optimization (Base Network)**
+   - Base gas normal: 0.01-0.05 GWEI
+   - Set priority fee: 0.002 GWEI
+   - Max fee per gas: 0.02 GWEI
+   - Biaya per swap: ~$0.002 (cocok untuk scalping kecil)
+
+6. **Safety Check (Wajib!)**
+   - Cek honeypot via GoPlus API
+   - Cek sell tax < 10%
+   - Cek deployer reputation (bukan serial rugger)
+   - Cek liquidity terkunci minimal 7 hari
+
+### Frontend Features:
+1. **Live Dashboard**
+   - Total modal (ETH & Rupiah)
+   - Realized PnL hari ini
+   - Win rate scalping
+   - Rata-rata hold time
+   - Running timer
+
+2. **Scalping Control Panel**
+   - Tombol START/STOP (warna gradient merah-hijau)
+   - Slider risk level (Conservative/Agressive)
+   - Toggle Auto Scalping
+   - Emergency Stop button
+
+3. **Active Positions Card**
+   - Token symbol + age
+   - Entry price vs current price
+   - Profit % dengan progress bar warna
+   - Timer sejak buy (countdown 15 menit)
+   - Tombol manual close
+
+4. **Real-time Chart**
+   - Lightweight-charts untuk price action
+   - Entry/exit markers
+   - Order book depth (sederhana)
+
+5. **Trade History Table**
+   - Kolom: Time | Token | Entry | Exit | Profit % | Hold Time | Status
+   - Filter: Today/This Week/All
+   - Export CSV
+
+6. **Log Console**
+   - Warna-warni: 🟢 BUY | 🟡 SELL | 🔴 STOP LOSS | ⚪ INFO
+   - Scrollable dengan auto-scroll
+
+## 📝 KONFIGURASI DEFAULT (Modal 200rb)
+
+```typescript
+// backend/src/config/scalping.config.ts
+export const SCALPING_CONFIG = {
+  // Trading parameters
+  TOTAL_CAPITAL_ETH: 0.04,
+  MAX_TRADE_AMOUNT_ETH: 0.002,
+  MAX_CONCURRENT_POSITIONS: 3,
+  MIN_POSITION_ETH: 0.001,
+  
+  // Entry filters
+  MIN_5M_VOLUME_USD: 5000,
+  MIN_LIQUIDITY_USD: 10000,
+  MAX_TOKEN_AGE_MINUTES: 30,
+  MIN_MOMENTUM_PERCENT: 15,
+  
+  // Exit strategy
+  TP1_PERCENT: 3,
+  TP1_SELL_PERCENT: 50,
+  TP2_PERCENT: 6,
+  TP2_SELL_PERCENT: 30,
+  TP3_PERCENT: 10,
+  TP3_SELL_PERCENT: 20,
+  STOP_LOSS_PERCENT: 5,
+  TRAILING_STOP_ACTIVATE_PERCENT: 4,
+  TRAILING_STOP_DISTANCE_PERCENT: 2,
+  MAX_HOLD_MINUTES: 15,
+  
+  // Risk management
+  MAX_DAILY_LOSS_ETH: 0.003,
+  COOLDOWN_MINUTES_AFTER_LOSS: 120,
+  MAX_SLIPPAGE_PERCENT: 5,
+  
+  // Gas (Base network - cheap!)
+  MAX_PRIORITY_FEE_GWEI: 0.002,
+  MAX_FEE_PER_GAS_GWEI: 0.02,
+  
+  // Safety
+  MIN_SAFETY_SCORE: 70,
+  MAX_SELL_TAX_PERCENT: 10,
+  
+  // Scanning
+  SCAN_INTERVAL_SECONDS: 8,
+  PRICE_CHECK_INTERVAL_SECONDS: 2
+};
+```
+
+## 🔑 ENVIRONMENT VARIABLES (.env)
+
+```env
+# Required
+PRIVATE_KEY=your_private_key_without_0x
+WALLET_ADDRESS=0x...
+
+# Base Network
+BASE_RPC_URL=https://mainnet.base.org
+BASE_WSS_URL=wss://base.drpc.org
+
+# DEX Router (Uniswap V3 on Base)
+UNISWAP_ROUTER=0x2626664c2603336E57B271c5C0b26F421741e481
+UNISWAP_FACTORY=0x33128a8fC17869897dcE68Ed026d694621f6FDfD
+WETH_ADDRESS=0x4200000000000000000000000000000000000006
+
+# APIs
+DEXSCREENER_API=https://api.dexscreener.com/latest/dex
+GECKO_API=https://api.geckoterminal.com/api/v2
+GOPLUS_API=https://api.gopluslabs.io/api/v1
+
+# Optional
+TELEGRAM_BOT_TOKEN= (for alerts)
+TELEGRAM_CHAT_ID= (for alerts)
+```
+
+## 🎯 REALTIME WEBSOCKET EVENTS
+
+```typescript
+// Server → Client
+socket.emit('new-token', tokenData)
+socket.emit('position-update', position)
+socket.emit('trade-executed', trade)
+socket.emit('scalp-alert', { type: 'buy/sell', message })
+socket.emit('daily-summary', summary)
+
+// Client → Server
+socket.emit('start-scaling')
+socket.emit('stop-scaling')
+socket.emit('manual-sell', { tokenAddress, percent })
+```
+
+## 📊 REQIUREMENTS (Replit compatible)
+
+```json
+// backend/package.json
+{
+  "name": "base-scalping-bot",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2",
+    "ethers": "^6.8.0",
+    "better-sqlite3": "^9.0.0",
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.1",
+    "cors": "^2.8.5",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.8.0",
+    "@types/express": "^4.17.20",
+    "@types/cors": "^2.8.15",
+    "tsx": "^4.0.0",
+    "typescript": "^5.2.2"
+  }
+}
+```
+
+```json
+// frontend/package.json
+{
+  "name": "scalping-dashboard",
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "socket.io-client": "^4.7.2",
+    "axios": "^1.6.0",
+    "react-router-dom": "^6.18.0",
+    "lightweight-charts": "^4.1.0",
+    "framer-motion": "^10.16.4",
+    "react-hot-toast": "^2.4.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.28",
+    "@types/react-dom": "^18.2.13",
+    "@vitejs/plugin-react": "^4.0.4",
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.31",
+    "tailwindcss": "^3.3.5",
+    "vite": "^4.5.0"
+  }
+}
+```
+
+## 🚀 REPlIT CONFIGURATION FILES
+
+```toml
+# .replit
+language = "nodejs"
+run = "bash start.sh"
+
+[nix]
+channel = "stable-23_11"
+
+[env]
+# Set di Secrets Replit, jangan hardcode
+```
+
+```nix
+# replit.nix
+{ pkgs }: {
+  deps = [
+    pkgs.nodejs_20
+    pkgs.nodePackages.pm2
+    pkgs.sqlite
+  ];
+}
+```
+
+```bash
+# start.sh
+#!/bin/bash
+
+# Install dependencies
+cd backend && npm install
+cd ../frontend && npm install
+
+# Build frontend
+npm run build
+
+# Start backend with PM2
+cd ../backend
+npm run build
+pm2 start dist/index.js --name scalping-bot
+pm2 logs scalping-bot
+```
+
+## ⚡ PERFORMANCE OPTIMIZATION (khusus modal kecil)
+
+1. **Caching**: Cache token data 5 detik (avoid rate limit)
+2. **Batch processing**: Process multiple tokens in parallel
+3. **Lazy loading**: Frontend hanya render komponen aktif
+4. **Memoization**: Prevent re-render yang tidak perlu
+5. **Debouncing**: Untuk API calls yang tidak urgent
+
+## 📈 MONITORING & ALERTS
+
+```typescript
+// Kirim notifikasi jika:
+- Profit hari ini > 10% → 📈 "Good day!"
+- Loss berturut-turut > 3x → ⚠️ "Cooldown mode"
+- Ada token dengan volume spike > 500% → 🔥 "Momentum detected"
+- Bot buy/sell otomatis → 💹 update dashboard
+```
+
+## ✅ TESTING CHECKLIST
+
+- [ ] Paper trading mode (test dengan wallet kosong)
+- [ ] Gas fee simulation (hitung profit real setelah fee)
+- [ ] Stress test 100 token per menit
+- [ ] Slippage simulation (worst case 10%)
+- [ ] Auto restart on crash (PM2 sudah handle)
+
+## 🎨 UI/UX REQUIREMENTS
+
+- Dark theme (#0D0F1C background)
+- Glowing accents (#00FF88 untuk profit, #FF4444 untuk loss)
+- Animated counters untuk PnL
+- Hover effects di semua button
+- Mobile responsive (grid layout)
+
+---
+HAN PREMIUM
+
+### 1. **MEV Protection (WAJIB untuk Scalping)**
+**Kenapa penting:** Mencegah bot Anda jadi korban front-running dan sandwich attack yang bisa makan profit kecil Anda.
+
+**Implementasi:** 
+Kirim transaksi melalui private relay (QuickNode atau Tatum), bukan public mempool 
+```typescript
+// Contoh integrasi MEV Protection
+const MEV_PROTECTION_RPC = "https://base.mev-protect.tatum.io"
+// Transaction otomatis terproteksi, zero config!
+```
+
+**Benefit:**
+- 400-1000ms lebih cepat block inclusion
+- Slippage lebih rendah
+- Gas refund jika transaksi gagal 
+
+---
+
+### 2. **TWAP & DCA Order Execution**
+**Kenapa penting:** Untuk modal 200rb, membeli sekaligus dalam satu transaksi bisa kena slippage besar. TWAP memecah order menjadi beberapa bagian kecil.
+
+**Fitur:**
+- **TWAP (Time-Weighted Average Price)**: Beli 0.002 ETH dipecah jadi 4 transaksi 0.0005 ETH 
+- **DCA Auto**: Otomatis beli di harga lebih rendah jika token turun 
+
+```typescript
+interface TWAPConfig {
+  totalAmount: 0.002,      // Total ETH
+  slices: 4,               // Dipecah jadi 4 tx
+  intervalSeconds: 30,     // Setiap 30 detik
+  maxSlippagePerSlice: 2   // 2% per slice
+}
+```
+
+---
+
+### 3. **Multi-DEX Aggregator (OpenOcean/Swap aggregator)**
+**Kenapa penting:** Harga token bisa beda di Uniswap vs Aerodrome vs BaseSwap. Aggregator cari harga terbaik otomatis.
+
+**Integrasi dengan:** 
+- OpenOcean API (agregasi Uniswap, SushiSwap, Aerodrome) 
+- Atau custom dengan multi-router fallback 
+
+**Hasil:** Bisa hemat 1-2% slippage per trade!
+
+---
+
+### 4. **Whale Copy Trading dengan AI Filter**
+**Kenapa penting:** Daripada nebak token mana yang naik, lebih aman ikut whale yang sudah terbukti profit.
+
+**Cara kerja:** 
+1. Auto-discover whale wallets baru (levonchain data)
+2. Filter: win rate >60%, hold time 5-30 menit, profit > $1k
+3. AI analyze trade sebelum copy: cek market cap, liquidity, sentiment
+4. Execute dengan position sizing lebih kecil dari whale (misal 20% dari whale amount)
+
+**Implementasi di bot Anda:**
+```typescript
+const WHALE_CONFIG = {
+  autoDiscover: true,
+  minWhaleWinRate: 60,        // Minimal 60% win rate
+  copySizePercent: 20,         // 20% dari size whale
+  maxCopyPerDay: 5,
+  aiGateEnabled: true          // AI filter sebelum copy
+}
+```
+
+---
+
+### 5. **Turbo Mode (Scalping Cepat)**
+**Kenapa penting:** Scalping butuh eksekusi super cepat. Turbo mode optimasi semua parameter untuk kecepatan maksimal .
+
+**Parameter Turbo Mode:**
+| Parameter | Normal | Turbo |
+|-----------|--------|-------|
+| Monitor interval | 200ms | 50ms |
+| Max positions | 2 | 4 |
+| Target profit | 30% | 15-20% (lebih cepat) |
+| Hold time max | 30 menit | 10 menit |
+| Trade size | 40% modal | 60% modal |
+
+**Toggle button di dashboard:** satu klik, semua setting berubah.
+
+---
+
+### 6. **Real-time Gas Optimizer**
+**Kenapa penting:** Base fee memang murah, tapi tetap fluktuasi. Optimizer bikin Anda bayar fee minimal tanpa ketinggalan block.
+
+**Fitur:**
+- Prediksi gas price berdasarkan mempool congestion (pakai Sentio API) 
+- 3 mode: Low/Medium/High (user bisa pilih)
+- Auto retry dengan gas lebih tinggi jika transaksi pending
+
+```typescript
+// Gas recommendation dari mempool real-time
+const gasEstimates = await sentio_gasPrice()
+// Returns: { low: 0.002, medium: 0.005, high: 0.01 } GWEI
+```
+
+---
+
+### 7. **Honeypot & Rugpull Auto-Detection (Lapisan Ganda)**
+**Kenapa penting:** Meme coin banyak scam. Jangan sampai bot Anda beli token yang gak bisa dijual.
+
+**API yang bisa dipakai:**
+- **GoPlus Security API** (cek honeypot, tax, ownership) 
+- **Honeypot.is** (fallback)
+- **Deployer reputation check** (apakah si deployer pernah rug sebelumnya) 
+
+**Checklist safety:**
+```
+✅ Bukan honeypot
+✅ Sell tax < 15%
+✅ Liquidity terkunci minimal 7 hari
+✅ Deployer reputation score > 40
+✅ Holders distribution tidak terpusat (>10% holder)
+```
+
+---
+
+### 8. **Kill Switch & Emergency Stop**
+**Kenapa penting:** Proteksi saat pasar crash atau bot error.
+
+**Fitur:**
+- **Emergency Stop Button** (jual semua posisi, stop semua aktivitas) 
+- **Daily Loss Limit** (auto-stop jika loss hari ini > 10% modal)
+- **Consecutive Loss Cooldown** (jika 3x rugi beruntun, pause 30 menit)
+- **Telegram Kill Switch** (stop dari Telegram)
+
+---
+
+### 9. **Limit Order untuk Meme Coin**
+**Kenapa penting:** Scalping butuh entry di harga tertentu, bukan market order terus.
+
+Implementasi dengan memantau harga dan eksekusi saat harga mencapai level yang diinginkan.
+
+---
+
+### 10. **AI Token Analysis (Multi-Provider)**
+**Kenapa penting:** Filter tambahan sebelum beli, biar bot tidak asal beli token sampah.
+
+**Arsitektur:** 
+```
+Groq (Llama 3) → Gemini → HuggingFace (fallback chain)
+```
+**Yang dianalisa AI:**
+- Social sentiment (Twitter mentions, volume)
+- Contract safety (readable code? proxy pattern?)
+- Unusual wallet activity (insider dumping?)
+
+---
+
+## 📋 PRIORITAS IMPLEMENTASI (Modal 200rb)
+
+| Prioritas | Fitur | Biaya Implementasi | Dampak ke Profit |
+|-----------|-------|---------------------|------------------|
+| 🥇 **WAJIB** | MEV Protection | Gratis (QuickNode/Tatum) | +20% profit (save dari sandwich) |
+| 🥇 **WAJIB** | Honeypot Detection | Gratis (GoPlus API) | -90% risk rugpull |
+| 🥈 **PENTING** | Multi-DEX Aggregator | Gratis (OpenOcean) | -2% slippage |
+| 🥈 **PENTING** | Gas Optimizer | Gratis (Sentio) | -30% gas fee |
+| 🥉 **NICE** | Whale Copy Trading | Gratis (onchain data) | +potensi alpha |
+| 🥉 **NICE** | Turbo Mode | Koding saja | +kecepatan eksekusi |
+| ⚪ **BONUS** | AI Analysis | API key gratis | +filter quality |
+
+---
+
+## 🔧 CARA MENGGABUNGKAN KE SCRIPT ANDA
+
+**Step 1:** Tambahkan dependensi baru di `package.json`
+```json
+{
+  "dependencies": {
+    "@openzeppelin/merkle-tree": "latest",
+    "axios": "^1.6.0",
+    "node-cache": "^5.1.2"
+  }
+}
+```
+
+**Step 2:** Buat file `src/services/MEVProtection.ts`
+**Step 3:** Buat file `src/services/AggregatorService.ts`
+**Step 4:** Modifikasi `ScalpingBot.ts` untuk integrasi fitur-fitur di atas
+
+---
+
+Butuh saya bantu **coding spesifik untuk salah satu fitur** di atas? Langsung kasih tahu nomor fiturnya (1-10), nanti saya generate kode lengkapnya! 🚀
+
+
+## 📦 FINAL INSTRUCTION
+
+"Generate kode LENGKAP untuk semua file yang disebutkan di atas. 
+Prioritaskan:
+
+1. **error handling** yang robust (jangan sampai bot mati karena satu token error)
+2. **Logging detail** untuk debugging (warna-warni di console)
+3. **Auto-reconnect** untuk WebSocket dan RPC
+4. **Simplicity** kode mudah dimodifikasi
+5. **Comment** dalam Bahasa Inggris untuk setiap function penting
+
+Hasilkan kode yang bisa langsung di-copy ke Replit dan jalan dengan 'bash start.sh' tanpa error.
+
+Modal awal 200rb, target profit realistis 20-50rb per hari dengan scalping konservatif.
+
+Sertakan juga contoh .env.example dan README.md untuk dokumentasi."
+```
+
+---

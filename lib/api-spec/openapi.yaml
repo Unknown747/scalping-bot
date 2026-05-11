@@ -3,20 +3,34 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Meme Coin Scalping Bot API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: bot
+    description: Bot control
+  - name: positions
+    description: Active positions
+  - name: trades
+    description: Trade history
+  - name: stats
+    description: Statistics
+  - name: config
+    description: Configuration
+  - name: wallet
+    description: Wallet info
+  - name: tokens
+    description: Token scanner
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +38,224 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /bot/status:
+    get:
+      operationId: getBotStatus
+      tags: [bot]
+      summary: Get bot status
+      responses:
+        "200":
+          description: Bot status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotStatus"
+
+  /bot/start:
+    post:
+      operationId: startBot
+      tags: [bot]
+      summary: Start the scalping bot
+      responses:
+        "200":
+          description: Bot started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotStatus"
+
+  /bot/stop:
+    post:
+      operationId: stopBot
+      tags: [bot]
+      summary: Stop the scalping bot
+      responses:
+        "200":
+          description: Bot stopped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotStatus"
+
+  /bot/emergency-stop:
+    post:
+      operationId: emergencyStop
+      tags: [bot]
+      summary: Emergency stop - close all positions immediately
+      responses:
+        "200":
+          description: Emergency stop executed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotStatus"
+
+  /positions:
+    get:
+      operationId: getPositions
+      tags: [positions]
+      summary: Get all active positions
+      responses:
+        "200":
+          description: Active positions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Position"
+
+  /positions/{address}/close:
+    post:
+      operationId: closePosition
+      tags: [positions]
+      summary: Manually close a position
+      parameters:
+        - name: address
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClosePositionInput"
+      responses:
+        "200":
+          description: Position closed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Trade"
+
+  /trades:
+    get:
+      operationId: getTrades
+      tags: [trades]
+      summary: Get trade history
+      parameters:
+        - name: filter
+          in: query
+          schema:
+            type: string
+            enum: [today, week, all]
+            default: today
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        "200":
+          description: Trade history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Trade"
+
+  /stats:
+    get:
+      operationId: getStats
+      tags: [stats]
+      summary: Get trading statistics
+      responses:
+        "200":
+          description: Trading stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TradingStats"
+
+  /config:
+    get:
+      operationId: getConfig
+      tags: [config]
+      summary: Get scalping configuration
+      responses:
+        "200":
+          description: Configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScalpingConfig"
+    put:
+      operationId: updateConfig
+      tags: [config]
+      summary: Update scalping configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScalpingConfigUpdate"
+      responses:
+        "200":
+          description: Updated configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScalpingConfig"
+
+  /wallet/balance:
+    get:
+      operationId: getWalletBalance
+      tags: [wallet]
+      summary: Get wallet balance
+      responses:
+        "200":
+          description: Wallet balance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WalletBalance"
+
+  /tokens/scanned:
+    get:
+      operationId: getScannedTokens
+      tags: [tokens]
+      summary: Get recently scanned tokens
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Scanned tokens
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ScannedToken"
+
+  /logs:
+    get:
+      operationId: getLogs
+      tags: [bot]
+      summary: Get recent bot logs
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        "200":
+          description: Bot logs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BotLog"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +266,402 @@ components:
       required:
         - status
 
+    BotStatus:
+      type: object
+      properties:
+        running:
+          type: boolean
+        mode:
+          type: string
+          enum: [live, paper]
+        startedAt:
+          type: ["string", "null"]
+        dailyLossHit:
+          type: boolean
+        cooldownUntil:
+          type: ["string", "null"]
+        activePositions:
+          type: integer
+        totalTradesDay:
+          type: integer
+        winRateDay:
+          type: number
+        walletAddress:
+          type: ["string", "null"]
+      required:
+        - running
+        - mode
+        - dailyLossHit
+        - activePositions
+        - totalTradesDay
+        - winRateDay
+
+    Position:
+      type: object
+      properties:
+        id:
+          type: integer
+        tokenAddress:
+          type: string
+        tokenSymbol:
+          type: string
+        tokenName:
+          type: string
+        entryPrice:
+          type: number
+        currentPrice:
+          type: number
+        amountEth:
+          type: number
+        amountTokens:
+          type: number
+        profitPercent:
+          type: number
+        profitEth:
+          type: number
+        entryTime:
+          type: string
+        holdSeconds:
+          type: integer
+        tp1Hit:
+          type: boolean
+        tp2Hit:
+          type: boolean
+        trailingStopActive:
+          type: boolean
+        safetyScore:
+          type: integer
+        liquidityUsd:
+          type: number
+        status:
+          type: string
+          enum: [open, closing]
+      required:
+        - id
+        - tokenAddress
+        - tokenSymbol
+        - tokenName
+        - entryPrice
+        - currentPrice
+        - amountEth
+        - amountTokens
+        - profitPercent
+        - profitEth
+        - entryTime
+        - holdSeconds
+        - tp1Hit
+        - tp2Hit
+        - trailingStopActive
+        - safetyScore
+        - liquidityUsd
+        - status
+
+    Trade:
+      type: object
+      properties:
+        id:
+          type: integer
+        tokenAddress:
+          type: string
+        tokenSymbol:
+          type: string
+        tokenName:
+          type: string
+        entryPrice:
+          type: number
+        exitPrice:
+          type: number
+        amountEth:
+          type: number
+        profitPercent:
+          type: number
+        profitEth:
+          type: number
+        entryTime:
+          type: string
+        exitTime:
+          type: string
+        holdSeconds:
+          type: integer
+        exitReason:
+          type: string
+          enum: [tp1, tp2, tp3, stop_loss, trailing_stop, max_hold, manual, emergency]
+        txHash:
+          type: ["string", "null"]
+      required:
+        - id
+        - tokenAddress
+        - tokenSymbol
+        - tokenName
+        - entryPrice
+        - exitPrice
+        - amountEth
+        - profitPercent
+        - profitEth
+        - entryTime
+        - exitTime
+        - holdSeconds
+        - exitReason
+
+    TradingStats:
+      type: object
+      properties:
+        todayPnlEth:
+          type: number
+        todayPnlIdr:
+          type: number
+        totalTradesDay:
+          type: integer
+        winningTradesDay:
+          type: integer
+        losingTradesDay:
+          type: integer
+        winRateDay:
+          type: number
+        avgHoldSeconds:
+          type: number
+        avgProfitPercent:
+          type: number
+        largestWin:
+          type: number
+        largestLoss:
+          type: number
+        totalPnlAllTime:
+          type: number
+        ethPriceUsd:
+          type: number
+        capitalEth:
+          type: number
+        capitalIdr:
+          type: number
+      required:
+        - todayPnlEth
+        - todayPnlIdr
+        - totalTradesDay
+        - winningTradesDay
+        - losingTradesDay
+        - winRateDay
+        - avgHoldSeconds
+        - avgProfitPercent
+        - largestWin
+        - largestLoss
+        - totalPnlAllTime
+        - ethPriceUsd
+        - capitalEth
+        - capitalIdr
+
+    ScalpingConfig:
+      type: object
+      properties:
+        totalCapitalEth:
+          type: number
+        maxTradeAmountEth:
+          type: number
+        maxConcurrentPositions:
+          type: integer
+        min5mVolumeUsd:
+          type: number
+        minLiquidityUsd:
+          type: number
+        maxTokenAgeMinutes:
+          type: integer
+        minMomentumPercent:
+          type: number
+        tp1Percent:
+          type: number
+        tp2Percent:
+          type: number
+        tp3Percent:
+          type: number
+        stopLossPercent:
+          type: number
+        trailingStopActivatePercent:
+          type: number
+        trailingStopDistancePercent:
+          type: number
+        maxHoldMinutes:
+          type: integer
+        maxDailyLossEth:
+          type: number
+        maxSlippagePercent:
+          type: number
+        minSafetyScore:
+          type: integer
+        scanIntervalSeconds:
+          type: integer
+        riskLevel:
+          type: string
+          enum: [conservative, moderate, aggressive]
+        mode:
+          type: string
+          enum: [live, paper]
+      required:
+        - totalCapitalEth
+        - maxTradeAmountEth
+        - maxConcurrentPositions
+        - min5mVolumeUsd
+        - minLiquidityUsd
+        - maxTokenAgeMinutes
+        - minMomentumPercent
+        - tp1Percent
+        - tp2Percent
+        - tp3Percent
+        - stopLossPercent
+        - trailingStopActivatePercent
+        - trailingStopDistancePercent
+        - maxHoldMinutes
+        - maxDailyLossEth
+        - maxSlippagePercent
+        - minSafetyScore
+        - scanIntervalSeconds
+        - riskLevel
+        - mode
+
+    ScalpingConfigUpdate:
+      type: object
+      properties:
+        totalCapitalEth:
+          type: number
+        maxTradeAmountEth:
+          type: number
+        maxConcurrentPositions:
+          type: integer
+        min5mVolumeUsd:
+          type: number
+        minLiquidityUsd:
+          type: number
+        maxTokenAgeMinutes:
+          type: integer
+        minMomentumPercent:
+          type: number
+        tp1Percent:
+          type: number
+        tp2Percent:
+          type: number
+        tp3Percent:
+          type: number
+        stopLossPercent:
+          type: number
+        trailingStopActivatePercent:
+          type: number
+        trailingStopDistancePercent:
+          type: number
+        maxHoldMinutes:
+          type: integer
+        maxDailyLossEth:
+          type: number
+        maxSlippagePercent:
+          type: number
+        minSafetyScore:
+          type: integer
+        scanIntervalSeconds:
+          type: integer
+        riskLevel:
+          type: string
+          enum: [conservative, moderate, aggressive]
+        mode:
+          type: string
+          enum: [live, paper]
+
+    WalletBalance:
+      type: object
+      properties:
+        address:
+          type: ["string", "null"]
+        ethBalance:
+          type: number
+        ethBalanceIdr:
+          type: number
+        ethPriceUsd:
+          type: number
+        usdToIdr:
+          type: number
+        network:
+          type: string
+        blockNumber:
+          type: ["integer", "null"]
+      required:
+        - ethBalance
+        - ethBalanceIdr
+        - ethPriceUsd
+        - usdToIdr
+        - network
+
+    ScannedToken:
+      type: object
+      properties:
+        address:
+          type: string
+        symbol:
+          type: string
+        name:
+          type: string
+        priceUsd:
+          type: number
+        priceChangePercent5m:
+          type: number
+        priceChangePercent1h:
+          type: number
+        volumeUsd5m:
+          type: number
+        liquidityUsd:
+          type: number
+        marketCapUsd:
+          type: ["number", "null"]
+        ageMinutes:
+          type: number
+        holderCount:
+          type: ["integer", "null"]
+        safetyScore:
+          type: integer
+        passedFilters:
+          type: boolean
+        scannedAt:
+          type: string
+        dexUrl:
+          type: ["string", "null"]
+      required:
+        - address
+        - symbol
+        - name
+        - priceUsd
+        - priceChangePercent5m
+        - priceChangePercent1h
+        - volumeUsd5m
+        - liquidityUsd
+        - ageMinutes
+        - safetyScore
+        - passedFilters
+        - scannedAt
+
+    BotLog:
+      type: object
+      properties:
+        id:
+          type: integer
+        level:
+          type: string
+          enum: [info, buy, sell, stop_loss, warn, error]
+        message:
+          type: string
+        tokenSymbol:
+          type: ["string", "null"]
+        data:
+          type: ["string", "null"]
+        timestamp:
+          type: string
+      required:
+        - id
+        - level
+        - message
+        - timestamp
+
+    ClosePositionInput:
+      type: object
+      properties:
+        percent:
+          type: number
+          minimum: 1
+          maximum: 100
+      required:
+        - percent
