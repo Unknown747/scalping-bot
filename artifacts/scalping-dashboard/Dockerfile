@@ -11,6 +11,10 @@ RUN pnpm install --frozen-lockfile --filter @workspace/scalping-dashboard...
 COPY artifacts/scalping-dashboard/ ./artifacts/scalping-dashboard/
 
 WORKDIR /app/artifacts/scalping-dashboard
+
+# PORT and BASE_PATH are required by vite.config.ts — set safe build-time defaults
+ENV PORT=80
+ENV BASE_PATH=/
 RUN pnpm run build
 
 FROM nginx:alpine AS runtime

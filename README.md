@@ -1,40 +1,83 @@
 # BASE Scalper
 
-Bot scalping meme coin otomatis untuk Base Network. Dilengkapi AI filter (Gemini / Groq / HuggingFace), trailing stop canggih, multi-DEX router, dan dashboard real-time berbasis web.
+Bot scalping meme coin otomatis untuk **Base Network**. Dilengkapi AI filter (Gemini / OpenRouter), MEV protection via dRPC, security audit system, trailing stop canggih, multi-DEX router, dan dashboard real-time berbasis web.
 
 ---
 
 ## Daftar Isi
 
 1. [Fitur Utama](#fitur-utama)
-2. [Install di VPS (Docker)](#install-di-vps-docker)
-3. [Install di VPS (Manual / PM2)](#install-di-vps-manual--pm2)
-4. [Konfigurasi Environment Variables](#konfigurasi-environment-variables)
-5. [Cara Pakai Dashboard](#cara-pakai-dashboard)
-6. [Arsitektur & Stack](#arsitektur--stack)
-7. [Development (Replit / Lokal)](#development-replit--lokal)
-8. [Keamanan](#keamanan)
+2. [Keamanan](#keamanan)
+3. [Install di VPS — Docker (Rekomendasi)](#install-di-vps--docker-rekomendasi)
+4. [Install di VPS — Manual / PM2](#install-di-vps--manual--pm2)
+5. [Environment Variables](#environment-variables)
+6. [Cara Pakai Dashboard](#cara-pakai-dashboard)
+7. [Arsitektur & Stack](#arsitektur--stack)
+8. [Development (Replit)](#development-replit)
 9. [Troubleshooting](#troubleshooting)
 
 ---
 
 ## Fitur Utama
 
-- **Bot Scalping Otomatis** — scan token baru Base Network tiap 8 detik via DexScreener + GeckoTerminal
-- **AI Filter** — Gemini 2.5 Flash (utama) → Groq/Llama (fallback) → HuggingFace (fallback 2) untuk validasi entry
-- **Safety Check** — GoPlus Labs honeypot detection, sell tax, ownership check, deployer reputation
-- **Trailing Stop Canggih** — aktif hanya setelah profit minimum, mengunci profit minimum terkunci
-- **Multi-DEX** — Uniswap V3, Aerodrome, BaseSwap
-- **TP Bertahap** — TP1 / TP2 / TP3 dengan persentase jual berbeda
-- **Telegram Notifikasi** — alert buy/sell/stop-loss ke grup Telegram
-- **Dashboard Real-time** — WebSocket, format IDR, live P&L, log bot
-- **Semua Setting dari Web** — tidak perlu edit file config, semua bisa diatur dari Settings panel
+| Fitur | Keterangan |
+|---|---|
+| **Bot Scalping Otomatis** | Scan token baru Base Network tiap 8 detik via DexScreener + GeckoTerminal |
+| **AI Filter** | Gemini 2.5 Flash → Groq/Llama → HuggingFace — validasi entry sebelum beli |
+| **Safety Check** | GoPlus Labs: honeypot detection, sell tax, ownership renounce, deployer check |
+| **MEV Protection** | Semua transaksi via dRPC MEV Blocker — terlindungi dari sandwich attack |
+| **MEV Tracking** | Trade History menampilkan status MEV per transaksi + % trade terlindungi |
+| **Security Audit** | Endpoint `/api/security-audit` — 7 check keamanan, blokir live mode jika gagal |
+| **Trailing Stop** | Aktif hanya setelah profit minimum tercapai, mengunci profit terkunci |
+| **Multi-DEX** | Uniswap V3, Aerodrome, BaseSwap — otomatis pilih fee tier terbaik |
+| **TP Bertahap** | TP1 / TP2 / TP3 dengan persentase jual berbeda per level |
+| **TWAP Execution** | Pecah order besar jadi beberapa slice untuk kurangi dampak ke harga |
+| **Telegram Notifikasi** | Alert buy / sell / stop-loss ke Telegram |
+| **Dashboard Real-time** | WebSocket, format IDR, live P&L, log bot, posisi aktif |
+| **Semua Setting dari Web** | Tidak perlu edit file — semua konfigurasi dari Settings panel |
+| **Paper Trading** | Mode simulasi tanpa dana nyata untuk testing strategi |
 
 ---
 
-## Install di VPS (Docker)
+## Keamanan
 
-Cara paling mudah dan direkomendasikan. Butuh: **Ubuntu 22.04+**, **Docker**, **Docker Compose**.
+> **Pelajaran penting:** Jangan pernah menyimpan private key, API key, atau password di dalam kode atau file yang di-commit ke git. Gunakan environment variables / secrets manager.
+
+### Praktik Keamanan yang Diterapkan
+
+- **PRIVATE_KEY tidak pernah dikirim ke frontend** — hanya dipakai di server untuk sign transaksi
+- **Session cookie:** `httpOnly`, `secure` (production), TTL 7 hari
+- **Semua route API dilindungi** session authentication — 401 jika belum login
+- **Tab 🔑 Secrets di dashboard** hanya menampilkan nilai ter-mask (4 karakter pertama + bintang)
+- **Security Audit System** — bot diblokir masuk live mode jika ada konfigurasi kritis yang salah
+- **MEV Protection** — transaksi via dRPC MEV Blocker (`https://mev-blocker.drpc.org`)
+- **`.env` di `.gitignore`** — file secrets tidak akan pernah masuk ke repository
+- **Database (`*.db`) di `.gitignore`** — file SQLite tidak ter-commit ke git
+
+### Checklist Sebelum Go-Live
+
+- [ ] Buat **wallet baru** khusus untuk bot — jangan pakai wallet utama
+- [ ] Set `SESSION_SECRET` dengan nilai acak ≥ 32 karakter
+- [ ] Ganti `DASHBOARD_PASSWORD` dari nilai default
+- [ ] Gunakan RPC dari Alchemy/Infura (bukan public RPC yang lambat)
+- [ ] Set `MEV_PROTECTION_RPC=https://mev-blocker.drpc.org`
+- [ ] Pastikan `PRIVATE_KEY` hanya ada di `.env` atau secrets manager — tidak di tempat lain
+- [ ] Cek endpoint `/api/security-audit` — semua critical check harus `"passed": true`
+- [ ] Test Paper mode dulu sebelum switch ke Live
+
+### Security Audit Endpoint
+
+```bash
+curl http://IP_VPS:8080/api/security-audit
+```
+
+Mengembalikan status 7 check keamanan. Jika `canRunLive: false`, bot **tidak bisa** dijalankan di live mode sampai semua masalah kritis diperbaiki.
+
+---
+
+## Install di VPS — Docker (Rekomendasi)
+
+Cara paling mudah. Butuh: **Ubuntu 22.04+**, **Docker**, **Docker Compose**.
 
 ### 1. Siapkan VPS
 
@@ -51,7 +94,7 @@ newgrp docker
 docker --version && docker compose version
 ```
 
-### 2. Clone Repo
+### 2. Clone Repository
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/base-scalper.git
@@ -71,29 +114,20 @@ Isi nilai berikut (wajib):
 PORT=8080
 NODE_ENV=production
 
-# Auth (WAJIB — ganti sebelum deploy!)
-SESSION_SECRET=isi_dengan_string_acak_minimal_64_karakter
+# Auth — generate SESSION_SECRET: openssl rand -hex 32
+SESSION_SECRET=isi_dengan_string_acak_minimal_32_karakter
 DASHBOARD_PASSWORD=password_dashboard_kamu
 
-# Wallet (WAJIB untuk live trading)
-PRIVATE_KEY=0x_kunci_privat_wallet_kamu
-WALLET_ADDRESS=0x_alamat_wallet_kamu
+# Wallet (wajib untuk live trading) — GUNAKAN WALLET BARU KHUSUS BOT!
+PRIVATE_KEY=0x_private_key_wallet_base_network_kamu
+WALLET_ADDRESS=0x_alamat_wallet_base_network_kamu
 
-# RPC — gunakan Alchemy/Infura untuk produksi, bukan public RPC
-BASE_RPC_URL=https://base-mainnet.g.alchemy.com/v2/YOUR_KEY
-MEV_PROTECTION_RPC=https://rpc.flashbots.net/fast
+# RPC — gunakan Alchemy/Infura, bukan public RPC
+BASE_RPC_URL=https://base-mainnet.g.alchemy.com/v2/YOUR_ALCHEMY_KEY
 
-# AI Filter (opsional — lihat bagian AI Keys di bawah)
-AI_INTEGRATIONS_GEMINI_BASE_URL=https://api.replit.com/v1/ai/gemini
-AI_INTEGRATIONS_GEMINI_API_KEY=your_key
-AI_INTEGRATIONS_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-AI_INTEGRATIONS_OPENROUTER_API_KEY=your_key
+# MEV Protection via dRPC
+MEV_PROTECTION_RPC=https://mev-blocker.drpc.org
 ```
-
-> **Cara generate SESSION_SECRET:**
-> ```bash
-> openssl rand -base64 48
-> ```
 
 ### 4. Build dan Jalankan
 
@@ -101,22 +135,25 @@ AI_INTEGRATIONS_OPENROUTER_API_KEY=your_key
 docker compose up -d --build
 ```
 
-Bot dan dashboard akan berjalan otomatis. Akses:
-
+Bot dan dashboard berjalan otomatis. Akses:
 - **Dashboard:** `http://IP_VPS` (port 80)
 - **API:** `http://IP_VPS:8080`
+- **Security Audit:** `http://IP_VPS:8080/api/security-audit`
 
 ### 5. Cek Status
 
 ```bash
-# Lihat semua container
+# Status semua container
 docker compose ps
 
-# Log API (bot)
+# Log bot (API)
 docker compose logs -f api
 
-# Log dashboard
+# Log dashboard (nginx)
 docker compose logs -f dashboard
+
+# Security audit
+curl http://localhost:8080/api/security-audit | python3 -m json.tool
 ```
 
 ### 6. Update ke Versi Terbaru
@@ -126,19 +163,23 @@ git pull
 docker compose up -d --build
 ```
 
-### 7. Stop / Restart
+### 7. Stop / Restart / Backup
 
 ```bash
 docker compose stop       # stop semua
 docker compose restart    # restart semua
 docker compose down       # stop + hapus container (data tetap aman di volume)
+
+# Backup database
+docker run --rm -v scalping_data:/data -v $(pwd):/backup alpine \
+  tar czf /backup/scalping-backup-$(date +%Y%m%d).tar.gz /data
 ```
 
 > Data trading (SQLite) disimpan di Docker volume `scalping_data` — aman saat container di-restart atau di-rebuild.
 
 ---
 
-## Install di VPS (Manual / PM2)
+## Install di VPS — Manual / PM2
 
 Jika tidak mau pakai Docker.
 
@@ -165,25 +206,13 @@ cd base-scalper
 pnpm install
 ```
 
-> **Catatan:** `better-sqlite3` butuh native compile. Jika ada error:
+> `better-sqlite3` butuh native compile. Jika ada error:
 > ```bash
-> sudo apt install -y python3 make g++
+> sudo apt install -y python3 make g++ libsqlite3-dev
 > pnpm install --force
 > ```
 
-### 3. Build API Server
-
-```bash
-pnpm --filter @workspace/api-server run build
-```
-
-### 4. Build Dashboard
-
-```bash
-pnpm --filter @workspace/scalping-dashboard run build
-```
-
-### 5. Buat File `.env`
+### 3. Buat File `.env`
 
 ```bash
 cp artifacts/api-server/.env.example artifacts/api-server/.env
@@ -191,27 +220,22 @@ nano artifacts/api-server/.env
 # Isi semua nilai seperti di bagian Docker di atas
 ```
 
-### 6. Jalankan dengan PM2
+### 4. Build API Server
 
 ```bash
-# Jalankan API server
-pm2 start artifacts/api-server/dist/index.mjs \
-  --name "scalper-api" \
-  --node-args "--enable-source-maps" \
-  --env production
-
-# Baca env dari file
-pm2 start artifacts/api-server/dist/index.mjs \
-  --name "scalper-api" \
-  --node-args "--enable-source-maps" \
-  -- --env-file artifacts/api-server/.env
-
-# Atau gunakan ecosystem file (lihat di bawah)
+pnpm --filter @workspace/api-server run build
 ```
 
-**Alternatif: PM2 Ecosystem File**
+### 5. Build Dashboard
 
-Buat file `ecosystem.config.cjs`:
+```bash
+# BASE_PATH=/ diperlukan agar Vite tahu root path untuk production build
+BASE_PATH=/ PORT=80 pnpm --filter @workspace/scalping-dashboard run build
+```
+
+### 6. Jalankan dengan PM2
+
+Buat file `ecosystem.config.cjs` (jangan commit ke git):
 
 ```js
 module.exports = {
@@ -223,6 +247,7 @@ module.exports = {
       env_file: "./artifacts/api-server/.env",
       restart_delay: 3000,
       max_restarts: 10,
+      watch: false,
     },
   ],
 };
@@ -232,9 +257,10 @@ module.exports = {
 pm2 start ecosystem.config.cjs
 pm2 save
 pm2 startup  # auto-start saat reboot
+pm2 logs scalper-api  # lihat log
 ```
 
-### 7. Serve Dashboard (Nginx)
+### 7. Serve Dashboard dengan Nginx
 
 ```bash
 sudo apt install -y nginx
@@ -247,30 +273,34 @@ server {
     listen 80;
     server_name IP_VPS_ATAU_DOMAIN;
 
-    root /path/to/base-scalper/artifacts/scalping-dashboard/dist;
+    root /path/to/base-scalper/artifacts/scalping-dashboard/dist/public;
     index index.html;
+
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml;
 
     # SPA routing
     location / {
         try_files $uri $uri/ /index.html;
     }
 
-    # Proxy ke API
+    # Proxy REST API ke bot
     location /api/ {
         proxy_pass http://localhost:8080/api/;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # WebSocket (Socket.io)
+    # WebSocket proxy untuk Socket.io (real-time dashboard)
     location /socket.io/ {
         proxy_pass http://localhost:8080/socket.io/;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
+        proxy_read_timeout 86400;
     }
 }
 ```
@@ -282,50 +312,53 @@ sudo nginx -t && sudo systemctl reload nginx
 
 ---
 
-## Konfigurasi Environment Variables
+## Environment Variables
 
 | Variable | Wajib | Default | Keterangan |
 |---|---|---|---|
-| `PORT` | Ya | — | Port API server |
+| `PORT` | Ya | — | Port API server (8080) |
 | `NODE_ENV` | Ya | `development` | Set ke `production` di VPS |
-| `SESSION_SECRET` | **Ya** | — | String acak ≥64 karakter untuk enkripsi session |
+| `SESSION_SECRET` | **Ya** | — | String acak ≥ 32 karakter untuk enkripsi session |
 | `DASHBOARD_PASSWORD` | Ya | `scalper2024` | Password login dashboard — **wajib ganti!** |
 | `PRIVATE_KEY` | Live only | — | Private key wallet Base Network (0x...) |
 | `WALLET_ADDRESS` | Live only | — | Alamat wallet Base Network (0x...) |
 | `BASE_RPC_URL` | Opsional | `mainnet.base.org` | RPC Base — gunakan Alchemy/Infura untuk produksi |
-| `MEV_PROTECTION_RPC` | Opsional | sama dengan BASE_RPC_URL | Flashbots/Beaverbuild untuk anti-sandwich |
+| `MEV_PROTECTION_RPC` | Opsional | sama dengan BASE_RPC_URL | MEV blocker — gunakan `https://mev-blocker.drpc.org` |
 | `SQLITE_PATH` | Opsional | `./scalping.db` | Path file database SQLite |
-| `AI_INTEGRATIONS_GEMINI_BASE_URL` | Opsional | — | Base URL Gemini (auto di Replit) |
+| `AI_INTEGRATIONS_GEMINI_BASE_URL` | Opsional | — | Base URL Gemini AI |
 | `AI_INTEGRATIONS_GEMINI_API_KEY` | Opsional | — | API key Gemini (auto di Replit) |
 | `AI_INTEGRATIONS_OPENROUTER_BASE_URL` | Opsional | — | Base URL OpenRouter |
-| `AI_INTEGRATIONS_OPENROUTER_API_KEY` | Opsional | — | API key OpenRouter (untuk Groq + HuggingFace) |
+| `AI_INTEGRATIONS_OPENROUTER_API_KEY` | Opsional | — | API key OpenRouter (Groq + HuggingFace fallback) |
+| `TELEGRAM_BOT_TOKEN` | Opsional | — | Token Telegram bot untuk notifikasi |
+| `TELEGRAM_CHAT_ID` | Opsional | — | Chat ID Telegram tujuan notifikasi |
 | `LOG_LEVEL` | Opsional | `info` | Level log: `debug`, `info`, `warn`, `error` |
-
-### Cara Dapat AI Keys untuk VPS
-
-**Gemini (via Replit AI Integrations):**
-Di Replit, key di-set otomatis. Untuk VPS, buat Google AI Studio key di [aistudio.google.com](https://aistudio.google.com) dan set:
-```
-AI_INTEGRATIONS_GEMINI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
-AI_INTEGRATIONS_GEMINI_API_KEY=AIza...
-```
-
-**OpenRouter (untuk Groq + HuggingFace fallback):**
-Daftar di [openrouter.ai](https://openrouter.ai), buat API key, lalu:
-```
-AI_INTEGRATIONS_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-AI_INTEGRATIONS_OPENROUTER_API_KEY=sk-or-...
-```
 
 ### Rekomendasi RPC
 
 | Provider | URL | Kecepatan | Harga |
 |---|---|---|---|
 | Public Base | `https://mainnet.base.org` | Lambat | Gratis |
-| **Alchemy** | `https://base-mainnet.g.alchemy.com/v2/KEY` | Cepat | Free tier ada |
+| **Alchemy** | `https://base-mainnet.g.alchemy.com/v2/KEY` | Cepat | Free 300M req/bln |
 | **Infura** | `https://base-mainnet.infura.io/v3/KEY` | Cepat | Free tier ada |
-| Flashbots (MEV) | `https://rpc.flashbots.net/fast` | Medium | Gratis |
-| Beaverbuild (MEV) | `https://rpc.beaverbuild.org` | Cepat | Gratis |
+| **dRPC MEV Blocker** ✓ | `https://mev-blocker.drpc.org` | Cepat | Gratis |
+| dRPC Public | `https://base.drpc.org` | Cepat | Gratis |
+| Flashbots | `https://rpc.flashbots.net/fast` | Medium | Gratis |
+
+> **Rekomendasi:** Gunakan Alchemy untuk `BASE_RPC_URL` (read/write cepat) dan dRPC MEV Blocker untuk `MEV_PROTECTION_RPC` (proteksi sandwich attack).
+
+### AI Keys untuk VPS
+
+**Gemini (gratis):**
+```
+AI_INTEGRATIONS_GEMINI_BASE_URL=https://generativelanguage.googleapis.com
+AI_INTEGRATIONS_GEMINI_API_KEY=AIza...  # dari aistudio.google.com
+```
+
+**OpenRouter (fallback Groq + HuggingFace):**
+```
+AI_INTEGRATIONS_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+AI_INTEGRATIONS_OPENROUTER_API_KEY=sk-or-...  # dari openrouter.ai
+```
 
 ---
 
@@ -335,27 +368,48 @@ AI_INTEGRATIONS_OPENROUTER_API_KEY=sk-or-...
 Buka `http://IP_VPS` → masukkan `DASHBOARD_PASSWORD`
 
 ### Panel Utama
-- **Control Panel** — START / STOP bot, pilih risk level (Low/Mid/High), Emergency Stop
-- **Wallet** — saldo ETH real-time, harga ETH, nilai IDR
-- **Posisi Aktif** — posisi yang sedang terbuka, P&L live, tombol close manual
-- **Bot Log** — log real-time semua aktivitas bot
 
-### Settings (klik ikon settings)
+| Panel | Keterangan |
+|---|---|
+| **Control Panel** | START / STOP bot, pilih risk level, Emergency Stop |
+| **Security Audit** | Status 7 check keamanan — harus semua ✅ sebelum live |
+| **Wallet** | Saldo ETH real-time, harga ETH, nilai IDR |
+| **Posisi Aktif** | Posisi terbuka, P&L live, tombol close manual |
+| **Token Scanner** | Token yang baru di-scan dan skornya |
+| **Trade History** | Riwayat semua trade + status MEV protection per transaksi |
+| **P&L Chart** | Grafik profit/loss harian |
+| **AI Decision Log** | Log keputusan AI filter per token |
+| **Bot Log** | Log real-time semua aktivitas bot |
+
+### Trade History — MEV Tracking
+
+Halaman Trade History menampilkan:
+- **Badge `✓ MEV`** (hijau) — trade masuk via dRPC MEV Blocker, terlindungi sandwich attack
+- **Badge `— STD`** (abu-abu) — trade via RPC standar
+- **Ringkasan bar** — persentase trade via MEV vs Standard, P&L per jalur
+- **Progress bar visual** — rasio MEV vs Standard sekilas
+- **Export CSV** — kolom MEV disertakan (YES/NO)
+
+### Settings Panel
 
 | Tab | Isi |
 |---|---|
-| **Optim** | Toggle fitur: Dynamic Sizing, Break-Even Stop, TWAP, Multi-DEX, dll |
+| **Optim** | Dynamic Sizing, Break-Even Stop, TWAP, Multi-DEX, Auto-Compound |
 | **Trading** | Mode (Live/Paper), TP1/TP2/TP3, Stop Loss, Trailing Stop, Anti-FOMO |
-| **Safety** | Min Safety Score, Max Sell Tax, Filter likuiditas & volume |
-| **🤖 AI** | Toggle AI Filter, pilih provider (Gemini/Groq/HF), min confidence |
+| **Safety** | Min Safety Score, Max Sell Tax, filter likuiditas & volume |
+| **AI** | Toggle AI Filter, pilih provider (Gemini/Groq/HF), min confidence |
 | **Telegram** | Bot token + Chat ID untuk notifikasi |
 | **RPC/Gas** | Gas price, slippage, TWAP interval |
-| **🔑 Secrets** | Status semua env var — ✅/❌ per secret, panduan cara set di VPS |
+| **Secrets** | Status semua env var — ✅/❌ per secret, nilai ter-mask |
 
 ### Switch ke Live Trading
-1. Pastikan **Settings → 🔑 Secrets** menunjukkan `PRIVATE_KEY` dan `WALLET_ADDRESS` ✅
-2. Pergi ke **Settings → Trading → Mode** → klik `⚡ LIVE (Mainnet)`
-3. Klik **START BOT**
+
+1. Cek **Security Audit** — semua item harus ✅
+2. Cek **Settings → 🔑 Secrets** — `PRIVATE_KEY` dan `WALLET_ADDRESS` harus ✅
+3. Pergi ke **Settings → Trading → Mode** → klik **LIVE (Mainnet)**
+4. Klik **START BOT**
+
+> Bot **tidak bisa** dijalankan di live mode jika Security Audit gagal.
 
 ---
 
@@ -363,22 +417,23 @@ Buka `http://IP_VPS` → masukkan `DASHBOARD_PASSWORD`
 
 ```
 ┌─────────────────────────────┐
-│   Dashboard (React + Vite)  │  port 80
+│   Dashboard (React + Vite)  │  port 80 (Docker) / 18432 (dev)
 │   Tailwind + Framer Motion  │
 └──────────┬──────────────────┘
-           │ REST + WebSocket
+           │ REST + WebSocket (Socket.io)
 ┌──────────▼──────────────────┐
 │   API Server (Express 5)    │  port 8080
-│   Socket.io + Auth Session  │
+│   Session Auth + Socket.io  │
 │                             │
 │  ┌──────────────────────┐   │
 │  │   ScalpingBot.ts     │   │
 │  │  ┌────────────────┐  │   │
-│  │  │ TokenScanner   │  │   │  DexScreener / GeckoTerminal
-│  │  │ SafetyChecker  │  │   │  GoPlus Labs
-│  │  │ AIAnalyzer     │  │   │  Gemini / OpenRouter
-│  │  │ SwapExecutor   │  │   │  Uniswap V3 / Base Network
-│  │  │ PriceMonitor   │  │   │  DexScreener prices
+│  │  │ TokenScanner   │  │──── DexScreener / GeckoTerminal
+│  │  │ SafetyChecker  │  │──── GoPlus Labs
+│  │  │ AIAnalyzer     │  │──── Gemini / OpenRouter
+│  │  │ SwapExecutor   │  │──── Uniswap V3 / dRPC MEV Blocker
+│  │  │ PriceMonitor   │  │──── DexScreener prices
+│  │  │ SecurityAudit  │  │
 │  │  └────────────────┘  │   │
 │  └──────────────────────┘   │
 │                             │
@@ -390,13 +445,14 @@ Buka `http://IP_VPS` → masukkan `DASHBOARD_PASSWORD`
 - Node.js 24, TypeScript 5.9, pnpm workspaces
 - Express 5 + Socket.io (same HTTP server)
 - SQLite via `better-sqlite3`
-- React + Vite + Tailwind CSS + Framer Motion
+- React 19 + Vite 7 + Tailwind CSS + Framer Motion
 - Zod validation, Orval codegen dari OpenAPI spec
 - esbuild (ESM bundle untuk API)
+- Docker multi-stage build + nginx
 
 ---
 
-## Development (Replit / Lokal)
+## Development (Replit)
 
 ```bash
 # Install dependencies
@@ -408,40 +464,29 @@ pnpm --filter @workspace/api-server run dev
 # Jalankan dashboard (port 18432)
 pnpm --filter @workspace/scalping-dashboard run dev
 
+# Build API untuk produksi
+pnpm --filter @workspace/api-server run build
+
+# Build dashboard untuk produksi
+BASE_PATH=/ PORT=80 pnpm --filter @workspace/scalping-dashboard run build
+
 # Typecheck semua package
-pnpm run typecheck
+pnpm --filter @workspace/api-server run typecheck
+pnpm --filter @workspace/scalping-dashboard run typecheck
 
 # Regenerate API hooks dari OpenAPI spec
 pnpm --filter @workspace/api-spec run codegen
 ```
 
-**Di Replit:** Set secrets di `Tools → Secrets`:
-- `SESSION_SECRET`, `DASHBOARD_PASSWORD`
-- `PRIVATE_KEY`, `WALLET_ADDRESS` (untuk live)
-- `BASE_RPC_URL` (opsional)
+**Di Replit, set secrets di `Tools → Secrets`:**
+- `SESSION_SECRET` — string acak ≥ 32 karakter
+- `DASHBOARD_PASSWORD` — password dashboard
+- `PRIVATE_KEY` — private key wallet baru (bukan wallet utama!)
+- `WALLET_ADDRESS` — alamat wallet
+- `BASE_RPC_URL` — RPC dari Alchemy/Infura
+- `MEV_PROTECTION_RPC` — `https://mev-blocker.drpc.org`
 
 AI keys (Gemini, OpenRouter) di-set otomatis via Replit AI Integrations.
-
----
-
-## Keamanan
-
-- Semua route API dilindungi session authentication — 401 jika belum login
-- Session cookie: `httpOnly`, `secure` (production), TTL 7 hari
-- `PRIVATE_KEY` tidak pernah dikirim ke frontend — hanya dipakai di server untuk sign transaksi
-- Tab **🔑 Secrets** di dashboard hanya menampilkan nilai yang di-mask (4 karakter + bintang)
-- Gunakan MEV protection RPC (`MEV_PROTECTION_RPC`) untuk mencegah front-running dan sandwich attack
-- **Jangan commit `.env` ke git** — sudah ada di `.gitignore`
-
-### Rekomendasi Sebelum Go-Live
-
-- [ ] Ganti `DASHBOARD_PASSWORD` dari default
-- [ ] Set `SESSION_SECRET` dengan nilai acak ≥64 karakter
-- [ ] Gunakan RPC dari Alchemy/Infura (bukan public)
-- [ ] Set `MEV_PROTECTION_RPC` ke Flashbots/Beaverbuild
-- [ ] Pastikan `PRIVATE_KEY` hanya ada di `.env`, tidak di tempat lain
-- [ ] Cek tab **🔑 Secrets** di dashboard — semua item wajib harus ✅
-- [ ] Test dengan Paper mode dulu sebelum switch ke Live
 
 ---
 
@@ -451,76 +496,108 @@ AI keys (Gemini, OpenRouter) di-set otomatis via Replit AI Integrations.
 
 ```bash
 docker compose logs api
-# Cek apakah SESSION_SECRET sudah diset di .env
+# Pastikan SESSION_SECRET sudah diset di .env
+# Pastikan format PRIVATE_KEY benar (0x + 64 karakter hex)
+```
+
+### Security audit gagal
+
+```bash
+curl http://localhost:8080/api/security-audit | python3 -m json.tool
+# Ikuti petunjuk "fix" di setiap check yang "passed": false
+```
+
+### Dashboard tidak bisa connect ke API
+
+```bash
+# Cek container jalan
+docker compose ps
+
+# Cek port tidak diblokir firewall
+sudo ufw allow 8080
+sudo ufw allow 80
+
+# Test API langsung
+curl http://localhost:8080/api/healthz
 ```
 
 ### Bot jalan tapi tidak ada trade
 
 - Cek **Bot Log** di dashboard — lihat pesan warn/error
-- Pastikan `BASE_RPC_URL` bisa diakses dari VPS:
+- Test koneksi RPC dari VPS:
   ```bash
   curl -X POST $BASE_RPC_URL \
     -H "Content-Type: application/json" \
     -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
   ```
-- Cek `minSafetyScore`, `minMemeScore`, `min5mVolumeUsd` — mungkin terlalu ketat
+- Cek `minSafetyScore`, `minMemeScore`, `min5mVolumeUsd` di Settings — mungkin terlalu ketat
 
 ### Swap gagal / transaksi error
 
 - Cek saldo ETH wallet cukup untuk gas
-- Coba naikkan `maxPriorityFeeGwei` dan `maxFeePerGasGwei` di Settings → RPC/Gas
-- Pastikan `PRIVATE_KEY` benar dan wallet sudah punya ETH di Base Network
-
-### Dashboard tidak bisa connect ke API
-
-- Pastikan API container jalan: `docker compose ps`
-- Cek port 8080 tidak diblokir firewall:
-  ```bash
-  sudo ufw allow 8080
-  sudo ufw allow 80
-  ```
-- Pastikan nginx proxy ke `http://localhost:8080` (bukan IP eksternal)
+- Naikkan `maxPriorityFeeGwei` dan `maxFeePerGasGwei` di Settings → RPC/Gas
+- Cek `PRIVATE_KEY` dan `WALLET_ADDRESS` benar dan cocok
+- Pastikan wallet punya ETH di Base Network
 
 ### `better-sqlite3` native build error (manual install)
 
 ```bash
 sudo apt install -y python3 make g++ libsqlite3-dev
-cd node_modules/.pnpm/better-sqlite3*/node_modules/better-sqlite3
-node-pre-gyp rebuild
+pnpm install --force
 ```
 
 ### AI Filter tidak jalan
 
-- Cek tab **🔑 Secrets** — pastikan `AI_INTEGRATIONS_GEMINI_API_KEY` ✅
+- Cek tab **🔑 Secrets** — `AI_INTEGRATIONS_GEMINI_API_KEY` harus ✅
 - Jika semua AI key kosong, bot tetap jalan tapi tanpa AI filter
 - Cek log untuk pesan `AI [Gemini]` atau `AI filter error`
 
+### Trade History tidak tampil MEV status
+
+Database lama perlu migrasi otomatis (terjadi saat server restart). Jika belum:
+```bash
+docker compose restart api
+```
+
 ---
 
-## File Penting
+## Struktur File Penting
 
 ```
 base-scalper/
 ├── artifacts/
 │   ├── api-server/
-│   │   ├── src/scalping/          # Core bot engine
-│   │   │   ├── ScalpingBot.ts     # Orchestrator utama
-│   │   │   ├── config.ts          # Config type + defaults
-│   │   │   ├── AIAnalyzer.ts      # Gemini / OpenRouter AI
-│   │   │   ├── SwapExecutor.ts    # Uniswap V3 swaps
-│   │   │   ├── SafetyChecker.ts   # GoPlus honeypot check
-│   │   │   ├── TokenScanner.ts    # DexScreener scanner
-│   │   │   └── PriceMonitor.ts    # Real-time price polling
-│   │   ├── src/routes/            # REST API routes
-│   │   ├── .env.example           # Template env vars
+│   │   ├── src/
+│   │   │   ├── scalping/
+│   │   │   │   ├── ScalpingBot.ts      # Orchestrator utama
+│   │   │   │   ├── config.ts           # Config type + defaults
+│   │   │   │   ├── SecurityAudit.ts    # 7 security checks
+│   │   │   │   ├── AIAnalyzer.ts       # Gemini / OpenRouter AI
+│   │   │   │   ├── SwapExecutor.ts     # Uniswap V3 swaps + MEV
+│   │   │   │   ├── SafetyChecker.ts    # GoPlus honeypot check
+│   │   │   │   ├── TokenScanner.ts     # DexScreener scanner
+│   │   │   │   ├── PriceMonitor.ts     # Real-time price polling
+│   │   │   │   └── database.ts         # SQLite operations
+│   │   │   └── routes/
+│   │   │       ├── bot.ts              # Start/stop + security gate
+│   │   │       ├── trades.ts           # Trade history + MEV status
+│   │   │       ├── secrets.ts          # Secrets status (masked)
+│   │   │       └── security.ts         # /api/security-audit
+│   │   ├── .env.example                # Template env vars
 │   │   └── Dockerfile
 │   └── scalping-dashboard/
-│       ├── src/pages/Dashboard.tsx
-│       ├── src/components/
-│       │   ├── FullSettingsPanel.tsx  # Semua settings
-│       │   └── ControlPanel.tsx
+│       ├── src/
+│       │   ├── pages/Dashboard.tsx
+│       │   └── components/
+│       │       ├── TradeHistory.tsx     # + MEV tracking
+│       │       ├── SecurityAuditCard.tsx
+│       │       ├── ControlPanel.tsx
+│       │       └── FullSettingsPanel.tsx
 │       └── Dockerfile
-├── lib/api-spec/openapi.yaml      # OpenAPI spec (source of truth)
-├── docker-compose.yml             # Deploy keduanya sekaligus
+├── lib/
+│   ├── api-spec/openapi.yaml           # OpenAPI spec (source of truth)
+│   └── api-client-react/               # Generated React hooks
+├── docker-compose.yml                  # Deploy keduanya sekaligus
+├── .env.example -> artifacts/api-server/.env.example
 └── README.md
 ```

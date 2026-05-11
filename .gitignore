@@ -1,6 +1,6 @@
-# See https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files for more about ignoring files.
+# See https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
 
-# compiled output
+# Compiled output
 dist
 tmp
 out-tsc
@@ -8,13 +8,24 @@ out-tsc
 .expo
 .expo-shared
 
-# dependencies
+# Dependencies
 node_modules
 
-# Secrets — NEVER commit these
+# Secrets — JANGAN PERNAH commit file ini ke git!
 .env
 *.env
 !.env.example
+
+# Database files — berisi data trading, jangan commit!
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# PM2 ecosystem file (mungkin berisi path sensitif)
+ecosystem.config.cjs
+ecosystem.config.js
 
 # IDEs and editors
 /.idea
@@ -25,14 +36,14 @@ node_modules
 .settings/
 *.sublime-workspace
 
-# IDE - VSCode
+# VSCode
 .vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
 
-# misc
+# Misc
 /.sass-cache
 /connect.lock
 /coverage
@@ -49,13 +60,6 @@ Thumbs.db
 .cursor/rules/nx-rules.mdc
 .github/instructions/nx.instructions.md
 
-# Replit
+# Replit internal
 .cache/
 .local/
-
-# Database files — JANGAN PERNAH commit ke git!
-*.db
-*.db-shm
-*.db-wal
-*.sqlite
-*.sqlite3
