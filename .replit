@@ -41,15 +41,5 @@ channel = "stable-25_05"
 [userenv]
 
 [userenv.shared]
-DASHBOARD_PASSWORD = "ScalpBase2024!"
-PRIVATE_KEY = "0xe4dcb470e3e167b26b9b626ea32f0b763c3844b668835d971f6cd8d5d47c9fd9"
-WALLET_ADDRESS = "0x1538aD8378DF77590733E3D0699A1C56AD9f1141"
-BASE_RPC_URL = "https://base-mainnet.g.alchemy.com/v2/h7HVmNkX8XDt4WA45fTiC"
-MEV_PROTECTION_RPC = "https://base-mainnet.g.alchemy.com/v2/h7HVmNkX8XDt4WA45fTiC"
-AI_INTEGRATIONS_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com"
-AI_INTEGRATIONS_GEMINI_API_KEY = "AIzaSyDODIb5BLJKe2Q0A_BtaVyKcX692LlLft0"
-AI_INTEGRATIONS_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
-TELEGRAM_BOT_TOKEN = "8625526848:AAEwPEDquOpSQVDWnTrcYMg9_bUVDbjivOA"
-TELEGRAM_CHAT_ID = "1708124942"
 LOG_LEVEL = "debug"
 NODE_ENV = "production"

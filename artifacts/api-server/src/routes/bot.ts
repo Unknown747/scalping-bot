@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { getBot } from "../botInstance.js";
+import { runSecurityAudit } from "../scalping/SecurityAudit.js";
 
 const router = Router();
 
@@ -10,6 +11,23 @@ router.get("/bot/status", (req, res) => {
 
 router.post("/bot/start", async (req, res) => {
   const bot = getBot();
+  const config = bot.getConfig();
+
+  // Block live mode if security audit fails
+  if (config.mode === "live") {
+    const audit = runSecurityAudit();
+    if (!audit.canRunLive) {
+      res.status(403).json({
+        error: "SECURITY_AUDIT_FAILED",
+        message: "Bot tidak dapat dijalankan di live mode karena ada masalah keamanan kritis.",
+        criticalFailures: audit.criticalFailures,
+        checks: audit.checks,
+        fix: "Perbaiki semua masalah kritis di atas, lalu coba lagi.",
+      });
+      return;
+    }
+  }
+
   await bot.start();
   res.json(bot.getStatus());
 });
