@@ -1,34 +1,42 @@
-# See https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
-
-# Compiled output
-dist
-tmp
-out-tsc
+# ─── Compiled output ──────────────────────────────────────────────────────────
+dist/
+tmp/
+out-tsc/
 *.tsbuildinfo
-.expo
-.expo-shared
+.expo/
+.expo-shared/
 
-# Dependencies
-node_modules
+# Generated lib dist (di-build saat install, tidak perlu di-commit)
+lib/*/dist/
 
-# Secrets — JANGAN PERNAH commit file ini ke git!
+# ─── Dependencies ─────────────────────────────────────────────────────────────
+node_modules/
+
+# ─── Secrets — JANGAN PERNAH commit file ini ke git! ─────────────────────────
 .env
 *.env
 !.env.example
 
-# Database files — berisi data trading, jangan commit!
+# ─── Database — berisi data trading real, jangan commit! ──────────────────────
 *.db
 *.db-shm
 *.db-wal
 *.sqlite
 *.sqlite3
 
-# PM2 ecosystem file (mungkin berisi path sensitif)
+# ─── PM2 ecosystem file — mungkin berisi path/env sensitif ───────────────────
 ecosystem.config.cjs
 ecosystem.config.js
 
-# IDEs and editors
-/.idea
+# ─── Python / Replit boilerplate ──────────────────────────────────────────────
+main.py
+pyproject.toml
+uv.lock
+__pycache__/
+*.pyc
+
+# ─── IDEs ─────────────────────────────────────────────────────────────────────
+/.idea/
 .project
 .classpath
 .c9/
@@ -36,30 +44,29 @@ ecosystem.config.js
 .settings/
 *.sublime-workspace
 
-# VSCode
+# VSCode (kecuali settings yang berguna)
 .vscode/*
 !.vscode/settings.json
 !.vscode/tasks.json
 !.vscode/launch.json
 !.vscode/extensions.json
 
-# Misc
-/.sass-cache
+# ─── System Files ─────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ─── Misc ─────────────────────────────────────────────────────────────────────
+/.sass-cache/
 /connect.lock
-/coverage
+/coverage/
 /libpeerconnection.log
 npm-debug.log
 yarn-error.log
 testem.log
-/typings
 
-# System Files
-.DS_Store
-Thumbs.db
-
-.cursor/rules/nx-rules.mdc
-.github/instructions/nx.instructions.md
-
-# Replit internal
+# ─── Replit internal ──────────────────────────────────────────────────────────
 .cache/
 .local/
+.agents/
+.cursor/rules/nx-rules.mdc
+.github/instructions/nx.instructions.md
