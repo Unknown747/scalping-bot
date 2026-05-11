@@ -97,7 +97,7 @@ function TextInput({
   );
 }
 
-type Tab = "optimizations" | "trading" | "safety" | "telegram" | "rpc";
+type Tab = "optimizations" | "trading" | "safety" | "ai" | "telegram" | "rpc";
 
 export function FullSettingsPanel() {
   const [open, setOpen] = useState(false);
@@ -138,6 +138,7 @@ export function FullSettingsPanel() {
     { id: "optimizations", label: "Optim" },
     { id: "trading", label: "Trading" },
     { id: "safety", label: "Safety" },
+    { id: "ai", label: "🤖 AI" },
     { id: "telegram", label: "Telegram" },
     { id: "rpc", label: "RPC/Gas" },
   ];
@@ -419,6 +420,80 @@ export function FullSettingsPanel() {
                         className="w-full py-2 rounded-lg bg-primary text-background font-mono font-bold text-xs hover:bg-primary/90 disabled:opacity-50 transition-colors"
                       >
                         {isSaving ? "Menyimpan..." : "Simpan Telegram Config"}
+                      </motion.button>
+                    )}
+                  </div>
+                )}
+
+                {/* ── AI FILTER ── */}
+                {tab === "ai" && (
+                  <div className="space-y-4">
+                    <div className="p-3 rounded-lg border border-primary/30 bg-primary/5">
+                      <div className="text-[10px] text-primary font-mono font-bold mb-1">AI Token Filter</div>
+                      <div className="text-[9px] text-muted-foreground leading-relaxed">
+                        Gunakan AI untuk menganalisis token sebelum masuk posisi. Gemini (utama) → Groq/OpenRouter (fallback) → HuggingFace/OpenRouter (fallback 2). Menggunakan Replit AI Integrations — tidak perlu API key sendiri.
+                      </div>
+                    </div>
+
+                    <div className={`flex items-center justify-between p-3 rounded-lg border ${cfg.enableAIFilter ? "bg-primary/5 border-primary/20" : "bg-muted/10 border-border"}`}>
+                      <div>
+                        <div className={`text-xs font-mono font-bold ${cfg.enableAIFilter ? "text-primary" : "text-muted-foreground"}`}>
+                          Aktifkan AI Filter
+                        </div>
+                        <div className="text-[9px] text-muted-foreground mt-0.5">AI memvalidasi setiap token sebelum buy</div>
+                      </div>
+                      <Toggle enabled={!!cfg.enableAIFilter} onToggle={() => toggle("enableAIFilter")} disabled={isSaving} />
+                    </div>
+
+                    <SectionHeader title="Provider Utama" />
+                    <div className="grid grid-cols-3 gap-2">
+                      {(["gemini", "groq", "huggingface"] as const).map((p) => (
+                        <button
+                          key={p}
+                          onClick={() => save({ aiPrimaryProvider: p })}
+                          disabled={isSaving}
+                          className={`py-2 rounded-lg text-[10px] font-mono font-bold capitalize transition-colors border ${
+                            (cfg.aiPrimaryProvider || "gemini") === p
+                              ? "bg-primary/20 text-primary border-primary/50"
+                              : "bg-muted/10 text-muted-foreground border-border hover:bg-muted/20"
+                          }`}
+                        >
+                          {p === "gemini" ? "Gemini" : p === "groq" ? "Groq" : "HuggingFace"}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="text-[9px] text-muted-foreground/60 font-mono">
+                      Groq & HuggingFace dijalankan via OpenRouter. Jika provider utama gagal, sistem otomatis fallback ke provider lain.
+                    </div>
+
+                    <SectionHeader title="Threshold" />
+                    <NumInput
+                      label="Min Confidence"
+                      value={pending.aiFilterMinConfidence ?? cfg.aiFilterMinConfidence ?? 65}
+                      unit="%" min={30} max={95} step={5}
+                      description="min AI confidence untuk buy"
+                      onChange={(v) => setPending((p) => ({ ...p, aiFilterMinConfidence: Math.round(v) }))}
+                    />
+
+                    <div className="p-2.5 rounded-lg border border-border bg-muted/5">
+                      <div className="text-[9px] text-muted-foreground font-mono leading-relaxed space-y-1">
+                        <div className="font-semibold text-foreground/70">Urutan provider (contoh: Gemini dipilih):</div>
+                        <div>1. Gemini 2.5 Flash — analisis utama</div>
+                        <div>2. Groq / Llama 3.1 (via OpenRouter) — fallback cepat</div>
+                        <div>3. HuggingFace / Llama 3.2 (via OpenRouter) — fallback terakhir</div>
+                        <div className="pt-1 text-primary/70">Jika semua gagal → token tetap diproses tanpa AI filter</div>
+                      </div>
+                    </div>
+
+                    {Object.keys(pending).length > 0 && (
+                      <motion.button
+                        initial={{ opacity: 0, y: 4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        onClick={() => save(pending)}
+                        disabled={isSaving}
+                        className="w-full py-2 rounded-lg bg-primary text-background font-mono font-bold text-xs hover:bg-primary/90 disabled:opacity-50 transition-colors"
+                      >
+                        {isSaving ? "Menyimpan..." : `Simpan ${Object.keys(pending).length} perubahan`}
                       </motion.button>
                     )}
                   </div>

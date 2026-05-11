@@ -172,7 +172,7 @@ export function Dashboard() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      {/* Paper trading banner */}
+      {/* Paper trading banner — only shown if user deliberately switches to paper mode */}
       <AnimatePresence>
         {isPaperMode && (
           <motion.div
@@ -181,8 +181,8 @@ export function Dashboard() {
             exit={{ height: 0, opacity: 0 }}
             className="bg-warn/10 border-b border-warn/30 px-4 py-1.5 text-center overflow-hidden"
           >
-            <span className="text-warn text-xs font-semibold tracking-widest uppercase">
-              Paper Trading Mode — Tidak ada dana nyata yang berisiko
+            <span className="text-warn text-[11px] font-semibold tracking-widest uppercase">
+              ⚠ PAPER MODE — Tidak ada dana nyata. Aktifkan LIVE di Settings → Trading → mode
             </span>
           </motion.div>
         )}

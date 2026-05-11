@@ -126,6 +126,15 @@ export const ScalpingConfigMode = {
   paper: "paper",
 } as const;
 
+export type ScalpingConfigAiPrimaryProvider =
+  (typeof ScalpingConfigAiPrimaryProvider)[keyof typeof ScalpingConfigAiPrimaryProvider];
+
+export const ScalpingConfigAiPrimaryProvider = {
+  gemini: "gemini",
+  groq: "groq",
+  huggingface: "huggingface",
+} as const;
+
 export interface ScalpingConfig {
   totalCapitalEth: number;
   maxTradeAmountEth: number;
@@ -149,6 +158,9 @@ export interface ScalpingConfig {
   mode: ScalpingConfigMode;
   trailingStopMinProfitToActivate?: number;
   trailingStopLockMinProfitPercent?: number;
+  enableAIFilter?: boolean;
+  aiFilterMinConfidence?: number;
+  aiPrimaryProvider?: ScalpingConfigAiPrimaryProvider;
 }
 
 export type ScalpingConfigUpdateRiskLevel =
@@ -166,6 +178,15 @@ export type ScalpingConfigUpdateMode =
 export const ScalpingConfigUpdateMode = {
   live: "live",
   paper: "paper",
+} as const;
+
+export type ScalpingConfigUpdateAiPrimaryProvider =
+  (typeof ScalpingConfigUpdateAiPrimaryProvider)[keyof typeof ScalpingConfigUpdateAiPrimaryProvider];
+
+export const ScalpingConfigUpdateAiPrimaryProvider = {
+  gemini: "gemini",
+  groq: "groq",
+  huggingface: "huggingface",
 } as const;
 
 export interface ScalpingConfigUpdate {
@@ -191,6 +212,9 @@ export interface ScalpingConfigUpdate {
   mode?: ScalpingConfigUpdateMode;
   trailingStopMinProfitToActivate?: number;
   trailingStopLockMinProfitPercent?: number;
+  enableAIFilter?: boolean;
+  aiFilterMinConfidence?: number;
+  aiPrimaryProvider?: ScalpingConfigUpdateAiPrimaryProvider;
 }
 
 export interface WalletBalance {

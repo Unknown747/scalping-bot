@@ -1,4 +1,7 @@
 import { motion } from "framer-motion";
+import { useGetConfig, useUpdateConfig, getGetConfigQueryKey } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 
 type Props = {
   running: boolean;
@@ -15,14 +18,40 @@ type Props = {
 const riskLevels = ["conservative", "moderate", "aggressive"] as const;
 
 export function ControlPanel({
-  running, mode, onStartStop, onEmergencyStop, onRiskChange, onModeToggle,
+  running, mode, onStartStop, onEmergencyStop, onRiskChange,
   isStarting, isStopping, isEmergencyStopping
 }: Props) {
   const isPending = isStarting || isStopping;
+  const queryClient = useQueryClient();
+  const updateConfig = useUpdateConfig();
+
+  const enablePaperMode = () => {
+    updateConfig.mutate({ data: { mode: "paper" } }, {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getGetConfigQueryKey() });
+        toast.info("Switched to paper mode");
+      },
+    });
+  };
 
   return (
     <div className="bg-card border border-border rounded-lg p-4 space-y-4" data-testid="control-panel">
-      <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">Control Panel</div>
+      {/* Live mode indicator */}
+      <div className="flex items-center justify-between">
+        <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">Control Panel</div>
+        {mode === "live" ? (
+          <span className="text-[9px] font-mono font-bold px-2 py-0.5 rounded bg-loss/15 text-loss border border-loss/30 tracking-wider">
+            ⚡ MAINNET LIVE
+          </span>
+        ) : (
+          <button
+            onClick={enablePaperMode}
+            className="text-[9px] font-mono px-2 py-0.5 rounded bg-warn/10 text-warn border border-warn/30 hover:bg-warn/20 transition-colors"
+          >
+            PAPER (click: kembali ke paper)
+          </button>
+        )}
+      </div>
 
       {/* START/STOP button */}
       <motion.button
@@ -63,34 +92,15 @@ export function ControlPanel({
         </div>
       </div>
 
-      {/* Mode toggle */}
-      <div className="space-y-2">
-        <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">Trading Mode</div>
-        <div className="grid grid-cols-2 gap-1">
-          <button
-            data-testid="button-mode-paper"
-            onClick={() => onModeToggle("paper")}
-            className={`py-1.5 rounded text-xs font-mono transition-colors ${
-              mode === "paper"
-                ? "bg-warn/20 text-warn border border-warn/50"
-                : "bg-muted text-muted-foreground border border-border hover:bg-muted/80"
-            }`}
-          >
-            PAPER
-          </button>
-          <button
-            data-testid="button-mode-live"
-            onClick={() => onModeToggle("live")}
-            className={`py-1.5 rounded text-xs font-mono transition-colors ${
-              mode === "live"
-                ? "bg-loss/20 text-loss border border-loss/50"
-                : "bg-muted text-muted-foreground border border-border hover:bg-muted/80"
-            }`}
-          >
-            LIVE
-          </button>
+      {/* Live trading info */}
+      {mode === "live" && (
+        <div className="rounded-lg border border-loss/20 bg-loss/5 p-2.5 space-y-1">
+          <div className="text-[10px] font-mono text-loss font-bold">LIVE TRADING ACTIVE</div>
+          <div className="text-[9px] text-muted-foreground font-mono leading-relaxed">
+            Dana nyata digunakan. Setiap trade ~$1 (0.0003 ETH). Pastikan wallet & RPC sudah dikonfigurasi di Secrets.
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Emergency Stop */}
       <motion.button

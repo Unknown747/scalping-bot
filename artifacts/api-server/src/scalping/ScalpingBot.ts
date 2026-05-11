@@ -6,6 +6,7 @@ import { SwapExecutor } from "./SwapExecutor.js";
 import { DEXAggregator } from "./DEXAggregator.js";
 import { TelegramNotifier } from "./TelegramNotifier.js";
 import { calculateMemeScore } from "./MemeScorer.js";
+import { AIAnalyzer } from "./AIAnalyzer.js";
 import type { ScalpingConfigData } from "./config.js";
 import { DEFAULT_CONFIG } from "./config.js";
 import * as db from "./database.js";
@@ -98,6 +99,7 @@ export class ScalpingBot {
   private dexAggregator: DEXAggregator;
   private telegram: TelegramNotifier;
   private cooldownManager: CooldownManager;
+  private aiAnalyzer: AIAnalyzer;
 
   private accumulatedProfitEth = 0;
 
@@ -122,6 +124,11 @@ export class ScalpingBot {
       enabled: this.config.enableTelegram,
     });
     this.cooldownManager = new CooldownManager();
+    this.aiAnalyzer = new AIAnalyzer(
+      this.config.enableAIFilter,
+      this.config.aiFilterMinConfidence,
+      this.config.aiPrimaryProvider
+    );
   }
 
   private loadConfig(): ScalpingConfigData {
@@ -156,6 +163,11 @@ export class ScalpingBot {
       chatId: this.config.telegramChatId,
       enabled: this.config.enableTelegram,
     });
+    this.aiAnalyzer.updateSettings(
+      this.config.enableAIFilter,
+      this.config.aiFilterMinConfidence,
+      this.config.aiPrimaryProvider
+    );
     return this.config;
   }
 
@@ -575,6 +587,34 @@ export class ScalpingBot {
     if (!safety.passed) {
       this.log("warn", `${token.symbol} failed safety check (score: ${safety.score}): ${safety.warnings.join(", ")}`, token.symbol);
       return;
+    }
+
+    // AI Filter: use Gemini/Groq/HuggingFace to validate entry
+    if (this.config.enableAIFilter) {
+      const buySellRatioForAI = buySellRatio;
+      const aiResult = await this.aiAnalyzer.analyze({
+        symbol: token.symbol,
+        name: token.name,
+        priceUsd: token.priceUsd,
+        priceChange5m: token.priceChange5m,
+        priceChange1h: token.priceChange1h,
+        volume5mUsd: token.volume5mUsd,
+        liquidityUsd: token.liquidityUsd,
+        ageMinutes: token.ageMinutes,
+        buySellRatio5m: buySellRatioForAI,
+        safetyScore: safety.score,
+        memeScore: memeScore.score,
+      });
+
+      if (aiResult) {
+        const verdict = this.aiAnalyzer.shouldBuy(aiResult);
+        this.log(
+          verdict ? "info" : "warn",
+          `AI [${aiResult.provider}] ${token.symbol}: ${aiResult.decision.toUpperCase()} (confidence: ${aiResult.confidence}%) — ${aiResult.reasons.slice(0,2).join(" | ")} [${aiResult.latencyMs}ms]`,
+          token.symbol
+        );
+        if (!verdict) return;
+      }
     }
 
     // DEX Aggregator: find best route

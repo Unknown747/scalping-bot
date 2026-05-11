@@ -499,6 +499,13 @@ components:
           type: number
         trailingStopLockMinProfitPercent:
           type: number
+        enableAIFilter:
+          type: boolean
+        aiFilterMinConfidence:
+          type: number
+        aiPrimaryProvider:
+          type: string
+          enum: [gemini, groq, huggingface]
       required:
         - totalCapitalEth
         - maxTradeAmountEth
@@ -570,6 +577,13 @@ components:
           type: number
         trailingStopLockMinProfitPercent:
           type: number
+        enableAIFilter:
+          type: boolean
+        aiFilterMinConfidence:
+          type: number
+        aiPrimaryProvider:
+          type: string
+          enum: [gemini, groq, huggingface]
 
     WalletBalance:
       type: object

@@ -224,6 +224,9 @@ export const GetConfigResponse = zod.object({
   mode: zod.enum(["live", "paper"]),
   trailingStopMinProfitToActivate: zod.number().optional(),
   trailingStopLockMinProfitPercent: zod.number().optional(),
+  enableAIFilter: zod.boolean().optional(),
+  aiFilterMinConfidence: zod.number().optional(),
+  aiPrimaryProvider: zod.enum(["gemini", "groq", "huggingface"]).optional(),
 });
 
 /**
@@ -252,6 +255,9 @@ export const UpdateConfigBody = zod.object({
   mode: zod.enum(["live", "paper"]).optional(),
   trailingStopMinProfitToActivate: zod.number().optional(),
   trailingStopLockMinProfitPercent: zod.number().optional(),
+  enableAIFilter: zod.boolean().optional(),
+  aiFilterMinConfidence: zod.number().optional(),
+  aiPrimaryProvider: zod.enum(["gemini", "groq", "huggingface"]).optional(),
 });
 
 export const UpdateConfigResponse = zod.object({
@@ -277,6 +283,9 @@ export const UpdateConfigResponse = zod.object({
   mode: zod.enum(["live", "paper"]),
   trailingStopMinProfitToActivate: zod.number().optional(),
   trailingStopLockMinProfitPercent: zod.number().optional(),
+  enableAIFilter: zod.boolean().optional(),
+  aiFilterMinConfidence: zod.number().optional(),
+  aiPrimaryProvider: zod.enum(["gemini", "groq", "huggingface"]).optional(),
 });
 
 /**

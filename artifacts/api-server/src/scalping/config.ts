@@ -80,15 +80,20 @@ export interface ScalpingConfigData {
   require1hMomentum: boolean;
 
   // Advanced Trailing Stop
-  trailingStopMinProfitToActivate: number;  // trailing stop only activates after profit >= this %
-  trailingStopLockMinProfitPercent: number; // stop price is always >= entryPrice × (1 + lockMin%), locking minimum profit
+  trailingStopMinProfitToActivate: number;
+  trailingStopLockMinProfitPercent: number;
+
+  // AI Filter
+  enableAIFilter: boolean;
+  aiFilterMinConfidence: number;
+  aiPrimaryProvider: "gemini" | "groq" | "huggingface";
 }
 
 export const DEFAULT_CONFIG: ScalpingConfigData = {
   totalCapitalEth: 0.04,
-  maxTradeAmountEth: 0.002,
+  maxTradeAmountEth: 0.0003,
   maxConcurrentPositions: 3,
-  minPositionEth: 0.001,
+  minPositionEth: 0.0001,
   min5mVolumeUsd: 5000,
   minLiquidityUsd: 10000,
   maxTokenAgeMinutes: 30,
@@ -113,7 +118,7 @@ export const DEFAULT_CONFIG: ScalpingConfigData = {
   scanIntervalSeconds: 8,
   priceCheckIntervalSeconds: 2,
   riskLevel: "conservative",
-  mode: "paper",
+  mode: "live",
 
   // Meme Score Filter
   minMemeScore: 70,
@@ -168,6 +173,11 @@ export const DEFAULT_CONFIG: ScalpingConfigData = {
   // Advanced Trailing Stop
   trailingStopMinProfitToActivate: 5,
   trailingStopLockMinProfitPercent: 2,
+
+  // AI Filter
+  enableAIFilter: false,
+  aiFilterMinConfidence: 65,
+  aiPrimaryProvider: "gemini",
 };
 
 // Risk level presets

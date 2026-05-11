@@ -5,6 +5,7 @@
  * Meme Coin Scalping Bot API
  * OpenAPI spec version: 0.1.0
  */
+import type { ScalpingConfigUpdateAiPrimaryProvider } from "./scalpingConfigUpdateAiPrimaryProvider";
 import type { ScalpingConfigUpdateMode } from "./scalpingConfigUpdateMode";
 import type { ScalpingConfigUpdateRiskLevel } from "./scalpingConfigUpdateRiskLevel";
 
@@ -31,4 +32,7 @@ export interface ScalpingConfigUpdate {
   mode?: ScalpingConfigUpdateMode;
   trailingStopMinProfitToActivate?: number;
   trailingStopLockMinProfitPercent?: number;
+  enableAIFilter?: boolean;
+  aiFilterMinConfidence?: number;
+  aiPrimaryProvider?: ScalpingConfigUpdateAiPrimaryProvider;
 }
