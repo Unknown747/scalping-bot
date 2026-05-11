@@ -6,6 +6,7 @@ import router from "./routes/index.js";
 import authRouter from "./routes/auth.js";
 import { logger } from "./lib/logger.js";
 import { requireAuth } from "./middleware/auth.js";
+import { runSecurityAudit } from "./scalping/SecurityAudit.js";
 
 const SESSION_SECRET = process.env["SESSION_SECRET"];
 if (!SESSION_SECRET) {
@@ -48,9 +49,15 @@ app.use(
   })
 );
 
-// Public routes — auth endpoints and health check
+// Public routes — auth endpoints, health check, and security audit
 app.use("/api", authRouter);
 app.get("/api/healthz", (_req, res) => res.json({ status: "ok" }));
+
+// Security audit is public — shows only pass/fail status, no sensitive values
+app.get("/api/security-audit", (_req, res) => {
+  const result = runSecurityAudit();
+  res.status(result.canRunLive ? 200 : 503).json(result);
+});
 
 // All other /api routes require authentication
 app.use("/api", requireAuth, router);
