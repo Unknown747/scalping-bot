@@ -136,12 +136,16 @@ SESSION_SECRET=TEMPEL_HASIL_OPENSSL_DISINI
 # Password untuk login dashboard
 DASHBOARD_PASSWORD=buat_password_kuat_kamu
 
+# Set ke true HANYA jika VPS sudah pakai HTTPS/SSL. Biarkan false untuk HTTP biasa.
+# Jika ini true di HTTP → semua API call balik 401 dan bot tidak bisa start!
+COOKIE_SECURE=false
+
 # Wallet BOT (gunakan wallet baru, bukan wallet utama!)
 PRIVATE_KEY=0xPRIVATE_KEY_WALLET_BOT_KAMU
 WALLET_ADDRESS=0xALAMAT_WALLET_BOT_KAMU
 
-# RPC dari Alchemy
-BASE_RPC_URL=https://base-mainnet.g.alchemy.com/v2/YOUR_ALCHEMY_KEY
+# RPC dari Alchemy atau Infura
+BASE_RPC_URL=https://base-mainnet.g.alchemy.com/v2/YOUR_KEY
 
 # ─── MEV Protection (sudah ada default, langsung pakai) ───────────────────────
 MEV_PROTECTION_RPC=https://mev-blocker.drpc.org
@@ -345,6 +349,32 @@ Jika `index.html` tidak ada → build ulang:
 ```bash
 BASE_PATH=/ PORT=80 pnpm --filter @workspace/scalping-dashboard run build
 ```
+
+### Login berhasil tapi semua API balik 401 / Bot tidak bisa start
+
+Ini terjadi karena `COOKIE_SECURE=true` di VPS yang pakai HTTP biasa (bukan HTTPS).
+
+```bash
+# Cek isi .env
+grep COOKIE_SECURE artifacts/api-server/.env
+```
+
+Jika hasilnya `COOKIE_SECURE=true` atau tidak ada baris itu → fix:
+
+```bash
+# Tambah atau ganti ke false
+sed -i 's/^COOKIE_SECURE=.*/COOKIE_SECURE=false/' artifacts/api-server/.env
+grep -q "COOKIE_SECURE" artifacts/api-server/.env || echo "COOKIE_SECURE=false" >> artifacts/api-server/.env
+
+# Rebuild dan restart
+pnpm --filter @workspace/api-server run build
+pm2 restart scalper-api
+
+# Verifikasi — harus balik {"status":"ok",...}
+curl http://localhost:8080/api/healthz
+```
+
+---
 
 ### Bot jalan tapi tidak ada trade
 

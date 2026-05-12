@@ -15,6 +15,9 @@ if (!SESSION_SECRET) {
 
 const app: Express = express();
 
+// Trust Nginx reverse proxy — required for correct IP, X-Forwarded-Proto, etc.
+app.set("trust proxy", 1);
+
 app.use(
   pinoHttp({
     logger,
@@ -42,7 +45,9 @@ app.use(
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: process.env["NODE_ENV"] === "production",
+      // Set COOKIE_SECURE=true di .env hanya jika VPS pakai HTTPS.
+      // Default false supaya VPS dengan HTTP biasa bisa login.
+      secure: process.env["COOKIE_SECURE"] === "true",
       sameSite: "lax",
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     },

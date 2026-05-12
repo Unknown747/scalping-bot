@@ -191,6 +191,9 @@ NODE_ENV=production
 SESSION_SECRET=$SESSION_SECRET
 DASHBOARD_PASSWORD=$DASHBOARD_PASSWORD
 
+# Set ke true HANYA jika VPS sudah pakai HTTPS/SSL. Biarkan false untuk HTTP biasa.
+COOKIE_SECURE=false
+
 # ─── Wallet ───────────────────────────────────────────────────────────────────
 PRIVATE_KEY=$PRIVATE_KEY
 WALLET_ADDRESS=$WALLET_ADDRESS
