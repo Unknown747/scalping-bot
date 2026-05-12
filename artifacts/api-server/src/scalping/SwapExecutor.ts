@@ -465,23 +465,24 @@ export class SwapExecutor {
             simMsg.includes("STF") ||
             simMsg.includes("slippage");
 
-          // On the ETH path, TransferHelper = token's transfer() is broken = real honeypot/FoT
-          // (NOT an approval error — ETH path never needs wallet approval)
-          const isContractRevert =
-            simMsg.includes("missing revert data") ||
-            simMsg.includes("execution reverted") ||
-            simMsg.includes("reverted") ||
+          // ONLY block on an explicit TransferHelper error on the ETH path.
+          // This means the token's transfer() to the recipient is restricted → clear honeypot/FoT signal.
+          //
+          // DO NOT block on:
+          //   "missing revert data"  — public RPCs often return this when eth_call+value isn't
+          //                            properly simulated. This is an RPC infra issue, not a honeypot.
+          //   "execution reverted"   — too generic; could be slippage, stale price, or RPC quirk.
+          //   "reverted"             — same as above.
+          // These should all proceed to the real tx and let the on-chain execution decide.
+          const isHoneypot =
             simMsg.includes("TRANSFER_FROM_FAILED") ||
             simMsg.includes("TransferHelper");
 
-          const isInfraError =
-            simMsg.includes("rate limit") ||
-            simMsg.includes("over rate limit") ||
-            simMsg.includes("could not coalesce") ||
-            simMsg.includes("timeout") ||
-            simMsg.includes("network");
-
           if (isSlippageRevert) {
+            // Retry with 2× slippage (up to 20%) — update amountOutMinimum and proceed.
+            // Even if the retry simulation also fails, we still continue with the real tx
+            // using the wider slippage, rather than aborting. Price can move between
+            // quote and simulation; the real tx is the ultimate source of truth.
             const retrySlippagePct = Math.min(slippagePct * 2, 20);
             amountOutMinimum =
               (expectedOut * BigInt(Math.floor((100 - retrySlippagePct) * 100))) / 10000n;
@@ -512,16 +513,17 @@ export class SwapExecutor {
                 retryErr.revert?.args?.[0] ||
                 retryErr.message ||
                 "retry simulation failed";
-              logger.warn({ tokenAddress, fee, retryMsg }, "Slippage retry simulation also failed — skipping buy");
-              return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: `Simulation: ${retryMsg}` };
+              // Still proceed — real tx uses the widened slippage; simulation may be an RPC artefact.
+              logger.warn({ tokenAddress, fee, retryMsg }, "Slippage retry simulation also failed — still proceeding with real tx at wider slippage");
             }
-          } else if (isContractRevert) {
-            logger.warn({ tokenAddress, fee, simMsg }, "Token contract revert in ETH-path simulation — likely honeypot/FoT, skipping buy");
+          } else if (isHoneypot) {
+            // Explicit TransferHelper on ETH path = token blocks transfers = honeypot/FoT.
+            logger.warn({ tokenAddress, fee, simMsg }, "Honeypot/FoT detected in ETH-path simulation (TransferHelper) — skipping buy");
             return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: `Honeypot/FoT: ${simMsg}` };
-          } else if (isInfraError) {
-            logger.warn({ tokenAddress, fee, simMsg }, "Simulation infra error (rate limit/timeout) — proceeding with real tx");
           } else {
-            logger.warn({ tokenAddress, fee, simMsg }, "Simulation unknown error — proceeding with real tx anyway");
+            // Anything else (missing revert data, execution reverted, RPC errors, unknown) — proceed.
+            // GoPlus already vetted this token; let the real tx be the final arbiter.
+            logger.warn({ tokenAddress, fee, simMsg }, "Simulation non-critical error — proceeding with real tx (GoPlus safety already passed)");
           }
         }
       } else {
