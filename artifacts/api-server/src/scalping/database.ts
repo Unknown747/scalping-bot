@@ -12,6 +12,7 @@ export function getDb(): DatabaseSync {
   if (!_db) {
     _db = new DatabaseSync(DB_PATH);
     _db.exec("PRAGMA journal_mode = WAL");
+    _db.exec("PRAGMA busy_timeout = 10000");
     _db.exec("PRAGMA foreign_keys = ON");
     _db.exec("PRAGMA cache_size = -8000");
     _db.exec("PRAGMA temp_store = MEMORY");

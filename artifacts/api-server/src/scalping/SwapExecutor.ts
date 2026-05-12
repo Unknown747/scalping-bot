@@ -35,8 +35,8 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Uniswap V3 QuoterV2 on Base — verified address
-const QUOTER_V2 = "0x61fFE014bA17989E743c5F6cB21bF9697530B21e";
+// Uniswap V3 QuoterV2 on Base mainnet — same address as BASE_CONTRACTS.UNISWAP_V3_QUOTER
+const QUOTER_V2 = BASE_CONTRACTS.UNISWAP_V3_QUOTER; // 0x3d4e44Eb1374240CE5F1B136041212501e4a0439
 const FEE_TIERS = [10000, 3000, 500, 100]; // 1%, 0.3%, 0.05%, 0.01%
 
 const feeTierCache = new Map<string, { fee: number; timestamp: number }>();
