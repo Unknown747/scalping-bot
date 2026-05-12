@@ -1,718 +1,717 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"log"
-	"math/rand"
-	"net/http"
-	"os"
-	"sync"
-	"time"
+        "context"
+        "encoding/json"
+        "fmt"
+        "log"
+        "math/rand"
+        "net/http"
+        "os"
+        "sync"
+        "time"
 
-	"github.com/gorilla/websocket"
-	"github.com/joho/godotenv"
+        "github.com/gorilla/websocket"
+        "github.com/joho/godotenv"
 
-	"meme-scalper-ai/internal/ai"
-	"meme-scalper-ai/internal/auth"
-	"meme-scalper-ai/internal/checker"
-	"meme-scalper-ai/internal/config"
-	"meme-scalper-ai/internal/data"
-	"meme-scalper-ai/internal/mev"
-	"meme-scalper-ai/internal/notify"
-	rpcpkg "meme-scalper-ai/internal/rpc"
+        "meme-scalper-ai/internal/ai"
+        "meme-scalper-ai/internal/auth"
+        "meme-scalper-ai/internal/checker"
+        "meme-scalper-ai/internal/config"
+        "meme-scalper-ai/internal/data"
+        "meme-scalper-ai/internal/mev"
+        "meme-scalper-ai/internal/notify"
+        rpcpkg "meme-scalper-ai/internal/rpc"
 )
 
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
+        CheckOrigin: func(r *http.Request) bool { return true },
 }
 
 type BotStats struct {
-	TotalTrades     int     `json:"totalTrades"`
-	WinningTrades   int     `json:"winningTrades"`
-	LosingTrades    int     `json:"losingTrades"`
-	WinRate         float64 `json:"winRate"`
-	TotalProfitUSD  float64 `json:"totalProfitUSD"`
-	DailyPnL        float64 `json:"dailyPnL"`
-	ActivePositions int     `json:"activePositions"`
-	GasSpentETH     float64 `json:"gasSpentETH"`
+        TotalTrades     int     `json:"totalTrades"`
+        WinningTrades   int     `json:"winningTrades"`
+        LosingTrades    int     `json:"losingTrades"`
+        WinRate         float64 `json:"winRate"`
+        TotalProfitUSD  float64 `json:"totalProfitUSD"`
+        DailyPnL        float64 `json:"dailyPnL"`
+        ActivePositions int     `json:"activePositions"`
 }
 
 type WSMessage struct {
-	Type string      `json:"type"`
-	Data interface{} `json:"data"`
+        Type string      `json:"type"`
+        Data interface{} `json:"data"`
 }
 
 type BotState struct {
-	Running         bool
-	SimMode         bool
-	Stats           BotStats
-	mu              sync.RWMutex
-	ConsecutiveLoss int
-	CircuitBroken   bool
-	CircuitUntil    time.Time
+        Running         bool
+        SimMode         bool
+        Stats           BotStats
+        mu              sync.RWMutex
+        ConsecutiveLoss int
+        CircuitBroken   bool
+        CircuitUntil    time.Time
 }
 
 var (
-	cfg        *config.Config
-	rpcClient  *rpcpkg.MultiRPCClient
-	aiOrch     *ai.AIOrchestrator
-	mevShield  *mev.SandwichDetector
-	geckoData  *data.GeckoClient
-	dexData    *data.DexScreenerClient
-	tgBot      *notify.TelegramBot
-	sessions   *auth.Manager
-	botState   = &BotState{}
-	clients    = make(map[*websocket.Conn]bool)
-	clientsMu  sync.Mutex
+        cfg        *config.Config
+        rpcClient  *rpcpkg.MultiRPCClient
+        aiOrch     *ai.AIOrchestrator
+        mevShield  *mev.SandwichDetector
+        geckoData  *data.GeckoClient
+        dexData    *data.DexScreenerClient
+        tgBot      *notify.TelegramBot
+        sessions   *auth.Manager
+        botState   = &BotState{}
+        clients    = make(map[*websocket.Conn]bool)
+        clientsMu  sync.Mutex
 )
 
 func main() {
-	_ = godotenv.Load(".env")
+        _ = godotenv.Load(".env")
 
-	var err error
-	cfg, err = config.Load("config.json")
-	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
-	}
+        var err error
+        cfg, err = config.Load("config.json")
+        if err != nil {
+                log.Fatalf("Failed to load config: %v", err)
+        }
 
-	rpcClient = rpcpkg.NewMultiRPCClient(cfg.RPCConfig.PrimaryEndpoints, cfg.RPCConfig.BackupEndpoints)
+        rpcClient = rpcpkg.NewMultiRPCClient(cfg.RPCConfig.PrimaryEndpoints, cfg.RPCConfig.BackupEndpoints)
 
-	weights := cfg.AIConfig.AIWeights
-	if weights == nil {
-		weights = map[string]float64{"gemini": 0.40, "groq": 0.35, "huangfing": 0.25}
-	}
-	aiOrch = ai.NewOrchestrator(
-		cfg.AIConfig.Gemini.Model, cfg.AIConfig.Gemini.TimeoutSeconds,
-		cfg.AIConfig.Groq.Model, cfg.AIConfig.Groq.TimeoutSeconds,
-		cfg.AIConfig.Huangfing.BaseURL, cfg.AIConfig.Huangfing.Model, cfg.AIConfig.Huangfing.TimeoutSeconds,
-		weights,
-	)
+        weights := cfg.AIConfig.AIWeights
+        if weights == nil {
+                weights = map[string]float64{"gemini": 0.40, "groq": 0.35, "huangfing": 0.25}
+        }
+        aiOrch = ai.NewOrchestrator(
+                cfg.AIConfig.Gemini.Model, cfg.AIConfig.Gemini.TimeoutSeconds,
+                cfg.AIConfig.Groq.Model, cfg.AIConfig.Groq.TimeoutSeconds,
+                cfg.AIConfig.Huangfing.BaseURL, cfg.AIConfig.Huangfing.Model, cfg.AIConfig.Huangfing.TimeoutSeconds,
+                weights,
+        )
 
-	mevShield = mev.NewSandwichDetector(
-		cfg.MEV.MaxSandwichRiskPct,
-		cfg.MEV.RandomDelayMs["min"],
-		cfg.MEV.RandomDelayMs["max"],
-	)
+        mevShield = mev.NewSandwichDetector(
+                cfg.MEV.MaxSandwichRiskPct,
+                cfg.MEV.RandomDelayMs["min"],
+                cfg.MEV.RandomDelayMs["max"],
+        )
 
-	geckoData = data.NewGeckoClient()
-	dexData = data.NewDexScreenerClient()
-	tgBot = notify.NewTelegramBot()
-	sessions = auth.NewManager()
+        geckoData = data.NewGeckoClient()
+        dexData = data.NewDexScreenerClient()
+        tgBot = notify.NewTelegramBot()
+        sessions = auth.NewManager()
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "5000"
-	}
+        port := os.Getenv("PORT")
+        if port == "" {
+                port = "5000"
+        }
 
-	mux := http.NewServeMux()
+        mux := http.NewServeMux()
 
-	// Public routes — no auth required
-	mux.HandleFunc("/login", serveLogin)
-	mux.HandleFunc("/api/login", handleLogin)
+        // Public routes — no auth required
+        mux.HandleFunc("/login", serveLogin)
+        mux.HandleFunc("/api/login", handleLogin)
 
-	// Protected routes — wrapped with authMiddleware
-	mux.Handle("/", authMiddleware(http.HandlerFunc(serveUI)))
-	mux.Handle("/logout", authMiddleware(http.HandlerFunc(handleLogout)))
-	mux.Handle("/ws", authMiddleware(http.HandlerFunc(handleWebSocket)))
-	mux.Handle("/api/stats", authMiddleware(http.HandlerFunc(handleStats)))
-	mux.Handle("/api/status", authMiddleware(http.HandlerFunc(handleStatus)))
-	mux.Handle("/api/check", authMiddleware(http.HandlerFunc(handleCheck)))
-	mux.Handle("/api/test/telegram", authMiddleware(http.HandlerFunc(handleTestTelegram)))
+        // Protected routes — wrapped with authMiddleware
+        mux.Handle("/", authMiddleware(http.HandlerFunc(serveUI)))
+        mux.Handle("/logout", authMiddleware(http.HandlerFunc(handleLogout)))
+        mux.Handle("/ws", authMiddleware(http.HandlerFunc(handleWebSocket)))
+        mux.Handle("/api/stats", authMiddleware(http.HandlerFunc(handleStats)))
+        mux.Handle("/api/status", authMiddleware(http.HandlerFunc(handleStatus)))
+        mux.Handle("/api/check", authMiddleware(http.HandlerFunc(handleCheck)))
+        mux.Handle("/api/test/telegram", authMiddleware(http.HandlerFunc(handleTestTelegram)))
 
-	log.Printf("🚀 MemeScalper AI Pro v%s starting on port %s", cfg.Bot.Version, port)
-	log.Printf("📡 Network: %s | Chain ID: %d", cfg.Bot.Network, cfg.Bot.ChainID)
-	log.Printf("🔐 Login: http://0.0.0.0:%s/login", port)
-	log.Printf("🌐 Web UI: http://0.0.0.0:%s (protected)", port)
-	if tgBot.IsEnabled() {
-		log.Printf("📱 Telegram notifications: enabled")
-	} else {
-		log.Printf("📱 Telegram notifications: disabled (set BOT_TOKEN + CHAT_ID in .env)")
-	}
+        log.Printf("🚀 MemeScalper AI Pro v%s starting on port %s", cfg.Bot.Version, port)
+        log.Printf("📡 Network: %s | Chain ID: %d", cfg.Bot.Network, cfg.Bot.ChainID)
+        log.Printf("🔐 Login: http://0.0.0.0:%s/login", port)
+        log.Printf("🌐 Web UI: http://0.0.0.0:%s (protected)", port)
+        if tgBot.IsEnabled() {
+                log.Printf("📱 Telegram notifications: enabled")
+        } else {
+                log.Printf("📱 Telegram notifications: disabled (set BOT_TOKEN + CHAT_ID in .env)")
+        }
 
-	go broadcastLoop()
+        go broadcastLoop()
 
-	if err := http.ListenAndServe(":"+port, mux); err != nil {
-		log.Fatalf("Server failed: %v", err)
-	}
+        if err := http.ListenAndServe(":"+port, mux); err != nil {
+                log.Fatalf("Server failed: %v", err)
+        }
 }
 
 // ── Auth middleware ──────────────────────────────────────────────────────────
 
 func authMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !sessions.IsAuthenticated(r) {
-			// For API / WS requests return 401 JSON; for page requests redirect
-			if isAPIorWS(r) {
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusUnauthorized)
-				json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
-				return
-			}
-			http.Redirect(w, r, "/login", http.StatusFound)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+                if !sessions.IsAuthenticated(r) {
+                        // For API / WS requests return 401 JSON; for page requests redirect
+                        if isAPIorWS(r) {
+                                w.Header().Set("Content-Type", "application/json")
+                                w.WriteHeader(http.StatusUnauthorized)
+                                json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+                                return
+                        }
+                        http.Redirect(w, r, "/login", http.StatusFound)
+                        return
+                }
+                next.ServeHTTP(w, r)
+        })
 }
 
 func isAPIorWS(r *http.Request) bool {
-	p := r.URL.Path
-	return len(p) >= 4 && (p[:4] == "/api" || p[:3] == "/ws")
+        p := r.URL.Path
+        return len(p) >= 4 && (p[:4] == "/api" || p[:3] == "/ws")
 }
 
 // ── Auth handlers ────────────────────────────────────────────────────────────
 
 func serveLogin(w http.ResponseWriter, r *http.Request) {
-	// If already logged in, redirect to dashboard
-	if sessions.IsAuthenticated(r) {
-		http.Redirect(w, r, "/", http.StatusFound)
-		return
-	}
-	http.ServeFile(w, r, "web/login.html")
+        // If already logged in, redirect to dashboard
+        if sessions.IsAuthenticated(r) {
+                http.Redirect(w, r, "/", http.StatusFound)
+                return
+        }
+        http.ServeFile(w, r, "web/login.html")
 }
 
 func handleLogin(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	if r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
+        w.Header().Set("Content-Type", "application/json")
+        if r.Method != http.MethodPost {
+                w.WriteHeader(http.StatusMethodNotAllowed)
+                return
+        }
 
-	ip := auth.ClientIP(r)
-	if sessions.IsLockedOut(ip) {
-		w.WriteHeader(http.StatusTooManyRequests)
-		json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "too_many_attempts"})
-		return
-	}
+        ip := auth.ClientIP(r)
+        if sessions.IsLockedOut(ip) {
+                w.WriteHeader(http.StatusTooManyRequests)
+                json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "too_many_attempts"})
+                return
+        }
 
-	var creds struct {
-		Username string `json:"username"`
-		Password string `json:"password"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]interface{}{"ok": false})
-		return
-	}
+        var creds struct {
+                Username string `json:"username"`
+                Password string `json:"password"`
+        }
+        if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
+                w.WriteHeader(http.StatusBadRequest)
+                json.NewEncoder(w).Encode(map[string]interface{}{"ok": false})
+                return
+        }
 
-	if !sessions.Validate(creds.Username, creds.Password) {
-		sessions.RecordFail(ip)
-		w.WriteHeader(http.StatusUnauthorized)
-		json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "invalid_credentials"})
-		log.Printf("⚠️  Failed login attempt from %s (user: %q)", ip, creds.Username)
-		return
-	}
+        if !sessions.Validate(creds.Username, creds.Password) {
+                sessions.RecordFail(ip)
+                w.WriteHeader(http.StatusUnauthorized)
+                json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "invalid_credentials"})
+                log.Printf("⚠️  Failed login attempt from %s (user: %q)", ip, creds.Username)
+                return
+        }
 
-	sessions.ResetAttempts(ip)
-	token := sessions.Create()
-	sessions.SetCookie(w, token)
-	log.Printf("✅ Login successful from %s", ip)
-	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+        sessions.ResetAttempts(ip)
+        token := sessions.Create()
+        sessions.SetCookie(w, token)
+        log.Printf("✅ Login successful from %s", ip)
+        json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
 }
 
 func handleLogout(w http.ResponseWriter, r *http.Request) {
-	token := sessions.TokenFromRequest(r)
-	if token != "" {
-		sessions.Delete(token)
-	}
-	sessions.ClearCookie(w)
-	http.Redirect(w, r, "/login", http.StatusFound)
+        token := sessions.TokenFromRequest(r)
+        if token != "" {
+                sessions.Delete(token)
+        }
+        sessions.ClearCookie(w)
+        http.Redirect(w, r, "/login", http.StatusFound)
 }
 
 // ── Page / API handlers ──────────────────────────────────────────────────────
 
 func serveUI(w http.ResponseWriter, r *http.Request) {
-	http.ServeFile(w, r, "web/index.html")
+        http.ServeFile(w, r, "web/index.html")
 }
 
 func handleStats(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	botState.mu.RLock()
-	defer botState.mu.RUnlock()
-	json.NewEncoder(w).Encode(botState.Stats)
+        w.Header().Set("Content-Type", "application/json")
+        botState.mu.RLock()
+        defer botState.mu.RUnlock()
+        json.NewEncoder(w).Encode(botState.Stats)
 }
 
 func handleStatus(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	botState.mu.RLock()
-	running := botState.Running
-	simMode := botState.SimMode
-	botState.mu.RUnlock()
+        w.Header().Set("Content-Type", "application/json")
+        botState.mu.RLock()
+        running := botState.Running
+        simMode := botState.SimMode
+        botState.mu.RUnlock()
 
-	statuses := rpcClient.GetAllStatuses()
-	rpcInfo := make([]map[string]interface{}, 0, len(statuses))
-	for _, s := range statuses {
-		name := s.URL
-		if len(name) > 8 {
-			name = name[8:]
-		}
-		if len(name) > 30 {
-			name = name[:30]
-		}
-		status := "healthy"
-		if !s.Healthy {
-			status = "down"
-		}
-		rpcInfo = append(rpcInfo, map[string]interface{}{
-			"name":    name,
-			"status":  status,
-			"latency": s.Latency.Milliseconds(),
-		})
-	}
+        statuses := rpcClient.GetAllStatuses()
+        rpcInfo := make([]map[string]interface{}, 0, len(statuses))
+        for _, s := range statuses {
+                name := s.URL
+                if len(name) > 8 {
+                        name = name[8:]
+                }
+                if len(name) > 30 {
+                        name = name[:30]
+                }
+                status := "healthy"
+                if !s.Healthy {
+                        status = "down"
+                }
+                rpcInfo = append(rpcInfo, map[string]interface{}{
+                        "name":    name,
+                        "status":  status,
+                        "latency": s.Latency.Milliseconds(),
+                })
+        }
 
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"running":      running,
-		"simMode":      simMode,
-		"rpcEndpoints": rpcInfo,
-		"telegram":     tgBot.IsEnabled(),
-	})
+        json.NewEncoder(w).Encode(map[string]interface{}{
+                "running":      running,
+                "simMode":      simMode,
+                "rpcEndpoints": rpcInfo,
+                "telegram":     tgBot.IsEnabled(),
+        })
 }
 
 func handleCheck(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	report := checker.RunAll(cfg.RPCConfig.PrimaryEndpoints)
-	json.NewEncoder(w).Encode(report)
+        w.Header().Set("Content-Type", "application/json")
+        report := checker.RunAll(cfg.RPCConfig.PrimaryEndpoints)
+        json.NewEncoder(w).Encode(report)
 }
 
 func handleTestTelegram(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	result := tgBot.Test()
-	json.NewEncoder(w).Encode(result)
+        w.Header().Set("Content-Type", "application/json")
+        result := tgBot.Test()
+        json.NewEncoder(w).Encode(result)
 }
 
 // ── WebSocket ────────────────────────────────────────────────────────────────
 
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Printf("WebSocket upgrade error: %v", err)
-		return
-	}
-	defer conn.Close()
+        conn, err := upgrader.Upgrade(w, r, nil)
+        if err != nil {
+                log.Printf("WebSocket upgrade error: %v", err)
+                return
+        }
+        defer conn.Close()
 
-	clientsMu.Lock()
-	clients[conn] = true
-	clientsMu.Unlock()
+        clientsMu.Lock()
+        clients[conn] = true
+        clientsMu.Unlock()
 
-	defer func() {
-		clientsMu.Lock()
-		delete(clients, conn)
-		clientsMu.Unlock()
-	}()
+        defer func() {
+                clientsMu.Lock()
+                delete(clients, conn)
+                clientsMu.Unlock()
+        }()
 
-	sendInitialState(conn)
+        sendInitialState(conn)
 
-	for {
-		_, msg, err := conn.ReadMessage()
-		if err != nil {
-			break
-		}
-		var cmd struct {
-			Action string                 `json:"action"`
-			Config map[string]interface{} `json:"config"`
-		}
-		if err := json.Unmarshal(msg, &cmd); err != nil {
-			continue
-		}
-		handleCommand(cmd.Action, cmd.Config)
-	}
+        for {
+                _, msg, err := conn.ReadMessage()
+                if err != nil {
+                        break
+                }
+                var cmd struct {
+                        Action string                 `json:"action"`
+                        Config map[string]interface{} `json:"config"`
+                }
+                if err := json.Unmarshal(msg, &cmd); err != nil {
+                        continue
+                }
+                handleCommand(cmd.Action, cmd.Config)
+        }
 }
 
 func handleCommand(action string, params map[string]interface{}) {
-	switch action {
-	case "start":
-		simMode := false
-		if v, ok := params["simMode"]; ok {
-			simMode, _ = v.(bool)
-		}
-		botState.mu.Lock()
-		if !botState.Running {
-			botState.Running = true
-			botState.SimMode = simMode
-			botState.mu.Unlock()
-			go runBot()
-			modeLabel := "LIVE"
-			if simMode {
-				modeLabel = "SIMULATION"
-			}
-			broadcast("log", map[string]interface{}{
-				"message": fmt.Sprintf("✅ Bot started in %s mode", modeLabel),
-				"type":    "success",
-			})
-			tgBot.NotifyBotStart(simMode)
-		} else {
-			botState.mu.Unlock()
-		}
+        switch action {
+        case "start":
+                simMode := false
+                if v, ok := params["simMode"]; ok {
+                        simMode, _ = v.(bool)
+                }
+                botState.mu.Lock()
+                if !botState.Running {
+                        botState.Running = true
+                        botState.SimMode = simMode
+                        botState.mu.Unlock()
+                        go runBot()
+                        modeLabel := "LIVE"
+                        if simMode {
+                                modeLabel = "SIMULATION"
+                        }
+                        broadcast("log", map[string]interface{}{
+                                "message": fmt.Sprintf("✅ Bot started in %s mode", modeLabel),
+                                "type":    "success",
+                        })
+                        tgBot.NotifyBotStart(simMode)
+                } else {
+                        botState.mu.Unlock()
+                }
 
-	case "stop":
-		botState.mu.Lock()
-		botState.Running = false
-		stats := botState.Stats
-		botState.mu.Unlock()
-		broadcast("log", map[string]interface{}{"message": "🛑 Bot stopped", "type": "warning"})
-		tgBot.NotifyBotStop(map[string]interface{}{
-			"totalTrades":    stats.TotalTrades,
-			"totalProfitUSD": fmt.Sprintf("%.4f", stats.TotalProfitUSD),
-		})
+        case "stop":
+                botState.mu.Lock()
+                botState.Running = false
+                stats := botState.Stats
+                botState.mu.Unlock()
+                broadcast("log", map[string]interface{}{"message": "🛑 Bot stopped", "type": "warning"})
+                tgBot.NotifyBotStop(map[string]interface{}{
+                        "totalTrades":    stats.TotalTrades,
+                        "totalProfitUSD": fmt.Sprintf("%.4f", stats.TotalProfitUSD),
+                })
 
-	case "withdraw":
-		broadcast("log", map[string]interface{}{"message": "💰 Withdraw initiated (manual)", "type": "info"})
+        case "withdraw":
+                broadcast("log", map[string]interface{}{"message": "💰 Withdraw initiated (manual)", "type": "info"})
 
-	case "reset_stats":
-		botState.mu.Lock()
-		botState.Stats = BotStats{}
-		botState.ConsecutiveLoss = 0
-		botState.CircuitBroken = false
-		botState.mu.Unlock()
-		broadcast("log", map[string]interface{}{"message": "🔄 Statistics reset", "type": "warning"})
+        case "reset_stats":
+                botState.mu.Lock()
+                botState.Stats = BotStats{}
+                botState.ConsecutiveLoss = 0
+                botState.CircuitBroken = false
+                botState.mu.Unlock()
+                broadcast("log", map[string]interface{}{"message": "🔄 Statistics reset", "type": "warning"})
 
-	case "run_check":
-		go func() {
-			broadcast("log", map[string]interface{}{"message": "🔍 Running system check...", "type": "info"})
-			report := checker.RunAll(cfg.RPCConfig.PrimaryEndpoints)
-			broadcast("check_result", report)
-			if report.AllOK {
-				broadcast("log", map[string]interface{}{"message": "✅ All checks passed!", "type": "success"})
-			} else {
-				broadcast("log", map[string]interface{}{"message": "⚠️ Some checks failed — see Check panel", "type": "warning"})
-			}
-		}()
+        case "run_check":
+                go func() {
+                        broadcast("log", map[string]interface{}{"message": "🔍 Running system check...", "type": "info"})
+                        report := checker.RunAll(cfg.RPCConfig.PrimaryEndpoints)
+                        broadcast("check_result", report)
+                        if report.AllOK {
+                                broadcast("log", map[string]interface{}{"message": "✅ All checks passed!", "type": "success"})
+                        } else {
+                                broadcast("log", map[string]interface{}{"message": "⚠️ Some checks failed — see Check panel", "type": "warning"})
+                        }
+                }()
 
-	case "test_telegram":
-		go func() {
-			broadcast("log", map[string]interface{}{"message": "📱 Testing Telegram connection...", "type": "info"})
-			result := tgBot.Test()
-			if result.OK {
-				broadcast("log", map[string]interface{}{"message": "✅ Telegram OK: " + result.Message, "type": "success"})
-			} else {
-				broadcast("log", map[string]interface{}{"message": "❌ Telegram failed: " + result.Message, "type": "error"})
-			}
-			broadcast("telegram_test", result)
-		}()
-	}
+        case "test_telegram":
+                go func() {
+                        broadcast("log", map[string]interface{}{"message": "📱 Testing Telegram connection...", "type": "info"})
+                        result := tgBot.Test()
+                        if result.OK {
+                                broadcast("log", map[string]interface{}{"message": "✅ Telegram OK: " + result.Message, "type": "success"})
+                        } else {
+                                broadcast("log", map[string]interface{}{"message": "❌ Telegram failed: " + result.Message, "type": "error"})
+                        }
+                        broadcast("telegram_test", result)
+                }()
+        }
 }
 
 // ── Bot logic ────────────────────────────────────────────────────────────────
 
 func runBot() {
-	log.Println("Bot loop started")
-	botState.mu.RLock()
-	simMode := botState.SimMode
-	botState.mu.RUnlock()
+        log.Println("Bot loop started")
+        botState.mu.RLock()
+        simMode := botState.SimMode
+        botState.mu.RUnlock()
 
-	if simMode {
-		broadcast("log", map[string]interface{}{"message": "🧪 SIMULATION MODE — no real trades", "type": "warning"})
-	}
-	broadcast("log", map[string]interface{}{"message": "🔍 Scanning tokens on Base Network...", "type": "info"})
+        if simMode {
+                broadcast("log", map[string]interface{}{"message": "🧪 SIMULATION MODE — no real trades", "type": "warning"})
+        }
+        broadcast("log", map[string]interface{}{"message": "🔍 Scanning tokens on Base Network...", "type": "info"})
 
-	for {
-		botState.mu.RLock()
-		running := botState.Running
-		circuitBroken := botState.CircuitBroken
-		circuitUntil := botState.CircuitUntil
-		simMode = botState.SimMode
-		botState.mu.RUnlock()
+        for {
+                botState.mu.RLock()
+                running := botState.Running
+                circuitBroken := botState.CircuitBroken
+                circuitUntil := botState.CircuitUntil
+                simMode = botState.SimMode
+                botState.mu.RUnlock()
 
-		if !running {
-			break
-		}
+                if !running {
+                        break
+                }
 
-		if circuitBroken {
-			if time.Now().Before(circuitUntil) {
-				remaining := time.Until(circuitUntil).Round(time.Second)
-				broadcast("log", map[string]interface{}{
-					"message": fmt.Sprintf("⚡ Circuit breaker active. Resuming in %s", remaining),
-					"type":    "warning",
-				})
-				time.Sleep(30 * time.Second)
-				continue
-			}
-			botState.mu.Lock()
-			botState.CircuitBroken = false
-			botState.mu.Unlock()
-			broadcast("log", map[string]interface{}{"message": "✅ Circuit breaker reset. Resuming...", "type": "success"})
-		}
+                if circuitBroken {
+                        if time.Now().Before(circuitUntil) {
+                                remaining := time.Until(circuitUntil).Round(time.Second)
+                                broadcast("log", map[string]interface{}{
+                                        "message": fmt.Sprintf("⚡ Circuit breaker active. Resuming in %s", remaining),
+                                        "type":    "warning",
+                                })
+                                time.Sleep(30 * time.Second)
+                                continue
+                        }
+                        botState.mu.Lock()
+                        botState.CircuitBroken = false
+                        botState.mu.Unlock()
+                        broadcast("log", map[string]interface{}{"message": "✅ Circuit breaker reset. Resuming...", "type": "success"})
+                }
 
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		tokens, err := geckoData.GetTopPools(ctx, "base")
-		cancel()
+                ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+                tokens, err := geckoData.GetTopPools(ctx, "base")
+                cancel()
 
-		if err != nil {
-			broadcast("log", map[string]interface{}{"message": "⚠️ GeckoTerminal error, trying DexScreener...", "type": "warning"})
-			ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
-			tokens, err = dexData.GetLatestTokens(ctx2, "base")
-			cancel2()
-			if err != nil {
-				broadcast("log", map[string]interface{}{"message": "❌ Data fetch failed: " + err.Error(), "type": "error"})
-				time.Sleep(5 * time.Second)
-				continue
-			}
-		}
+                if err != nil {
+                        broadcast("log", map[string]interface{}{"message": "⚠️ GeckoTerminal error, trying DexScreener...", "type": "warning"})
+                        ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
+                        tokens, err = dexData.GetLatestTokens(ctx2, "base")
+                        cancel2()
+                        if err != nil {
+                                broadcast("log", map[string]interface{}{"message": "❌ Data fetch failed: " + err.Error(), "type": "error"})
+                                time.Sleep(5 * time.Second)
+                                continue
+                        }
+                }
 
-		if simMode && len(tokens) == 0 {
-			tokens = generateSimTokens()
-		}
+                if simMode && len(tokens) == 0 {
+                        tokens = generateSimTokens()
+                }
 
-		for _, token := range tokens {
-			botState.mu.RLock()
-			running = botState.Running
-			botState.mu.RUnlock()
-			if !running {
-				break
-			}
+                for _, token := range tokens {
+                        botState.mu.RLock()
+                        running = botState.Running
+                        botState.mu.RUnlock()
+                        if !running {
+                                break
+                        }
 
-			if !passesFilters(token) {
-				continue
-			}
+                        if !passesFilters(token) {
+                                continue
+                        }
 
-			marketMap := geckoData.ToMarketMap(token)
-			decision := aiOrch.GetTradingDecision(token.Address, marketMap)
-			broadcastAIUpdate(decision, token.Address)
+                        marketMap := geckoData.ToMarketMap(token)
+                        decision := aiOrch.GetTradingDecision(token.Address, marketMap)
+                        broadcastAIUpdate(decision, token.Address)
 
-			if decision.Action == "HOLD" || decision.Confidence < cfg.AIConfig.MinConfidenceThreshold {
-				continue
-			}
+                        if decision.Action == "HOLD" || decision.Confidence < cfg.AIConfig.MinConfidenceThreshold {
+                                continue
+                        }
 
-			risk := mevShield.Assess(0.5, token.LiquidityUSD, float64(token.TxCount5m)/5.0)
-			if risk.ShouldSkip {
-				broadcast("log", map[string]interface{}{
-					"message": fmt.Sprintf("🛡️ MEV risk [%s]: %s — skipping %s", risk.RiskLevel, risk.Reason, token.Symbol),
-					"type":    "warning",
-				})
-				continue
-			}
+                        risk := mevShield.Assess(0.5, token.LiquidityUSD, float64(token.TxCount5m)/5.0)
+                        if risk.ShouldSkip {
+                                broadcast("log", map[string]interface{}{
+                                        "message": fmt.Sprintf("🛡️ MEV risk [%s]: %s — skipping %s", risk.RiskLevel, risk.Reason, token.Symbol),
+                                        "type":    "warning",
+                                })
+                                continue
+                        }
 
-			if !simMode {
-				mevShield.RandomDelay()
-			}
-			executeTrade(token, decision, simMode)
-		}
+                        if !simMode {
+                                mevShield.RandomDelay()
+                        }
+                        executeTrade(token, decision, simMode)
+                }
 
-		pollInterval := time.Duration(cfg.Monitoring.PollIntervalSecs) * time.Second
-		if pollInterval < time.Second {
-			pollInterval = 2 * time.Second
-		}
-		if simMode {
-			pollInterval = 3 * time.Second
-		}
-		time.Sleep(pollInterval)
-	}
+                pollInterval := time.Duration(cfg.Monitoring.PollIntervalSecs) * time.Second
+                if pollInterval < time.Second {
+                        pollInterval = 2 * time.Second
+                }
+                if simMode {
+                        pollInterval = 3 * time.Second
+                }
+                time.Sleep(pollInterval)
+        }
 
-	log.Println("Bot loop stopped")
+        log.Println("Bot loop stopped")
 }
 
 func generateSimTokens() []data.TokenData {
-	syms := []string{"DEGEN", "BRETT", "TOSHI", "MOCHI", "BENJI", "FROG", "PEPE", "MEME"}
-	out := make([]data.TokenData, 3)
-	for i := range out {
-		sym := syms[rand.Intn(len(syms))]
-		out[i] = data.TokenData{
-			Address:       fmt.Sprintf("0xSIM%04d", rand.Intn(9999)),
-			Symbol:        sym,
-			PriceUSD:      0.0001 + rand.Float64()*0.009,
-			Volume24h:     15000 + rand.Float64()*50000,
-			LiquidityUSD:  8000 + rand.Float64()*30000,
-			PriceChange5m: -3 + rand.Float64()*8,
-			TxCount5m:     10 + rand.Intn(80),
-			Buys5m:        5 + rand.Intn(40),
-			Sells5m:       5 + rand.Intn(30),
-		}
-	}
-	return out
+        syms := []string{"DEGEN", "BRETT", "TOSHI", "MOCHI", "BENJI", "FROG", "PEPE", "MEME"}
+        out := make([]data.TokenData, 3)
+        for i := range out {
+                sym := syms[rand.Intn(len(syms))]
+                out[i] = data.TokenData{
+                        Address:       fmt.Sprintf("0xSIM%04d", rand.Intn(9999)),
+                        Symbol:        sym,
+                        PriceUSD:      0.0001 + rand.Float64()*0.009,
+                        Volume24h:     15000 + rand.Float64()*50000,
+                        LiquidityUSD:  8000 + rand.Float64()*30000,
+                        PriceChange5m: -3 + rand.Float64()*8,
+                        TxCount5m:     10 + rand.Intn(80),
+                        Buys5m:        5 + rand.Intn(40),
+                        Sells5m:       5 + rand.Intn(30),
+                }
+        }
+        return out
 }
 
 func passesFilters(token data.TokenData) bool {
-	f := cfg.Monitoring.TokenFilters
-	if token.LiquidityUSD < f.MinLiquidityUSD {
-		return false
-	}
-	if token.Volume24h < f.MinVolume24hUSD {
-		return false
-	}
-	if f.MaxPriceUSD > 0 && token.PriceUSD > f.MaxPriceUSD {
-		return false
-	}
-	if token.TxCount5m < f.MinTxCount5m {
-		return false
-	}
-	return true
+        f := cfg.Monitoring.TokenFilters
+        if token.LiquidityUSD < f.MinLiquidityUSD {
+                return false
+        }
+        if token.Volume24h < f.MinVolume24hUSD {
+                return false
+        }
+        if f.MaxPriceUSD > 0 && token.PriceUSD > f.MaxPriceUSD {
+                return false
+        }
+        if token.TxCount5m < f.MinTxCount5m {
+                return false
+        }
+        return true
 }
 
 func executeTrade(token data.TokenData, decision *ai.TradingDecision, simMode bool) {
-	posSize := cfg.Trading.PositionSizeUSD
-	simTag := ""
-	if simMode {
-		simTag = " [SIM]"
-	}
+        posSize := cfg.Trading.PositionSizeUSD
+        simTag := ""
+        if simMode {
+                simTag = " [SIM]"
+        }
 
-	broadcast("log", map[string]interface{}{
-		"message": fmt.Sprintf("📊%s %s on %s | Conf: %.0f%% | $%.2f",
-			simTag, decision.Action, token.Symbol, decision.Confidence, posSize),
-		"type": "info",
-	})
+        broadcast("log", map[string]interface{}{
+                "message": fmt.Sprintf("📊%s %s on %s | Conf: %.0f%% | $%.2f",
+                        simTag, decision.Action, token.Symbol, decision.Confidence, posSize),
+                "type": "info",
+        })
 
-	time.Sleep(time.Duration(50+rand.Intn(150)) * time.Millisecond)
+        time.Sleep(time.Duration(50+rand.Intn(150)) * time.Millisecond)
 
-	win := rand.Float64() > 0.45
-	pnl := 0.0
-	strat := cfg.ScalpingStrategies()
-	if win {
-		pnl = posSize * (strat.MomentumTP / 100.0)
-	} else {
-		pnl = -posSize * (strat.MomentumSL / 100.0)
-	}
+        win := rand.Float64() > 0.45
+        pnl := 0.0
+        strat := cfg.ScalpingStrategies()
+        if win {
+                pnl = posSize * (strat.MomentumTP / 100.0)
+        } else {
+                pnl = -posSize * (strat.MomentumSL / 100.0)
+        }
 
-	botState.mu.Lock()
-	botState.Stats.TotalTrades++
-	if win {
-		botState.Stats.WinningTrades++
-		botState.Stats.TotalProfitUSD += pnl
-		botState.Stats.DailyPnL += pnl
-		botState.ConsecutiveLoss = 0
-		botState.mu.Unlock()
-		broadcast("log", map[string]interface{}{
-			"message": fmt.Sprintf("✅%s TP HIT: %s +$%.4f", simTag, token.Symbol, pnl),
-			"type":    "success",
-		})
-	} else {
-		botState.Stats.LosingTrades++
-		botState.Stats.TotalProfitUSD += pnl
-		botState.Stats.DailyPnL += pnl
-		botState.ConsecutiveLoss++
-		consecutiveLoss := botState.ConsecutiveLoss
-		botState.mu.Unlock()
-		broadcast("log", map[string]interface{}{
-			"message": fmt.Sprintf("❌%s SL HIT: %s -$%.4f", simTag, token.Symbol, -pnl),
-			"type":    "error",
-		})
+        botState.mu.Lock()
+        botState.Stats.TotalTrades++
+        if win {
+                botState.Stats.WinningTrades++
+                botState.Stats.TotalProfitUSD += pnl
+                botState.Stats.DailyPnL += pnl
+                botState.ConsecutiveLoss = 0
+                botState.mu.Unlock()
+                broadcast("log", map[string]interface{}{
+                        "message": fmt.Sprintf("✅%s TP HIT: %s +$%.4f", simTag, token.Symbol, pnl),
+                        "type":    "success",
+                })
+        } else {
+                botState.Stats.LosingTrades++
+                botState.Stats.TotalProfitUSD += pnl
+                botState.Stats.DailyPnL += pnl
+                botState.ConsecutiveLoss++
+                consecutiveLoss := botState.ConsecutiveLoss
+                botState.mu.Unlock()
+                broadcast("log", map[string]interface{}{
+                        "message": fmt.Sprintf("❌%s SL HIT: %s -$%.4f", simTag, token.Symbol, -pnl),
+                        "type":    "error",
+                })
 
-		if cfg.Risk.CircuitBreaker.Enabled && consecutiveLoss >= cfg.Risk.CircuitBreaker.ConsecutiveLossesThreshold {
-			botState.mu.Lock()
-			botState.CircuitBroken = true
-			botState.CircuitUntil = time.Now().Add(time.Duration(cfg.Risk.CircuitBreaker.PauseMinutes) * time.Minute)
-			botState.mu.Unlock()
-			broadcast("log", map[string]interface{}{
-				"message": fmt.Sprintf("⚡ Circuit breaker triggered! Pausing %d minutes", cfg.Risk.CircuitBreaker.PauseMinutes),
-				"type":    "error",
-			})
-			tgBot.NotifyCircuitBreaker(consecutiveLoss, cfg.Risk.CircuitBreaker.PauseMinutes)
-		}
-	}
+                if cfg.Risk.CircuitBreaker.Enabled && consecutiveLoss >= cfg.Risk.CircuitBreaker.ConsecutiveLossesThreshold {
+                        botState.mu.Lock()
+                        botState.CircuitBroken = true
+                        botState.CircuitUntil = time.Now().Add(time.Duration(cfg.Risk.CircuitBreaker.PauseMinutes) * time.Minute)
+                        botState.mu.Unlock()
+                        broadcast("log", map[string]interface{}{
+                                "message": fmt.Sprintf("⚡ Circuit breaker triggered! Pausing %d minutes", cfg.Risk.CircuitBreaker.PauseMinutes),
+                                "type":    "error",
+                        })
+                        tgBot.NotifyCircuitBreaker(consecutiveLoss, cfg.Risk.CircuitBreaker.PauseMinutes)
+                }
+        }
 
-	tgBot.NotifyTrade(token.Symbol, decision.Action, pnl, decision.Confidence, simMode)
+        tgBot.NotifyTrade(token.Symbol, decision.Action, pnl, decision.Confidence, simMode)
 
-	botState.mu.Lock()
-	total := botState.Stats.TotalTrades
-	wins := botState.Stats.WinningTrades
-	if total > 0 {
-		botState.Stats.WinRate = float64(wins) / float64(total) * 100.0
-	}
-	botState.mu.Unlock()
+        botState.mu.Lock()
+        total := botState.Stats.TotalTrades
+        wins := botState.Stats.WinningTrades
+        if total > 0 {
+                botState.Stats.WinRate = float64(wins) / float64(total) * 100.0
+        }
+        botState.mu.Unlock()
 }
 
 // ── Broadcast helpers ────────────────────────────────────────────────────────
 
 func broadcastLoop() {
-	ticker := time.NewTicker(2 * time.Second)
-	for range ticker.C {
-		botState.mu.RLock()
-		stats := botState.Stats
-		running := botState.Running
-		simMode := botState.SimMode
-		botState.mu.RUnlock()
+        ticker := time.NewTicker(2 * time.Second)
+        for range ticker.C {
+                botState.mu.RLock()
+                stats := botState.Stats
+                running := botState.Running
+                simMode := botState.SimMode
+                botState.mu.RUnlock()
 
-		statuses := rpcClient.GetAllStatuses()
-		rpcInfo := make([]map[string]interface{}, 0, len(statuses))
-		activeRPC := "none"
-		for _, s := range statuses {
-			name := s.URL
-			if len(name) > 8 {
-				name = name[8:]
-			}
-			if len(name) > 28 {
-				name = name[:28]
-			}
-			status := "healthy"
-			if !s.Healthy {
-				status = "down"
-			} else if activeRPC == "none" {
-				activeRPC = name
-			}
-			rpcInfo = append(rpcInfo, map[string]interface{}{
-				"name":   name,
-				"status": status,
-			})
-		}
+                statuses := rpcClient.GetAllStatuses()
+                rpcInfo := make([]map[string]interface{}, 0, len(statuses))
+                activeRPC := "none"
+                for _, s := range statuses {
+                        name := s.URL
+                        if len(name) > 8 {
+                                name = name[8:]
+                        }
+                        if len(name) > 28 {
+                                name = name[:28]
+                        }
+                        status := "healthy"
+                        if !s.Healthy {
+                                status = "down"
+                        } else if activeRPC == "none" {
+                                activeRPC = name
+                        }
+                        rpcInfo = append(rpcInfo, map[string]interface{}{
+                                "name":   name,
+                                "status": status,
+                        })
+                }
 
-		broadcast("update", map[string]interface{}{
-			"stats":        stats,
-			"running":      running,
-			"simMode":      simMode,
-			"rpcEndpoints": rpcInfo,
-			"activeRpc":    activeRPC,
-		})
-	}
+                broadcast("update", map[string]interface{}{
+                        "stats":        stats,
+                        "running":      running,
+                        "simMode":      simMode,
+                        "rpcEndpoints": rpcInfo,
+                        "activeRpc":    activeRPC,
+                })
+        }
 }
 
 func broadcastAIUpdate(decision *ai.TradingDecision, tokenAddr string) {
-	lastDecisions := aiOrch.GetLastDecisions()
+        lastDecisions := aiOrch.GetLastDecisions()
 
-	aiData := map[string]interface{}{
-		"finalDecision": decision.Action,
-		"consensus":     fmt.Sprintf("%.0f", decision.Confidence),
-	}
+        aiData := map[string]interface{}{
+                "finalDecision": decision.Action,
+                "consensus":     fmt.Sprintf("%.0f", decision.Confidence),
+        }
 
-	for provider, d := range lastDecisions {
-		aiData[provider] = map[string]interface{}{
-			"signal":     d.Action,
-			"confidence": fmt.Sprintf("%.0f%%", d.Confidence),
-		}
-	}
+        for provider, d := range lastDecisions {
+                aiData[provider] = map[string]interface{}{
+                        "signal":     d.Action,
+                        "confidence": fmt.Sprintf("%.0f%%", d.Confidence),
+                }
+        }
 
-	broadcast("ai_update", map[string]interface{}{
-		"ai":    aiData,
-		"token": tokenAddr,
-	})
+        broadcast("ai_update", map[string]interface{}{
+                "ai":    aiData,
+                "token": tokenAddr,
+        })
 }
 
 func broadcast(msgType string, data interface{}) {
-	msg := WSMessage{Type: msgType, Data: data}
-	b, err := json.Marshal(msg)
-	if err != nil {
-		return
-	}
-	clientsMu.Lock()
-	defer clientsMu.Unlock()
-	for conn := range clients {
-		if err := conn.WriteMessage(websocket.TextMessage, b); err != nil {
-			conn.Close()
-			delete(clients, conn)
-		}
-	}
+        msg := WSMessage{Type: msgType, Data: data}
+        b, err := json.Marshal(msg)
+        if err != nil {
+                return
+        }
+        clientsMu.Lock()
+        defer clientsMu.Unlock()
+        for conn := range clients {
+                if err := conn.WriteMessage(websocket.TextMessage, b); err != nil {
+                        conn.Close()
+                        delete(clients, conn)
+                }
+        }
 }
 
 func sendInitialState(conn *websocket.Conn) {
-	botState.mu.RLock()
-	stats := botState.Stats
-	running := botState.Running
-	simMode := botState.SimMode
-	botState.mu.RUnlock()
+        botState.mu.RLock()
+        stats := botState.Stats
+        running := botState.Running
+        simMode := botState.SimMode
+        botState.mu.RUnlock()
 
-	msg := WSMessage{
-		Type: "init",
-		Data: map[string]interface{}{
-			"stats":    stats,
-			"running":  running,
-			"simMode":  simMode,
-			"telegram": tgBot.IsEnabled(),
-			"log": map[string]interface{}{
-				"message": fmt.Sprintf("🚀 Connected to %s v%s", cfg.Bot.Name, cfg.Bot.Version),
-				"type":    "info",
-			},
-		},
-	}
-	b, _ := json.Marshal(msg)
-	conn.WriteMessage(websocket.TextMessage, b)
+        msg := WSMessage{
+                Type: "init",
+                Data: map[string]interface{}{
+                        "stats":    stats,
+                        "running":  running,
+                        "simMode":  simMode,
+                        "telegram": tgBot.IsEnabled(),
+                        "log": map[string]interface{}{
+                                "message": fmt.Sprintf("🚀 Connected to %s v%s", cfg.Bot.Name, cfg.Bot.Version),
+                                "type":    "info",
+                        },
+                },
+        }
+        b, _ := json.Marshal(msg)
+        conn.WriteMessage(websocket.TextMessage, b)
 }
