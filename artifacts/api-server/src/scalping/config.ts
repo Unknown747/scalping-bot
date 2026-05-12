@@ -96,212 +96,226 @@ export interface ScalpingConfigData {
 }
 
 /**
- * DEFAULT CONFIG — tuned for new meme coin listings on Base.
+ * DEFAULT CONFIG — optimized for micro-trading ~$1 per trade on Base meme coins.
  *
- * KEY INSIGHT for new meme coins:
- * - First 5-15 minutes: pump window (buy pressure high, retail FOMO)
- * - 15-30 min: stabilization or dump
- * - >30 min: pump usually over, much lower R/R
+ * KEY CONSTRAINTS at $1 trade size:
+ * - Base gas fees: ~$0.001–$0.01 per swap (negligible, but still present)
+ * - DEX fee: 0.3% × 2 (buy+sell) = 0.6% minimum cost
+ * - Slippage at micro size: 0.5–2% (tiny impact due to small position)
+ * - Breakeven threshold: ~3–4% → TP1 must be at least +8% for real profit
  *
- * Strategy:
- * - Enter early (< 15 min age, strong buy pressure, min 10% 5m move)
- * - Quick TP1 at +5% (take half off, de-risk fast)
- * - Let remainder ride with trailing stop
- * - Hard stop -6% (meme dumps are fast)
- * - Max hold 12 min (force exit before dump cycle)
+ * STRATEGY — Fresh meme coin pump window:
+ * - Enter within first 10 minutes (peak FOMO window)
+ * - Require strong buy/sell ratio + min $5k volume to avoid fake pumps
+ * - TP1 at +8% (secure 60% of position — locks real cash profit even on $1)
+ * - Let remainder trail — meme can 2–5x in minutes
+ * - Hard stop -5% (dump cycles are violent and fast)
+ * - Max hold 8 min; for brand-new listings max 5 min
+ * - Max 2 concurrent positions (don't over-diversify with micro capital)
  */
 export const DEFAULT_CONFIG: ScalpingConfigData = {
-  totalCapitalEth: 0.04,
-  maxTradeAmountEth: 0.0005,
-  maxConcurrentPositions: 3,
-  minPositionEth: 0.0001,
+  // ── Capital — tuned for ~$1 per trade ────────────────────────────────────────
+  totalCapitalEth: 0.002,       // ~$5 total reserve (covers 5 full trades)
+  maxTradeAmountEth: 0.0004,    // ~$1 per trade at $2500/ETH
+  maxConcurrentPositions: 2,    // max 2 open at once — don't spread micro capital thin
+  minPositionEth: 0.00005,      // minimum valid position size
 
-  // Scanner filters
-  min5mVolumeUsd: 2000,       // lower threshold to catch very new listings
-  minLiquidityUsd: 6000,      // $6k min — enough to trade without excessive impact
-  maxTokenAgeMinutes: 45,     // focus on fresh tokens
-  minMomentumPercent: 8,      // 8%+ 5m momentum to enter
+  // ── Scanner Filters ──────────────────────────────────────────────────────────
+  min5mVolumeUsd: 5000,         // $5k min 5m volume — filters fake low-activity pumps
+  minLiquidityUsd: 15000,       // $15k min liquidity — enough depth for clean exit
+  maxTokenAgeMinutes: 10,       // only tokens < 10 min old — peak FOMO window
+  minMomentumPercent: 12,       // 12%+ 5m move — requires real momentum, not noise
 
-  // ── Take Profit Strategy (new listing optimized) ──────────────────────────
-  // New meme coins: pump hard then dump. Take profits FAST.
-  tp1Percent: 5,              // TP1 at +5% — quick de-risk
-  tp1SellPercent: 50,         // sell 50% at TP1 (secure half position)
-  tp2Percent: 12,             // TP2 at +12%
-  tp2SellPercent: 30,         // sell 30% at TP2
-  tp3Percent: 25,             // TP3 at +25% (moonshot target)
-  tp3SellPercent: 20,         // sell remaining 20% at TP3
+  // ── Take Profit ——— must cover fees+slippage on tiny trades ──────────────────
+  // At $1 size: breakeven ~3–4%. TP1 at +8% = ~$0.04 real profit after costs.
+  tp1Percent: 8,                // TP1 at +8% — first secure target
+  tp1SellPercent: 60,           // sell 60% at TP1 — lock majority of profit early
+  tp2Percent: 20,               // TP2 at +20% — only reached on strong pumps
+  tp2SellPercent: 30,           // sell 30% at TP2
+  tp3Percent: 40,               // TP3 at +40% — moonshot, rare but possible on memes
+  tp3SellPercent: 10,           // last 10% rides to TP3
 
-  // ── Stop Loss ─────────────────────────────────────────────────────────────
-  stopLossPercent: 6,         // -6% hard stop
-  trailingStopActivatePercent: 5,     // trailing activates at +5%
-  trailingStopDistancePercent: 3,     // 3% trail distance (tight for volatile memes)
-  trailingStopMinProfitToActivate: 5,
-  trailingStopLockMinProfitPercent: 2,
+  // ── Stop Loss ────────────────────────────────────────────────────────────────
+  stopLossPercent: 5,                     // -5% hard stop (tight — memes dump violently)
+  trailingStopActivatePercent: 8,         // trailing activates only after +8% (TP1 zone)
+  trailingStopDistancePercent: 4,         // 4% trail — wider to avoid whipsaw on volatile memes
+  trailingStopMinProfitToActivate: 8,     // must be 8%+ in profit before trailing kicks in
+  trailingStopLockMinProfitPercent: 3,    // lock at least +3% profit when trailing active
 
-  // ── Time Management ───────────────────────────────────────────────────────
-  maxHoldMinutes: 12,         // force exit after 12 min (new listing pump window)
-  maxDailyLossEth: 0.003,
-  cooldownMinutesAfterLoss: 30,
+  // ── Time Management ──────────────────────────────────────────────────────────
+  maxHoldMinutes: 8,            // 8 min max — pump window is short, exit before dump
+  maxDailyLossEth: 0.001,       // max $2.50 loss per day (caps 2–3 bad trades)
+  cooldownMinutesAfterLoss: 30, // 30 min cooldown after a stop loss hit
 
   // ── Execution ─────────────────────────────────────────────────────────────
-  maxSlippagePercent: 10,     // higher slippage for new coins (thin liquidity)
-  maxPriorityFeeGwei: 0.1,
+  // Small size = minimal price impact, but still need slippage room for thin liquidity
+  maxSlippagePercent: 12,       // 12% cap — covers thin liquidity new coins
+  maxPriorityFeeGwei: 0.3,      // slightly elevated priority to get filled fast
   maxFeePerGasGwei: 0.5,
 
-  // ── Safety Filters ────────────────────────────────────────────────────────
-  minSafetyScore: 55,         // slightly relaxed for new listings (GoPlus may lag)
-  maxSellTaxPercent: 10,
+  // ── Safety Filters ───────────────────────────────────────────────────────────
+  minSafetyScore: 65,           // stricter than default — filter obvious honeypots/rugs
+  maxSellTaxPercent: 8,         // reject if sell tax > 8%
 
-  // ── Scan Config ───────────────────────────────────────────────────────────
-  scanIntervalSeconds: 6,     // scan every 6s (faster for new listings)
+  // ── Scan Config ──────────────────────────────────────────────────────────────
+  scanIntervalSeconds: 5,       // scan every 5s — responsive for new listings
   priceCheckIntervalSeconds: 2,
   riskLevel: "aggressive",
   mode: "live",
 
-  // ── Meme Score Filter ─────────────────────────────────────────────────────
-  minMemeScore: 50,           // min 50/100 (new listings get age bonus)
+  // ── Meme Score Filter ────────────────────────────────────────────────────────
+  minMemeScore: 55,             // min 55/100 — new listings get age bonus so this is fair
   enableMemeScore: true,
 
-  // ── TWAP ──────────────────────────────────────────────────────────────────
-  enableTWAP: false,          // disabled for speed (new listings move fast)
+  // ── TWAP Execution ───────────────────────────────────────────────────────────
+  enableTWAP: false,            // OFF — our size is too small to need order splitting
   twapSlices: 3,
   twapIntervalMs: 5000,
 
-  // ── Dynamic Slippage ──────────────────────────────────────────────────────
-  enableDynamicSlippage: true,
+  // ── Dynamic Slippage ─────────────────────────────────────────────────────────
+  enableDynamicSlippage: true,  // ON — adjusts slippage per token liquidity dynamically
 
-  // ── Multi-DEX ─────────────────────────────────────────────────────────────
-  enableMultiDEX: true,
+  // ── Multi-DEX Router ─────────────────────────────────────────────────────────
+  enableMultiDEX: true,         // ON — routes to best DEX for best price
 
-  // ── Anti-FOMO & Rate Limiting ─────────────────────────────────────────────
-  cooldownAfterCloseSeconds: 15,
-  maxBuysPerFiveMinutes: 3,
+  // ── Anti-FOMO & Rate Limiting ────────────────────────────────────────────────
+  cooldownAfterCloseSeconds: 30, // 30s cooldown before next entry
+  maxBuysPerFiveMinutes: 2,      // max 2 buys per 5 min — prevent over-trading
 
-  // ── Peak Profit Exit ──────────────────────────────────────────────────────
+  // ── Peak Profit Exit ─────────────────────────────────────────────────────────
   enablePeakProfitExit: true,
-  peakProfitDropPercent: 35,  // force exit if drops 35% from peak
+  peakProfitDropPercent: 25,    // exit if price drops 25% from the peak reached
 
-  // ── Telegram ──────────────────────────────────────────────────────────────
+  // ── Telegram ─────────────────────────────────────────────────────────────────
   enableTelegram: !!(process.env["TELEGRAM_BOT_TOKEN"] && process.env["TELEGRAM_CHAT_ID"]),
   telegramBotToken: process.env["TELEGRAM_BOT_TOKEN"] || "",
   telegramChatId: process.env["TELEGRAM_CHAT_ID"] || "",
 
-  // ── Deployer Reputation ───────────────────────────────────────────────────
+  // ── Deployer Reputation ──────────────────────────────────────────────────────
   enableDeployerCheck: true,
-  maxDeployerTokens24h: 4,    // flag if deployer launched 4+ tokens in 24h (serial rug)
+  maxDeployerTokens24h: 3,      // flag deployers with 3+ launches in 24h (serial rugger)
 
-  // ── Auto-Compounding ──────────────────────────────────────────────────────
-  enableAutoCompound: false,
+  // ── Auto-Compounding ─────────────────────────────────────────────────────────
+  enableAutoCompound: false,    // OFF — capital too small to meaningfully compound
   compoundThresholdEth: 0.005,
 
-  // ── Position Sizing ───────────────────────────────────────────────────────
-  enableDynamicPositionSizing: true,
-  maxPositionSizeMultiplier: 1.5,
+  // ── Dynamic Position Sizing ──────────────────────────────────────────────────
+  enableDynamicPositionSizing: false, // OFF — size already micro, scaling up risks blowout
+  maxPositionSizeMultiplier: 1.0,
 
-  // ── Post-TP1 Break-Even ───────────────────────────────────────────────────
-  enableBreakEvenAfterTP1: true,
+  // ── Post-TP1 Break-Even ──────────────────────────────────────────────────────
+  enableBreakEvenAfterTP1: true, // ON — once TP1 hit, move stop to entry (can't lose)
 
-  // ── Token Blacklist ───────────────────────────────────────────────────────
+  // ── Token Blacklist ──────────────────────────────────────────────────────────
   enableTokenBlacklist: true,
-  tokenBlacklistMinutes: 15,
+  tokenBlacklistMinutes: 30,    // blacklist for 30 min after stop loss
 
-  // ── 1h Momentum Confirmation ──────────────────────────────────────────────
-  require1hMomentum: false,   // disabled — new listings have no 1h history
+  // ── 1h Momentum Confirmation ─────────────────────────────────────────────────
+  require1hMomentum: false,     // OFF — new listings have no 1h history yet
 
-  // ── AI Filter ─────────────────────────────────────────────────────────────
+  // ── AI Filter ────────────────────────────────────────────────────────────────
   enableAIFilter: !!(process.env["AI_INTEGRATIONS_GEMINI_API_KEY"] || process.env["AI_INTEGRATIONS_OPENROUTER_API_KEY"]),
   aiFilterMinConfidence: 60,
   aiPrimaryProvider: "gemini",
 
-  // ── New Listing Mode ──────────────────────────────────────────────────────
+  // ── New Listing Mode ─────────────────────────────────────────────────────────
   enableNewListingMode: true,
-  newListingMaxAgeMinutes: 15,    // < 15 min = new listing treatment
-  newListingMinBuySellRatio: 1.5, // must have 1.5x more buys than sells
-  newListingMaxHoldMinutes: 8,    // max 8 min hold for brand new listings
+  newListingMaxAgeMinutes: 10,    // tokens < 10 min = full new listing treatment
+  newListingMinBuySellRatio: 2.0, // require 2x more buyers than sellers (strong conviction)
+  newListingMaxHoldMinutes: 5,    // max 5 min for brand-new listings (extreme caution)
 };
 
-// ─── Risk Presets ─────────────────────────────────────────────────────────────
+// ─── Risk Presets — all calibrated for micro $1 trade sizes ──────────────────
 
 export const RISK_PRESETS: Record<string, Partial<ScalpingConfigData>> = {
   conservative: {
-    maxTradeAmountEth: 0.001,
-    maxConcurrentPositions: 2,
-    minMomentumPercent: 20,
+    // ~$0.50 per trade — ultra safe, only clear setups
+    maxTradeAmountEth: 0.0002,
+    maxConcurrentPositions: 1,    // only 1 open at a time
+    minMomentumPercent: 20,       // wait for very strong momentum
     minSafetyScore: 75,
-    stopLossPercent: 4,
-    tp1Percent: 4,
-    tp1SellPercent: 60,    // Take 60% off at TP1 — very conservative
-    tp2Percent: 8,
-    tp2SellPercent: 30,
-    tp3Percent: 15,
-    tp3SellPercent: 10,
-    maxHoldMinutes: 8,
+    stopLossPercent: 4,           // -4% hard stop
+    tp1Percent: 6,                // lower TP1 — easier to hit
+    tp1SellPercent: 70,           // sell 70% at TP1 — very conservative, take profits fast
+    tp2Percent: 15,
+    tp2SellPercent: 25,
+    tp3Percent: 30,
+    tp3SellPercent: 5,
+    maxHoldMinutes: 6,
     minMemeScore: 70,
     enablePeakProfitExit: true,
-    peakProfitDropPercent: 30,
+    peakProfitDropPercent: 20,
     cooldownAfterCloseSeconds: 60,
-    maxBuysPerFiveMinutes: 2,
+    maxBuysPerFiveMinutes: 1,
     enableBreakEvenAfterTP1: true,
     enableTokenBlacklist: true,
     tokenBlacklistMinutes: 60,
     require1hMomentum: false,
     enableDynamicPositionSizing: false,
-    newListingMaxHoldMinutes: 5,
-    newListingMinBuySellRatio: 2.0,
+    newListingMaxHoldMinutes: 4,
+    newListingMinBuySellRatio: 2.5,
+    maxDeployerTokens24h: 2,
+    maxSellTaxPercent: 5,
   },
   moderate: {
-    maxTradeAmountEth: 0.002,
-    maxConcurrentPositions: 3,
+    // ~$1 per trade — balanced risk/reward
+    maxTradeAmountEth: 0.0004,
+    maxConcurrentPositions: 2,
     minMomentumPercent: 12,
     minSafetyScore: 65,
-    stopLossPercent: 6,
-    tp1Percent: 5,
-    tp1SellPercent: 50,
-    tp2Percent: 12,
+    stopLossPercent: 5,
+    tp1Percent: 8,
+    tp1SellPercent: 60,
+    tp2Percent: 20,
     tp2SellPercent: 30,
-    tp3Percent: 20,
-    tp3SellPercent: 20,
-    maxHoldMinutes: 12,
-    minMemeScore: 60,
+    tp3Percent: 40,
+    tp3SellPercent: 10,
+    maxHoldMinutes: 8,
+    minMemeScore: 55,
     enablePeakProfitExit: true,
-    peakProfitDropPercent: 40,
+    peakProfitDropPercent: 25,
     cooldownAfterCloseSeconds: 30,
-    maxBuysPerFiveMinutes: 3,
+    maxBuysPerFiveMinutes: 2,
     enableBreakEvenAfterTP1: true,
     enableTokenBlacklist: true,
     tokenBlacklistMinutes: 30,
     require1hMomentum: false,
-    enableDynamicPositionSizing: true,
-    newListingMaxHoldMinutes: 8,
-    newListingMinBuySellRatio: 1.5,
+    enableDynamicPositionSizing: false,
+    newListingMaxHoldMinutes: 5,
+    newListingMinBuySellRatio: 2.0,
+    maxDeployerTokens24h: 3,
+    maxSellTaxPercent: 8,
   },
   aggressive: {
-    maxTradeAmountEth: 0.003,
-    maxConcurrentPositions: 4,
-    minMomentumPercent: 8,
-    minSafetyScore: 55,
-    stopLossPercent: 7,
-    tp1Percent: 5,
-    tp1SellPercent: 40,
-    tp2Percent: 15,
+    // ~$1.50 per trade — higher risk, chasing bigger pumps
+    maxTradeAmountEth: 0.0006,
+    maxConcurrentPositions: 2,
+    minMomentumPercent: 10,
+    minSafetyScore: 60,
+    stopLossPercent: 6,
+    tp1Percent: 8,
+    tp1SellPercent: 50,           // keep more riding for bigger moves
+    tp2Percent: 25,
     tp2SellPercent: 35,
-    tp3Percent: 30,
-    tp3SellPercent: 25,
-    maxHoldMinutes: 15,
+    tp3Percent: 50,
+    tp3SellPercent: 15,
+    maxHoldMinutes: 10,
     minMemeScore: 50,
     enablePeakProfitExit: true,
-    peakProfitDropPercent: 40,
-    cooldownAfterCloseSeconds: 10,
-    maxBuysPerFiveMinutes: 4,
-    enableAutoCompound: true,
+    peakProfitDropPercent: 30,
+    cooldownAfterCloseSeconds: 20,
+    maxBuysPerFiveMinutes: 2,
+    enableAutoCompound: false,
     enableBreakEvenAfterTP1: true,
     enableTokenBlacklist: true,
-    tokenBlacklistMinutes: 10,
+    tokenBlacklistMinutes: 20,
     require1hMomentum: false,
-    enableDynamicPositionSizing: true,
-    maxPositionSizeMultiplier: 2.0,
-    newListingMaxHoldMinutes: 10,
-    newListingMinBuySellRatio: 1.2,
+    enableDynamicPositionSizing: false,
+    maxPositionSizeMultiplier: 1.0,
+    newListingMaxHoldMinutes: 6,
+    newListingMinBuySellRatio: 1.8,
+    maxDeployerTokens24h: 3,
+    maxSellTaxPercent: 8,
   },
 };
 
@@ -321,14 +335,15 @@ export function calculateDynamicSlippage(
   liquidityUSD: number,
   priceChange5m: number
 ): number {
-  if (liquidityUSD <= 0) return 10;
+  if (liquidityUSD <= 0) return 12;
 
   const volLiqRatio = volume5mUSD / liquidityUSD;
-  let slippage = 6; // default for new meme coins
+  let slippage = 7; // base for new meme coins at micro size
 
-  // Good liquidity + moderate activity = tighter
+  // Good liquidity = tighter slippage needed
   if (volLiqRatio > 2 && liquidityUSD > 30000) slippage = 4;
-  else if (volLiqRatio > 1 && liquidityUSD > 15000) slippage = 5;
+  else if (volLiqRatio > 1 && liquidityUSD > 20000) slippage = 5;
+  else if (liquidityUSD > 15000) slippage = 6;
 
   // High volatility = needs more room
   if (Math.abs(priceChange5m) > 50) slippage = Math.max(slippage, 15);
@@ -336,10 +351,10 @@ export function calculateDynamicSlippage(
   else if (Math.abs(priceChange5m) > 15) slippage = Math.max(slippage, 9);
   else if (Math.abs(priceChange5m) > 8) slippage = Math.max(slippage, 7);
 
-  // Very thin liquidity = high impact
-  if (liquidityUSD < 5000) slippage = Math.max(slippage, 12);
-  else if (liquidityUSD < 10000) slippage = Math.max(slippage, 9);
-  else if (liquidityUSD < 20000) slippage = Math.max(slippage, 7);
+  // Very thin liquidity = high impact even for small size
+  if (liquidityUSD < 5000) slippage = Math.max(slippage, 14);
+  else if (liquidityUSD < 10000) slippage = Math.max(slippage, 10);
+  else if (liquidityUSD < 15000) slippage = Math.max(slippage, 8);
 
   return Math.min(15, Math.max(3, slippage));
 }
