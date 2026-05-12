@@ -61,7 +61,7 @@ npm-debug.log
 yarn-error.log
 testem.log
 
-# ─── Replit internal ──────────────────────────────────────────────────────────
+# ─── Replit internal (tidak diperlukan untuk VPS) ─────────────────────────────
 .cache/
 .local/
 .agents/
@@ -70,3 +70,6 @@ testem.log
 .replit_integration_files/
 .cursor/rules/nx-rules.mdc
 .github/instructions/nx.instructions.md
+
+# ─── Mockup sandbox (hanya untuk prototyping Replit) ──────────────────────────
+artifacts/mockup-sandbox/
