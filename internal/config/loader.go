@@ -145,17 +145,28 @@ type DevFilterConfig struct {
         BlacklistedAddresses []string `json:"blacklisted_addresses"`
 }
 
+type KellyConfig struct {
+        Enabled           bool    `json:"enabled"`
+        Fraction          float64 `json:"fraction"`
+        MinMultiplier     float64 `json:"min_multiplier"`
+        MaxMultiplier     float64 `json:"max_multiplier"`
+        MinTradesRequired int     `json:"min_trades_required"`
+        DrawdownDampen    bool    `json:"drawdown_dampen"`
+        DrawdownMaxPct    float64 `json:"drawdown_max_pct"`
+}
+
 type Config struct {
-        Bot         BotConfig       `json:"bot"`
-        RPCConfig   RPCConfig       `json:"rpc_config"`
-        Trading     TradingConfig   `json:"trading"`
-        DexPriority []string        `json:"dex_priority"`
-        AIConfig    AIConfig        `json:"ai_config"`
-        MEV         MEVConfig       `json:"mev_protection"`
+        Bot         BotConfig        `json:"bot"`
+        RPCConfig   RPCConfig        `json:"rpc_config"`
+        Trading     TradingConfig    `json:"trading"`
+        DexPriority []string         `json:"dex_priority"`
+        AIConfig    AIConfig         `json:"ai_config"`
+        MEV         MEVConfig        `json:"mev_protection"`
         Monitoring  MonitoringConfig `json:"monitoring"`
-        Risk        RiskConfig      `json:"risk_management"`
-        Scalping    ScalpingConfig  `json:"scalping_strategies"`
-        DevFilter   DevFilterConfig `json:"dev_filter"`
+        Risk        RiskConfig       `json:"risk_management"`
+        Scalping    ScalpingConfig   `json:"scalping_strategies"`
+        DevFilter   DevFilterConfig  `json:"dev_filter"`
+        Kelly       KellyConfig      `json:"kelly"`
 }
 
 func Load(path string) (*Config, error) {

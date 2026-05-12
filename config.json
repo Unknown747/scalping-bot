@@ -203,6 +203,16 @@
     "blacklisted_addresses": []
   },
 
+  "kelly": {
+    "enabled": true,
+    "fraction": 0.5,
+    "min_multiplier": 0.25,
+    "max_multiplier": 3.0,
+    "min_trades_required": 10,
+    "drawdown_dampen": true,
+    "drawdown_max_pct": 20.0
+  },
+
   "notifications": {
     "enabled": true,
     "telegram": {

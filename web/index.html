@@ -141,6 +141,13 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
 .check-msg{font-size:10px;color:#666;margin-top:2px;}
 .check-lat{font-size:10px;color:#444;margin-top:2px;}
 .check-placeholder{color:#333;font-size:12px;text-align:center;padding:20px;}
+/* ── Kelly Criterion card ── */
+.kelly-mode-tag{font-size:9px;letter-spacing:.8px;text-transform:uppercase;padding:2px 7px;border-radius:8px;display:inline-block;margin-top:4px;border:1px solid currentColor;}
+.kelly-adaptive{color:#00ffcc;border-color:#00ffcc44;background:#00ffcc0a;}
+.kelly-adaptive-dd,.kelly-dd-damped{color:#ffaa00;border-color:#ffaa0044;background:#ffaa000a;}
+.kelly-floor,.kelly-dd-floor,.kelly-neg-edge{color:#ff3366;border-color:#ff336644;background:#ff33660a;}
+.kelly-ceiling{color:#ff88aa;border-color:#ff88aa44;background:#ff88aa0a;}
+.kelly-warmup,.kelly-disabled{color:#555;border-color:#33333355;background:transparent;}
 /* ── Notification ── */
 #notifBtn{padding:6px 12px;border-radius:6px;border:1px solid #333;background:#13131f;color:#555;font-size:11px;cursor:pointer;}
 #notifBtn.on{color:#00ffcc;border-color:#00ffcc44;}
@@ -245,6 +252,11 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
     <div class="stat-card">
       <div class="stat-label">Avg Hold Time</div>
       <div class="stat-value sm neutral" id="avgHold">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Kelly Size</div>
+      <div class="stat-value sm neutral" id="kellyMult">1.00×</div>
+      <span class="kelly-mode-tag kelly-warmup" id="kellyModeTag">warmup</span>
     </div>
   </div>
 
@@ -814,6 +826,16 @@ function updateStats(s) {
     setClass('bestTrade',  'stat-value sm profit');
     setClass('worstTrade', 'stat-value sm loss');
     setText('avgHold', formatHeld(s.avgHoldSecs || 0));
+  }
+  // Kelly Criterion sizing card
+  const km   = s.kellyMultiplier || 1.0;
+  const kmode = (s.kellyMode || 'warmup').toLowerCase().replace(/_/g, '-');
+  setText('kellyMult', km.toFixed(2) + '×');
+  setClass('kellyMult', 'stat-value sm ' + (km >= 1.5 ? 'profit' : km <= 0.5 ? 'loss' : 'neutral'));
+  const tag = document.getElementById('kellyModeTag');
+  if (tag) {
+    tag.textContent = (s.kellyMode || 'warmup').replace(/_/g, ' ');
+    tag.className = 'kelly-mode-tag kelly-' + kmode;
   }
 }
 

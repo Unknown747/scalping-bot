@@ -21,6 +21,7 @@ import (
         "meme-scalper-ai/internal/checker"
         "meme-scalper-ai/internal/config"
         "meme-scalper-ai/internal/data"
+        "meme-scalper-ai/internal/kelly"
         "meme-scalper-ai/internal/mev"
         "meme-scalper-ai/internal/notify"
         "meme-scalper-ai/internal/position"
@@ -44,6 +45,8 @@ type BotStats struct {
         BestTradePct    float64 `json:"bestTradePct"`
         WorstTradePct   float64 `json:"worstTradePct"`
         AvgHoldSecs     int     `json:"avgHoldSecs"`
+        KellyMultiplier float64 `json:"kellyMultiplier"`
+        KellyMode       string  `json:"kellyMode"`
 }
 
 type TradeRecord struct {
@@ -787,6 +790,63 @@ func passesFilters(token data.TokenData) bool {
         return true
 }
 
+// ── Kelly Criterion position sizing ──────────────────────────────────────────
+
+func computeKellySize() kelly.Result {
+        base := cfg.Trading.PositionSizeUSD
+
+        historyMu.Lock()
+        h := make([]TradeRecord, len(tradeHistory))
+        copy(h, tradeHistory)
+        historyMu.Unlock()
+
+        botState.mu.RLock()
+        drawdownPct := botState.Stats.MaxDrawdownPct
+        botState.mu.RUnlock()
+
+        // Aggregate win/loss stats from closed trades.
+        wins := 0
+        var totalWinPct, totalLossPct float64
+        var winCount, lossCount int
+        for _, r := range h {
+                if r.PnLPct > 0 {
+                        wins++
+                        totalWinPct += r.PnLPct
+                        winCount++
+                } else if r.PnLPct < 0 {
+                        totalLossPct += math.Abs(r.PnLPct)
+                        lossCount++
+                }
+        }
+
+        winRate := 0.55 // neutral default before enough trades
+        if len(h) > 0 {
+                winRate = float64(wins) / float64(len(h))
+        }
+
+        // Fall back to strategy-configured TP/SL when history is thin.
+        strat := cfg.ScalpingStrategies()
+        avgWinPct := strat.MomentumTP
+        if winCount > 0 {
+                avgWinPct = totalWinPct / float64(winCount)
+        }
+        avgLossPct := strat.MomentumSL
+        if lossCount > 0 {
+                avgLossPct = totalLossPct / float64(lossCount)
+        }
+
+        kellyCfg := kelly.Config{
+                Enabled:           cfg.Kelly.Enabled,
+                Fraction:          cfg.Kelly.Fraction,
+                MinMultiplier:     cfg.Kelly.MinMultiplier,
+                MaxMultiplier:     cfg.Kelly.MaxMultiplier,
+                MinTradesRequired: cfg.Kelly.MinTradesRequired,
+                DrawdownDampen:    cfg.Kelly.DrawdownDampen,
+                DrawdownMaxPct:    cfg.Kelly.DrawdownMaxPct,
+        }
+        return kelly.GetPositionSize(base, winRate, avgWinPct, avgLossPct, drawdownPct, len(h), kellyCfg)
+}
+
 // ── Trade execution ───────────────────────────────────────────────────────────
 
 func fetchWETHPrice() float64 {
@@ -802,7 +862,16 @@ func fetchWETHPrice() float64 {
 
 func executeTrade(token data.TokenData, decision *ai.TradingDecision, simMode bool) {
         strat := cfg.ScalpingStrategies()
-        posSize := cfg.Trading.PositionSizeUSD
+
+        // Kelly Criterion dynamic position sizing
+        kr := computeKellySize()
+        posSize := kr.SizeUSD
+
+        // Persist Kelly state so the dashboard stat card stays current.
+        botState.mu.Lock()
+        botState.Stats.KellyMultiplier = kr.Multiplier
+        botState.Stats.KellyMode = kr.Mode
+        botState.mu.Unlock()
 
         tpPrice := token.PriceUSD * (1 + strat.MomentumTP/100.0)
         slPrice := token.PriceUSD * (1 - strat.MomentumSL/100.0)
@@ -825,9 +894,10 @@ func executeTrade(token data.TokenData, decision *ai.TradingDecision, simMode bo
         }
 
         broadcast("log", map[string]interface{}{
-                "message": fmt.Sprintf("📈%s OPEN %s | WETH→TOKEN | Entry: $%.6f | Size: %.6f WETH ($%.2f) | TP: +%.1f%% | SL: -%.1f%% | Conf: %.0f%%",
+                "message": fmt.Sprintf("📈%s OPEN %s | WETH→TOKEN | Entry: $%.6f | Size: %.6f WETH ($%.2f) | Kelly: %.2f× [%s] | TP: +%.1f%% | SL: -%.1f%% | Conf: %.0f%%",
                         simTag, token.Symbol, token.PriceUSD,
                         wethAmount, posSize,
+                        kr.Multiplier, kr.Mode,
                         strat.MomentumTP, strat.MomentumSL,
                         decision.Confidence),
                 "type": "success",
