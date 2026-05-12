@@ -2,7 +2,22 @@
 
 Panduan instalasi untuk **Ubuntu 22.04 / 24.04 LTS** menggunakan **Node.js + PM2 + Nginx**.
 
-> Sebelum mulai — jika VPS kamu sudah ada Docker dan mau dihapus bersih:
+---
+
+## Instalasi 1 Klik (Rekomendasi)
+
+```bash
+# Clone repo dulu
+git clone https://github.com/YOUR_USERNAME/base-scalper.git
+cd base-scalper
+
+# Jalankan installer otomatis
+bash scripts/install-vps.sh
+```
+
+Script akan tanya semua konfigurasi secara interaktif, lalu install dan setup semuanya otomatis (Node.js, pnpm, PM2, Nginx, firewall, .env).
+
+> Jika VPS kamu sudah ada Docker dan mau dihapus dulu:
 > ```bash
 > bash scripts/docker-cleanup-vps.sh
 > ```
