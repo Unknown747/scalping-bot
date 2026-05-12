@@ -222,6 +222,34 @@ function checkMevProtection(): SecurityCheck {
   };
 }
 
+function checkAIProviders(): SecurityCheck {
+  const gemini = !!process.env["AI_INTEGRATIONS_GEMINI_API_KEY"];
+  const groq = !!process.env["GROQ_API_KEY"];
+  const hf = !!process.env["HUGGINGFACE_API_KEY"];
+  const count = [gemini, groq, hf].filter(Boolean).length;
+  const names = [
+    gemini ? "Gemini" : null,
+    groq ? "Groq" : null,
+    hf ? "HuggingFace" : null,
+  ].filter(Boolean).join(", ");
+
+  if (count === 0) {
+    return {
+      name: "AI_PROVIDERS",
+      passed: false,
+      severity: "info",
+      message: "Tidak ada AI provider yang dikonfigurasi — AI Filter akan dinonaktifkan",
+      fix: "Set minimal 1 dari: AI_INTEGRATIONS_GEMINI_API_KEY, GROQ_API_KEY, HUGGINGFACE_API_KEY",
+    };
+  }
+  return {
+    name: "AI_PROVIDERS",
+    passed: true,
+    severity: "info",
+    message: `${count}/3 AI provider aktif: ${names} — rotasi round-robin terkonfigurasi`,
+  };
+}
+
 export function runSecurityAudit(): SecurityAuditResult {
   const checks: SecurityCheck[] = [
     checkPrivateKey(),
@@ -231,6 +259,7 @@ export function runSecurityAudit(): SecurityAuditResult {
     checkDashboardPassword(),
     checkRpcUrl(),
     checkMevProtection(),
+    checkAIProviders(),
   ];
 
   const criticalFailures = checks

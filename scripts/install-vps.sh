@@ -87,9 +87,18 @@ echo -e "${BOLD}  [3/6] Password Dashboard${NC}"
 DASHBOARD_PASSWORD=$(read_secret "DASHBOARD_PASSWORD (password login dashboard)")
 echo ""
 
-echo -e "${BOLD}  [4/6] AI Filter — opsional (Enter untuk skip)${NC}"
-echo "  Daftar key gratis di https://aistudio.google.com/app/apikey"
-read -rp "  GEMINI_API_KEY (kosongkan jika tidak pakai): " GEMINI_API_KEY
+echo -e "${BOLD}  [4/6] AI Filter — 3 Provider Round-Robin (opsional, isi ketiganya agar credit awet)${NC}"
+echo "  Sistem rotasi: Token 1→Gemini, Token 2→Groq, Token 3→HuggingFace, Token 4→Gemini, dst."
+echo "  Credit terdistribusi merata — tidak membebani satu provider."
+echo ""
+echo "  Provider 1: Gemini — https://aistudio.google.com/app/apikey (gratis 1500 req/hari)"
+read -rp "  AI_INTEGRATIONS_GEMINI_API_KEY (kosongkan jika tidak pakai): " GEMINI_API_KEY
+echo ""
+echo "  Provider 2: Groq — https://console.groq.com/keys (gratis 14400 req/hari, ultra-cepat)"
+read -rp "  GROQ_API_KEY (kosongkan jika tidak pakai): " GROQ_API_KEY
+echo ""
+echo "  Provider 3: HuggingFace — https://huggingface.co/settings/tokens (gratis, Read token)"
+read -rp "  HUGGINGFACE_API_KEY (kosongkan jika tidak pakai): " HUGGINGFACE_API_KEY
 echo ""
 
 echo -e "${BOLD}  [5/6] Notifikasi Telegram — opsional (Enter untuk skip)${NC}"
@@ -112,7 +121,9 @@ echo "  PRIVATE_KEY    : ${PRIVATE_KEY:0:6}...${PRIVATE_KEY: -4} (tersembunyi)"
 echo "  WALLET_ADDRESS : $WALLET_ADDRESS"
 echo "  BASE_RPC_URL   : ${BASE_RPC_URL:0:40}..."
 echo "  DASHBOARD_PASSWORD : (tersembunyi)"
-echo "  GEMINI_API_KEY : ${GEMINI_API_KEY:-tidak dipakai}"
+echo "  GEMINI_API_KEY    : ${GEMINI_API_KEY:-tidak dipakai}"
+echo "  GROQ_API_KEY      : ${GROQ_API_KEY:-tidak dipakai}"
+echo "  HUGGINGFACE_KEY   : ${HUGGINGFACE_API_KEY:-tidak dipakai}"
 echo "  TELEGRAM       : ${TELEGRAM_BOT_TOKEN:-tidak dipakai}"
 echo "  PORT           : $NGINX_PORT"
 hr
@@ -190,12 +201,27 @@ MEV_PROTECTION_RPC=https://mev-blocker.drpc.org
 MEV_PROTECTION_RPC_BACKUP=https://rpc.flashbots.net/fast
 EOF
 
-if [ -n "$GEMINI_API_KEY" ]; then
+# ─── AI Filter (3 provider round-robin) ──────────────────────────────────────
+if [ -n "$GEMINI_API_KEY" ] || [ -n "$GROQ_API_KEY" ] || [ -n "$HUGGINGFACE_API_KEY" ]; then
 cat >> "$ENV_FILE" <<EOF
 
-# ─── AI Filter ────────────────────────────────────────────────────────────────
+# ─── AI Filter — 3 Provider Round-Robin ──────────────────────────────────────
+EOF
+fi
+if [ -n "$GEMINI_API_KEY" ]; then
+cat >> "$ENV_FILE" <<EOF
 AI_INTEGRATIONS_GEMINI_BASE_URL=https://generativelanguage.googleapis.com
 AI_INTEGRATIONS_GEMINI_API_KEY=$GEMINI_API_KEY
+EOF
+fi
+if [ -n "$GROQ_API_KEY" ]; then
+cat >> "$ENV_FILE" <<EOF
+GROQ_API_KEY=$GROQ_API_KEY
+EOF
+fi
+if [ -n "$HUGGINGFACE_API_KEY" ]; then
+cat >> "$ENV_FILE" <<EOF
+HUGGINGFACE_API_KEY=$HUGGINGFACE_API_KEY
 EOF
 fi
 

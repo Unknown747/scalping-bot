@@ -147,10 +147,22 @@ BASE_RPC_URL=https://base-mainnet.g.alchemy.com/v2/YOUR_ALCHEMY_KEY
 MEV_PROTECTION_RPC=https://mev-blocker.drpc.org
 MEV_PROTECTION_RPC_BACKUP=https://rpc.flashbots.net/fast
 
-# ─── AI Filter (opsional tapi direkomendasikan) ───────────────────────────────
-# Daftar key gratis di: https://aistudio.google.com/app/apikey
+# ─── AI Filter — 3 Provider Round-Robin (opsional, isi semua agar awet) ───────
+# Sistem rotasi: Token 1→Gemini, Token 2→Groq, Token 3→HuggingFace, dst.
+# Credit terdistribusi merata — tidak membebani satu provider.
+
+# Provider 1: Google Gemini (gratis 1500 req/hari)
+# Daftar key: https://aistudio.google.com/app/apikey
 AI_INTEGRATIONS_GEMINI_BASE_URL=https://generativelanguage.googleapis.com
 AI_INTEGRATIONS_GEMINI_API_KEY=AIza_GEMINI_KEY_KAMU
+
+# Provider 2: Groq — ultra-cepat, gratis 14400 req/hari
+# Daftar key: https://console.groq.com/keys
+GROQ_API_KEY=gsk_GROQ_KEY_KAMU
+
+# Provider 3: HuggingFace — backup gratis
+# Daftar key: https://huggingface.co/settings/tokens (pilih "Read" token)
+HUGGINGFACE_API_KEY=hf_HUGGINGFACE_TOKEN_KAMU
 ```
 
 **Cara generate SESSION_SECRET** (jalankan di terminal baru):

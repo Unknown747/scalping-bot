@@ -214,7 +214,7 @@ export const DEFAULT_CONFIG: ScalpingConfigData = {
   require1hMomentum: false,     // OFF — new listings have no 1h history yet
 
   // ── AI Filter ────────────────────────────────────────────────────────────────
-  enableAIFilter: !!(process.env["AI_INTEGRATIONS_GEMINI_API_KEY"] || process.env["AI_INTEGRATIONS_OPENROUTER_API_KEY"]),
+  enableAIFilter: !!(process.env["AI_INTEGRATIONS_GEMINI_API_KEY"] || process.env["GROQ_API_KEY"] || process.env["HUGGINGFACE_API_KEY"]),
   aiFilterMinConfidence: 60,
   aiPrimaryProvider: "gemini",
 

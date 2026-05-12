@@ -30,13 +30,14 @@ function ConfidenceBar({ value, verdict }: { value: number; verdict: boolean }) 
 }
 
 const PROVIDER_BADGE: Record<string, string> = {
-  Gemini: "bg-blue-500/15 text-blue-400 border-blue-500/30",
-  "Groq/OpenRouter": "bg-purple-500/15 text-purple-400 border-purple-500/30",
-  "HuggingFace/OpenRouter": "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
+  Gemini:      "bg-blue-500/15 text-blue-400 border-blue-500/30",
+  Groq:        "bg-purple-500/15 text-purple-400 border-purple-500/30",
+  HuggingFace: "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
 };
 
 function providerColor(provider: string): string {
-  return PROVIDER_BADGE[provider] ?? "bg-muted/20 text-muted-foreground border-border";
+  const key = provider.split("/")[0];
+  return PROVIDER_BADGE[key] ?? "bg-muted/20 text-muted-foreground border-border";
 }
 
 function DecisionRow({ entry, index }: { entry: AIDecisionEntry; index: number }) {

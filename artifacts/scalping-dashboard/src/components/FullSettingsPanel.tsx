@@ -465,13 +465,17 @@ export function FullSettingsPanel() {
                 {/* ── AI FILTER ── */}
                 {tab === "ai" && (
                   <div className="space-y-4">
-                    <div className="p-3 rounded-lg border border-primary/30 bg-primary/5">
-                      <div className="text-[10px] text-primary font-mono font-bold mb-1">AI Token Filter</div>
+                    {/* Header info */}
+                    <div className="p-3 rounded-lg border border-primary/30 bg-primary/5 space-y-1">
+                      <div className="text-[10px] text-primary font-mono font-bold">AI Token Filter — 3 Provider Round-Robin</div>
                       <div className="text-[9px] text-muted-foreground leading-relaxed">
-                        Gunakan AI untuk menganalisis token sebelum masuk posisi. Gemini (utama) → Groq/OpenRouter (fallback) → HuggingFace/OpenRouter (fallback 2). Menggunakan Replit AI Integrations — tidak perlu API key sendiri.
+                        Setiap analisis token digilirkan ke provider berbeda secara otomatis.
+                        Token 1→Gemini, Token 2→Groq, Token 3→HuggingFace, Token 4→Gemini, dst.
+                        Credit terdistribusi merata — tidak membebani satu provider.
                       </div>
                     </div>
 
+                    {/* Enable toggle */}
                     <div className={`flex items-center justify-between p-3 rounded-lg border ${cfg.enableAIFilter ? "bg-primary/5 border-primary/20" : "bg-muted/10 border-border"}`}>
                       <div>
                         <div className={`text-xs font-mono font-bold ${cfg.enableAIFilter ? "text-primary" : "text-muted-foreground"}`}>
@@ -482,45 +486,75 @@ export function FullSettingsPanel() {
                       <Toggle enabled={!!cfg.enableAIFilter} onToggle={() => toggle("enableAIFilter")} disabled={isSaving} />
                     </div>
 
-                    <SectionHeader title="Provider Utama" />
-                    <div className="grid grid-cols-3 gap-2">
-                      {(["gemini", "groq", "huggingface"] as const).map((p) => (
-                        <button
-                          key={p}
-                          onClick={() => save({ aiPrimaryProvider: p })}
-                          disabled={isSaving}
-                          className={`py-2 rounded-lg text-[10px] font-mono font-bold capitalize transition-colors border ${
-                            (cfg.aiPrimaryProvider || "gemini") === p
-                              ? "bg-primary/20 text-primary border-primary/50"
-                              : "bg-muted/10 text-muted-foreground border-border hover:bg-muted/20"
-                          }`}
-                        >
-                          {p === "gemini" ? "Gemini" : p === "groq" ? "Groq" : "HuggingFace"}
-                        </button>
+                    {/* Provider cards */}
+                    <SectionHeader title="Provider (Rotasi Otomatis)" />
+                    <div className="space-y-2">
+                      {[
+                        {
+                          id: "gemini",
+                          name: "Gemini 2.5 Flash",
+                          role: "Deep Analysis — kualitas terbaik",
+                          color: "text-blue-400 bg-blue-500/10 border-blue-500/25",
+                          link: "aistudio.google.com",
+                          envKey: "AI_INTEGRATIONS_GEMINI_API_KEY",
+                          slot: "Slot 1",
+                        },
+                        {
+                          id: "groq",
+                          name: "Groq / Llama 3.1-8b",
+                          role: "Speed Decision — ultra-cepat (<1 detik)",
+                          color: "text-purple-400 bg-purple-500/10 border-purple-500/25",
+                          link: "console.groq.com",
+                          envKey: "GROQ_API_KEY",
+                          slot: "Slot 2",
+                        },
+                        {
+                          id: "huggingface",
+                          name: "HuggingFace / Qwen2.5-7B",
+                          role: "Tiebreaker / Backup — gratis unlimited",
+                          color: "text-yellow-400 bg-yellow-500/10 border-yellow-500/25",
+                          link: "huggingface.co/settings/tokens",
+                          envKey: "HUGGINGFACE_API_KEY",
+                          slot: "Slot 3",
+                        },
+                      ].map((p) => (
+                        <div key={p.id} className={`p-2.5 rounded-lg border ${p.color}`}>
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className={`text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border ${p.color}`}>
+                                {p.slot}
+                              </span>
+                              <span className="text-[11px] font-mono font-semibold text-foreground/90">{p.name}</span>
+                            </div>
+                          </div>
+                          <div className="text-[9px] text-muted-foreground/70 mt-1">{p.role}</div>
+                          <div className="text-[8px] text-muted-foreground/50 font-mono mt-0.5">
+                            env: <span className="text-foreground/60">{p.envKey}</span>
+                            {" · "}
+                            <span className="text-primary/60">{p.link}</span>
+                          </div>
+                        </div>
                       ))}
                     </div>
-                    <div className="text-[9px] text-muted-foreground/60 font-mono">
-                      Groq & HuggingFace dijalankan via OpenRouter. Jika provider utama gagal, sistem otomatis fallback ke provider lain.
-                    </div>
-
-                    <SectionHeader title="Threshold" />
-                    <NumInput
-                      label="Min Confidence"
-                      value={pending.aiFilterMinConfidence ?? cfg.aiFilterMinConfidence ?? 65}
-                      unit="%" min={30} max={95} step={5}
-                      description="min AI confidence untuk buy"
-                      onChange={(v) => setPending((p) => ({ ...p, aiFilterMinConfidence: Math.round(v) }))}
-                    />
 
                     <div className="p-2.5 rounded-lg border border-border bg-muted/5">
-                      <div className="text-[9px] text-muted-foreground font-mono leading-relaxed space-y-1">
-                        <div className="font-semibold text-foreground/70">Urutan provider (contoh: Gemini dipilih):</div>
-                        <div>1. Gemini 2.5 Flash — analisis utama</div>
-                        <div>2. Groq / Llama 3.1 (via OpenRouter) — fallback cepat</div>
-                        <div>3. HuggingFace / Llama 3.2 (via OpenRouter) — fallback terakhir</div>
-                        <div className="pt-1 text-primary/70">Jika semua gagal → token tetap diproses tanpa AI filter</div>
+                      <div className="text-[9px] text-muted-foreground font-mono leading-relaxed space-y-0.5">
+                        <div className="font-semibold text-foreground/70 mb-1">Set key di tab Secrets atau file .env VPS:</div>
+                        <div className="text-primary/70">AI_INTEGRATIONS_GEMINI_API_KEY</div>
+                        <div className="text-purple-400/70">GROQ_API_KEY</div>
+                        <div className="text-yellow-400/70">HUGGINGFACE_API_KEY</div>
+                        <div className="pt-1.5 text-muted-foreground/50">Jika semua gagal → trade tetap diproses (fail-open)</div>
                       </div>
                     </div>
+
+                    <SectionHeader title="Confidence Threshold" />
+                    <NumInput
+                      label="Min Confidence"
+                      value={pending.aiFilterMinConfidence ?? cfg.aiFilterMinConfidence ?? 60}
+                      unit="%" min={30} max={95} step={5}
+                      description="AI harus ≥ ini untuk approve buy"
+                      onChange={(v) => setPending((p) => ({ ...p, aiFilterMinConfidence: Math.round(v) }))}
+                    />
 
                     {Object.keys(pending).length > 0 && (
                       <motion.button
@@ -669,7 +703,7 @@ export function FullSettingsPanel() {
                     <div className="p-3 rounded-lg border border-border bg-muted/5 space-y-2">
                       <div className="text-[10px] font-mono font-bold text-muted-foreground">DI REPLIT</div>
                       <div className="text-[9px] font-mono text-muted-foreground/70 leading-relaxed">
-                        Set secret di <span className="text-primary">Tools → Secrets</span>. AI keys (Gemini, OpenRouter) sudah auto-set via Replit AI Integrations.
+                        Set secret di <span className="text-primary">Tools → Secrets</span>. Gemini key auto-set via Replit AI Integrations. Groq &amp; HuggingFace: tambahkan manual di Secrets.
                       </div>
                     </div>
                   </div>

@@ -75,24 +75,45 @@ router.get("/secrets-status", (_req, res) => {
         ? "Password sudah dikustomisasi"
         : "⚠ Menggunakan password default 'scalper2024' — GANTI sebelum deploy ke VPS!",
     },
+    // ── AI Provider Keys (opsional, min 1 untuk AI Filter aktif) ─────────────
     {
       key: "AI_INTEGRATIONS_GEMINI_API_KEY",
-      label: "Gemini AI Key",
+      label: "Gemini AI Key (Google)",
       set: !!process.env["AI_INTEGRATIONS_GEMINI_API_KEY"],
       required: false,
-      note: "Replit AI Integration (auto-set di Replit). Atur manual di VPS.",
+      note: process.env["AI_INTEGRATIONS_GEMINI_API_KEY"]
+        ? "Gemini aktif — slot 1 rotasi AI"
+        : "Opsional. Gratis di https://aistudio.google.com/app/apikey",
     },
     {
-      key: "AI_INTEGRATIONS_OPENROUTER_API_KEY",
-      label: "OpenRouter API Key",
-      set: !!process.env["AI_INTEGRATIONS_OPENROUTER_API_KEY"],
+      key: "GROQ_API_KEY",
+      label: "Groq API Key",
+      set: !!process.env["GROQ_API_KEY"],
       required: false,
-      note: "Replit AI Integration (auto-set di Replit). Atur manual di VPS.",
+      note: process.env["GROQ_API_KEY"]
+        ? "Groq aktif — slot 2 rotasi AI (ultra-fast)"
+        : "Opsional. Gratis di https://console.groq.com/keys",
+    },
+    {
+      key: "HUGGINGFACE_API_KEY",
+      label: "HuggingFace API Key",
+      set: !!process.env["HUGGINGFACE_API_KEY"],
+      required: false,
+      note: process.env["HUGGINGFACE_API_KEY"]
+        ? "HuggingFace aktif — slot 3 rotasi AI"
+        : "Opsional. Gratis di https://huggingface.co/settings/tokens",
     },
   ];
 
   const allRequired = secrets.filter((s) => s.required);
   const missingRequired = allRequired.filter((s) => !s.set);
+
+  // AI: at least 1 provider configured is recommended (not required)
+  const aiProviderCount = [
+    process.env["AI_INTEGRATIONS_GEMINI_API_KEY"],
+    process.env["GROQ_API_KEY"],
+    process.env["HUGGINGFACE_API_KEY"],
+  ].filter(Boolean).length;
 
   res.json({
     secrets,
@@ -101,6 +122,7 @@ router.get("/secrets-status", (_req, res) => {
       set: secrets.filter((s) => s.set).length,
       missingRequired: missingRequired.map((s) => s.key),
       readyForLive: missingRequired.length === 0,
+      aiProvidersConfigured: aiProviderCount,
     },
   });
 });
