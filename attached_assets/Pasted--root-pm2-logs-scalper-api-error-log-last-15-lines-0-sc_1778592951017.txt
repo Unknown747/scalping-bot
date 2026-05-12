@@ -1,0 +1,38 @@
+
+/root/.pm2/logs/scalper-api-error.log last 15 lines:
+0|scalper- | 2026-05-12 13:34:47 +00:00: (node:84175) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+0|scalper- | 2026-05-12 13:34:47 +00:00: (Use `node --trace-warnings ...` to show where the warning was created)
+0|scalper- | 2026-05-12 13:34:48 +00:00: PathError [TypeError]: Missing parameter name at index 1: *; visit https://git.new/pathToRegexpError for info
+0|scalper- | 2026-05-12 13:34:48 +00:00:     at name (/root/scalping-bot/node_modules/.pnpm/path-to-regexp@8.3.0/node_modules/path-to-regexp/src/index.ts:225:13)
+0|scalper- | 2026-05-12 13:34:48 +00:00:     at parse (/root/scalping-bot/node_modules/.pnpm/path-to-regexp@8.3.0/node_modules/path-to-regexp/src/index.ts:242:62)
+0|scalper- | 2026-05-12 13:34:48 +00:00:     at pathToRegexp (/root/scalping-bot/node_modules/.pnpm/path-to-regexp@8.3.0/node_modules/path-to-regexp/src/index.ts:480:54)
+0|scalper- | 2026-05-12 13:34:48 +00:00:     at Object.match (/root/scalping-bot/node_modules/.pnpm/path-to-regexp@8.3.0/node_modules/path-to-regexp/src/index.ts:438:28)
+0|scalper- | 2026-05-12 13:34:48 +00:00:     at matcher (/root/scalping-bot/node_modules/.pnpm/router@2.2.0/node_modules/router/lib/layer.js:86:23)
+0|scalper- | 2026-05-12 13:34:48 +00:00:     at new Layer (/root/scalping-bot/node_modules/.pnpm/router@2.2.0/node_modules/router/lib/layer.js:93:62)
+0|scalper- | 2026-05-12 13:34:48 +00:00:     at Function.route (/root/scalping-bot/node_modules/.pnpm/router@2.2.0/node_modules/router/index.js:428:17)
+0|scalper- | 2026-05-12 13:34:48 +00:00:     at Function.route (/root/scalping-bot/node_modules/.pnpm/express@5.2.1/node_modules/express/lib/application.js:257:22)
+0|scalper- | 2026-05-12 13:34:48 +00:00:     at Function.app2.<computed> (/root/scalping-bot/node_modules/.pnpm/express@5.2.1/node_modules/express/lib/application.js:478:22)
+0|scalper- | 2026-05-12 13:34:48 +00:00:     at <anonymous> (/root/scalping-bot/artifacts/api-server/src/app.ts:80:7) {
+0|scalper- | 2026-05-12 13:34:48 +00:00:   originalPath: '*'
+0|scalper- | 2026-05-12 13:34:48 +00:00: }
+
+0|scalper-api  | 2026-05-12 13:34:55 +00:00: Warning: connect.session() MemoryStore is not
+0|scalper-api  | 2026-05-12 13:34:55 +00:00: designed for a production environment, as it will leak
+0|scalper-api  | 2026-05-12 13:34:55 +00:00: memory, and will not scale past a single process.
+0|scalper-api  | 2026-05-12 13:34:55 +00:00: (node:84199) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+0|scalper-api  | 2026-05-12 13:34:55 +00:00: (Use `node --trace-warnings ...` to show where the warning was created)
+0|scalper-api  | 2026-05-12 13:34:56 +00:00: PathError [TypeError]: Missing parameter name at index 1: *; visit https://git.new/pathToRegexpError for info
+0|scalper-api  | 2026-05-12 13:34:56 +00:00:     at name (/root/scalping-bot/node_modules/.pnpm/path-to-regexp@8.3.0/node_modules/path-to-regexp/src/index.ts:225:13)
+0|scalper-api  | 2026-05-12 13:34:56 +00:00:     at parse (/root/scalping-bot/node_modules/.pnpm/path-to-regexp@8.3.0/node_modules/path-to-regexp/src/index.ts:242:62)
+0|scalper-api  | 2026-05-12 13:34:56 +00:00:     at pathToRegexp (/root/scalping-bot/node_modules/.pnpm/path-to-regexp@8.3.0/node_modules/path-to-regexp/src/index.ts:480:54)
+0|scalper-api  | 2026-05-12 13:34:56 +00:00:     at Object.match (/root/scalping-bot/node_modules/.pnpm/path-to-regexp@8.3.0/node_modules/path-to-regexp/src/index.ts:438:28)
+0|scalper-api  | 2026-05-12 13:34:56 +00:00:     at matcher (/root/scalping-bot/node_modules/.pnpm/router@2.2.0/node_modules/router/lib/layer.js:86:23)
+0|scalper-api  | 2026-05-12 13:34:56 +00:00:     at new Layer (/root/scalping-bot/node_modules/.pnpm/router@2.2.0/node_modules/router/lib/layer.js:93:62)
+0|scalper-api  | 2026-05-12 13:34:56 +00:00:     at Function.route (/root/scalping-bot/node_modules/.pnpm/router@2.2.0/node_modules/router/index.js:428:17)
+0|scalper-api  | 2026-05-12 13:34:56 +00:00:     at Function.route (/root/scalping-bot/node_modules/.pnpm/express@5.2.1/node_modules/express/lib/application.js:257:22)
+0|scalper-api  | 2026-05-12 13:34:56 +00:00:     at Function.app2.<computed> (/root/scalping-bot/node_modules/.pnpm/express@5.2.1/node_modules/express/lib/application.js:478:22)
+0|scalper-api  | 2026-05-12 13:34:56 +00:00:     at <anonymous> (/root/scalping-bot/artifacts/api-server/src/app.ts:80:7) {
+0|scalper-api  | 2026-05-12 13:34:56 +00:00:   originalPath: '*'
+0|scalper-api  | 2026-05-12 13:34:56 +00:00: }
+^C
+root@vps:~/scalping-bot#
