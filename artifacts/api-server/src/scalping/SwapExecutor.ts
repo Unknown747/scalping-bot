@@ -157,6 +157,7 @@ export class SwapExecutor {
    * Find best Uniswap V3 fee tier via quoteExactInputSingle.
    * Uses readProvider (BASE_RPC_URL) — pure static call, no gas needed.
    * Returns { fee, expectedOut } — if expectedOut === 0n, no Uniswap V3 pool exists.
+   * Caches both hits AND misses (fee=0 = no pool) to avoid repeated RPC calls.
    */
   private async getBestFeeTier(
     ethers: any,
@@ -167,8 +168,11 @@ export class SwapExecutor {
     const cacheKey = tokenAddress.toLowerCase();
     const cached = feeTierCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < FEE_CACHE_TTL) {
+      if (cached.fee === 0) {
+        // Cached "no V3 pool" — skip re-query
+        return { fee: 0, expectedOut: 0n };
+      }
       logger.debug({ tokenAddress, fee: cached.fee }, "Fee tier from cache (read)");
-      // Re-quote to get expectedOut since we're using cache
       const expectedOut = await this.getQuote(ethers, readProvider, tokenAddress, amountInWei, cached.fee);
       return { fee: cached.fee, expectedOut };
     }
@@ -178,7 +182,7 @@ export class SwapExecutor {
     ];
     const quoter = new ethers.Contract(QUOTER_V2, quoterAbi, readProvider);
 
-    let bestFee = 3000;
+    let bestFee = 0;
     let bestAmountOut = 0n;
 
     for (const fee of FEE_TIERS) {
@@ -199,9 +203,8 @@ export class SwapExecutor {
       }
     }
 
-    if (bestAmountOut > 0n) {
-      feeTierCache.set(cacheKey, { fee: bestFee, timestamp: Date.now() });
-    }
+    // Cache both hits and misses — fee=0 means "no V3 pool"
+    feeTierCache.set(cacheKey, { fee: bestFee, timestamp: Date.now() });
 
     logger.info(
       { tokenAddress, bestFee, bestAmountOut: bestAmountOut.toString() },
@@ -346,7 +349,7 @@ export class SwapExecutor {
   async buyToken(
     tokenAddress: string,
     amountEth: number,
-    _routerAddress?: string,
+    dexId?: string | null,
     marketData?: { volume5mUsd: number; liquidityUsd: number; priceChange5m: number }
   ): Promise<SwapResult> {
     if (this.isPaperMode) return this.simulateBuy(tokenAddress, amountEth);
@@ -377,12 +380,15 @@ export class SwapExecutor {
 
       const { fee, expectedOut } = feeTierResult;
 
-      // ── Pre-flight: abort if no Uniswap V3 pool exists for this token ──
-      // Tokens only listed on Aerodrome/BaseSwap will have expectedOut=0 here.
-      // Attempting the swap would revert with "missing revert data" on the router.
+      // ── Pre-flight: no Uniswap V3 pool — try Aerodrome V2 as fallback ──
       if (expectedOut === 0n) {
-        const reason = "No Uniswap V3 liquidity found — token may be Aerodrome/BaseSwap only. Skipping buy.";
-        logger.warn({ tokenAddress, amountEth }, reason);
+        const isAerodrome = dexId && (dexId === "aerodrome" || dexId.startsWith("aerodrome"));
+        if (isAerodrome) {
+          logger.info({ tokenAddress, dexId }, "No Uniswap V3 pool — routing to Aerodrome V2");
+          return this.buyTokenAerodrome(ethers, tokenAddress, amountEth, slippagePct);
+        }
+        const reason = `No Uniswap V3 liquidity found (dexId=${dexId ?? "unknown"}). Skipping buy.`;
+        logger.warn({ tokenAddress, amountEth, dexId }, reason);
         return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: reason };
       }
 
@@ -638,7 +644,7 @@ export class SwapExecutor {
    * READ phase  (BASE_RPC_URL):  actual balance check, allowance check
    * WRITE phase (MEV_PROTECTION_RPC): approve (if needed) + swap tx
    */
-  async sellToken(tokenAddress: string, amountTokens: bigint, amountEth: number): Promise<SwapResult> {
+  async sellToken(tokenAddress: string, amountTokens: bigint, amountEth: number, dexId?: string | null): Promise<SwapResult> {
     if (this.isPaperMode) return this.simulateSell(tokenAddress, amountEth);
     if (!this.privateKey || !this.walletAddress) {
       return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: "No private key configured" };
@@ -647,6 +653,12 @@ export class SwapExecutor {
     try {
       // ── Phase 1: READ (BASE_RPC_URL) ────────────────────────────────────
       const { provider: readProvider, ethers } = await getReadProvider();
+
+      // Route to Aerodrome if token was bought there
+      if (dexId && (dexId === "aerodrome" || dexId.startsWith("aerodrome"))) {
+        logger.info({ tokenAddress, dexId }, "Routing sell to Aerodrome V2");
+        return this.sellTokenAerodrome(ethers, tokenAddress, amountTokens);
+      }
 
       // Always read actual on-chain balance (avoid rounding mismatches)
       const actualBalance = await this.getTokenBalance(ethers, readProvider, tokenAddress);
@@ -664,7 +676,7 @@ export class SwapExecutor {
       // Use cached fee tier from buy (no need to re-query)
       const cacheKey = tokenAddress.toLowerCase();
       const cached = feeTierCache.get(cacheKey);
-      const fee = cached ? cached.fee : 3000;
+      const fee = (cached && cached.fee > 0) ? cached.fee : 3000;
 
       // ── Phase 2: WRITE (MEV_PROTECTION_RPC) ────────────────────────────
       const { provider: writeProvider, mevActive } = await getWriteProvider();
@@ -738,6 +750,209 @@ export class SwapExecutor {
         error: errMsg,
       };
     }
+  }
+
+  // ─── AERODROME V2 BUY / SELL ──────────────────────────────────────────────
+
+  /**
+   * Buy token via Aerodrome V2 AMM (volatile pool, native ETH → token).
+   * Used when token has no Uniswap V3 pool but lives on Aerodrome.
+   */
+  private async buyTokenAerodrome(
+    ethers: any,
+    tokenAddress: string,
+    amountEth: number,
+    slippagePct: number
+  ): Promise<SwapResult> {
+    const amountInWei = ethers.parseEther(amountEth.toFixed(18));
+    const { provider: readProvider } = await getReadProvider();
+
+    const aeroRouterAbi = [
+      "function getAmountsOut(uint256 amountIn, (address from, address to, bool stable, address factory)[] routes) view returns (uint256[] amounts)",
+      "function swapExactETHForTokens(uint256 amountOutMin, (address from, address to, bool stable, address factory)[] routes, address to, uint256 deadline) payable returns (uint256[] amounts)",
+    ];
+
+    const routes = [{
+      from: BASE_CONTRACTS.WETH,
+      to: tokenAddress,
+      stable: false,
+      factory: BASE_CONTRACTS.AERODROME_V2_FACTORY,
+    }];
+
+    // Quote from Aerodrome via read RPC
+    const aeroRead = new ethers.Contract(BASE_CONTRACTS.AERODROME_V2_ROUTER, aeroRouterAbi, readProvider);
+    let expectedOut = 0n;
+    try {
+      const amounts = await aeroRead.getAmountsOut(amountInWei, routes);
+      expectedOut = amounts[1] ?? 0n;
+    } catch (err) {
+      logger.warn({ tokenAddress, err }, "Aerodrome V2 getAmountsOut failed — no pool");
+      return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: "No Aerodrome V2 liquidity" };
+    }
+
+    if (expectedOut === 0n) {
+      return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: "No Aerodrome V2 liquidity (zero quote)" };
+    }
+
+    const amountOutMin = (expectedOut * BigInt(Math.floor((100 - slippagePct) * 100))) / 10000n;
+    const deadline = Math.floor(Date.now() / 1000) + 120;
+
+    const { provider: writeProvider, mevActive } = await getWriteProvider();
+    const writeWallet = new ethers.Wallet(this.privateKey, writeProvider);
+    const feeData = await writeProvider.getFeeData();
+    const gasParams = buildGasParams(ethers, feeData, this.config.maxPriorityFeeGwei);
+
+    const aeroRouter = new ethers.Contract(BASE_CONTRACTS.AERODROME_V2_ROUTER, aeroRouterAbi, writeWallet);
+
+    logger.info(
+      { tokenAddress, amountEth, expectedOut: expectedOut.toString(), amountOutMin: amountOutMin.toString(), mevActive },
+      "Executing Aerodrome V2 buy (native ETH)"
+    );
+
+    const tx = await aeroRouter.swapExactETHForTokens(
+      amountOutMin,
+      routes,
+      this.walletAddress,
+      deadline,
+      { value: amountInWei, ...gasParams }
+    );
+
+    logger.info({ txHash: tx.hash, tokenAddress, mevActive }, mevActive ? "Aerodrome buy via MEV RPC" : "Aerodrome buy via standard RPC");
+    const receipt = await waitForReceipt(tx.hash);
+
+    // Parse amountOut from Transfer event (ERC-20 transfer to wallet)
+    let amountOut = 0n;
+    const transferSig = ethers.id("Transfer(address,address,uint256)");
+    for (const log of receipt.logs || []) {
+      if (
+        log.topics[0] === transferSig &&
+        log.address.toLowerCase() === tokenAddress.toLowerCase() &&
+        log.topics[2] &&
+        ("0x" + log.topics[2].slice(26)).toLowerCase() === this.walletAddress!.toLowerCase()
+      ) {
+        amountOut = BigInt(log.data);
+        break;
+      }
+    }
+
+    const actualSlippagePct = expectedOut > 0n && amountOut > 0n
+      ? Math.max(0, Number(expectedOut - amountOut) / Number(expectedOut) * 100)
+      : 0;
+
+    return {
+      success: receipt.status === 1,
+      txHash: receipt.hash,
+      amountIn: amountInWei,
+      amountOut,
+      gasUsed: receipt.gasUsed,
+      usedWeth: false,
+      mevProtected: mevActive,
+      sandwichDetected: false,
+      actualSlippagePct,
+      expectedOut,
+    };
+  }
+
+  /**
+   * Sell token via Aerodrome V2 AMM (token → native ETH).
+   */
+  private async sellTokenAerodrome(
+    ethers: any,
+    tokenAddress: string,
+    amountTokens: bigint
+  ): Promise<SwapResult> {
+    const { provider: readProvider } = await getReadProvider();
+
+    const actualBalance = await this.getTokenBalance(ethers, readProvider, tokenAddress);
+    if (actualBalance === 0n) {
+      logger.warn({ tokenAddress }, "No token balance to sell on Aerodrome (read RPC)");
+      return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: "Zero balance" };
+    }
+    const sellAmount = actualBalance < amountTokens ? actualBalance : amountTokens;
+
+    const { provider: writeProvider, mevActive } = await getWriteProvider();
+    const writeWallet = new ethers.Wallet(this.privateKey, writeProvider);
+
+    await this.ensureAerodromeTokenApproval(ethers, writeWallet, tokenAddress, sellAmount);
+
+    const feeData = await writeProvider.getFeeData();
+    const gasParams = buildGasParams(ethers, feeData, this.config.maxPriorityFeeGwei);
+
+    const aeroRouterAbi = [
+      "function swapExactTokensForETH(uint256 amountIn, uint256 amountOutMin, (address from, address to, bool stable, address factory)[] routes, address to, uint256 deadline) returns (uint256[] amounts)",
+    ];
+
+    const routes = [{
+      from: tokenAddress,
+      to: BASE_CONTRACTS.WETH,
+      stable: false,
+      factory: BASE_CONTRACTS.AERODROME_V2_FACTORY,
+    }];
+    const deadline = Math.floor(Date.now() / 1000) + 120;
+
+    const aeroRouter = new ethers.Contract(BASE_CONTRACTS.AERODROME_V2_ROUTER, aeroRouterAbi, writeWallet);
+
+    logger.info(
+      { tokenAddress, sellAmount: sellAmount.toString(), mevActive },
+      "Executing Aerodrome V2 sell → ETH"
+    );
+
+    const tx = await aeroRouter.swapExactTokensForETH(
+      sellAmount,
+      0n,
+      routes,
+      this.walletAddress,
+      deadline,
+      { ...gasParams }
+    );
+
+    logger.info({ txHash: tx.hash, tokenAddress, mevActive }, mevActive ? "Aerodrome sell via MEV RPC" : "Aerodrome sell via standard RPC");
+    const receipt = await waitForReceipt(tx.hash);
+
+    // Aerodrome unwraps WETH → ETH internally; parse WETH Transfer event to router
+    // then look for ETH value. Simpler: check WETH transfer to wallet (some paths keep WETH)
+    // or just trust receipt status and read wallet balance delta.
+    // Use WETH Transfer event as best effort:
+    let amountOut = 0n;
+    const transferSig = ethers.id("Transfer(address,address,uint256)");
+    for (const log of receipt.logs || []) {
+      if (
+        log.address.toLowerCase() === BASE_CONTRACTS.WETH.toLowerCase() &&
+        log.topics[0] === transferSig &&
+        log.topics[2] &&
+        ("0x" + log.topics[2].slice(26)).toLowerCase() === this.walletAddress!.toLowerCase()
+      ) {
+        amountOut = BigInt(log.data);
+        break;
+      }
+    }
+
+    return {
+      success: receipt.status === 1,
+      txHash: receipt.hash,
+      amountIn: sellAmount,
+      amountOut,
+      gasUsed: receipt.gasUsed,
+      usedWeth: false,
+      mevProtected: mevActive,
+    };
+  }
+
+  /**
+   * Ensure ERC-20 token is approved for Aerodrome V2 router (write RPC).
+   */
+  private async ensureAerodromeTokenApproval(ethers: any, writeWallet: any, tokenAddress: string, amount: bigint): Promise<void> {
+    const { provider: readProvider } = await getReadProvider();
+    const allowance = await this.getAllowance(ethers, readProvider, tokenAddress, BASE_CONTRACTS.AERODROME_V2_ROUTER);
+    if (allowance >= amount) {
+      logger.debug({ tokenAddress }, "Aerodrome V2 token already approved");
+      return;
+    }
+    logger.info({ tokenAddress }, "Approving token for Aerodrome V2 router");
+    const token = new ethers.Contract(tokenAddress, ERC20_ABI, writeWallet);
+    const tx = await token.approve(BASE_CONTRACTS.AERODROME_V2_ROUTER, ethers.MaxUint256);
+    await tx.wait();
+    logger.info({ tokenAddress }, "Aerodrome V2 token approval confirmed");
   }
 
   // ─── PAPER TRADING SIMULATIONS ────────────────────────────────────────────

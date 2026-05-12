@@ -33,6 +33,7 @@ export interface PositionState {
   peakProfitPercent: number;
   dexUsed?: string;
   dexUrl?: string | null;
+  dexId?: string | null;
   marketData?: {
     volume5mUsd: number;
     liquidityUsd: number;
@@ -735,7 +736,7 @@ export class ScalpingBot {
       buyResult = await this.swapExecutor.buyToken(
         token.address,
         amountEth,
-        bestRoute.routerAddress,
+        token.dexId,
         marketData
       );
     }
@@ -789,6 +790,7 @@ export class ScalpingBot {
       peakProfitPercent: 0,
       dexUsed: bestRoute.dex,
       dexUrl: token.dexUrl,
+      dexId: token.dexId,
       marketData,
     };
 
@@ -867,7 +869,8 @@ export class ScalpingBot {
     const sellResult = await this.swapExecutor.sellToken(
       tokenAddress,
       sellTokenAmount,
-      sellEthEstimate
+      sellEthEstimate,
+      pos.dexId
     );
 
     const exitTime = new Date().toISOString();
@@ -987,7 +990,7 @@ export class ScalpingBot {
 
     this.log("info", `MANUAL BUY: ${token.symbol} @ $${token.priceUsd} | ${amountEth} ETH | liq: $${token.liquidityUsd.toFixed(0)}`, token.symbol);
 
-    const buyResult = await this.swapExecutor.buyToken(token.address, amountEth, bestRoute.routerAddress, marketData);
+    const buyResult = await this.swapExecutor.buyToken(token.address, amountEth, token.dexId, marketData);
 
     if (!buyResult.success) {
       this.log("error", `Manual buy FAILED for ${token.symbol}: ${buyResult.error}`, token.symbol);
@@ -1016,6 +1019,7 @@ export class ScalpingBot {
       peakProfitPercent: 0,
       dexUsed: bestRoute.dex,
       dexUrl: token.dexUrl,
+      dexId: token.dexId,
       marketData,
     };
 
@@ -1070,7 +1074,7 @@ export class ScalpingBot {
     try { symbol = await erc20.symbol(); name = await erc20.name(); } catch {}
 
     this.log("info", `MANUAL SELL (no position): ${symbol} balance=${balance.toString()} tokens`, symbol);
-    const sellResult = await this.swapExecutor.sellToken(tokenAddress, balance, amountEthEstimate || 0.001);
+    const sellResult = await this.swapExecutor.sellToken(tokenAddress, balance, amountEthEstimate || 0.001, existing?.dexId);
 
     if (!sellResult.success) {
       return { success: false, message: sellResult.error || "Sell failed", txHash: null };

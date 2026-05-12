@@ -18,6 +18,7 @@ export interface TokenData {
   ageMinutes: number;
   holderCount: number | null;
   dexUrl: string | null;
+  dexId?: string | null;
   pairAddress: string;
   txns5m: { buys: number; sells: number };
   source?: "dexscreener" | "geckoterminal";
@@ -328,6 +329,7 @@ export class TokenScanner {
       ageMinutes,
       holderCount: null,
       dexUrl: pair.url || null,
+      dexId: pair.dexId || null,
       pairAddress: pair.pairAddress || "",
       txns5m: {
         buys: pair.txns?.m5?.buys || 0,
