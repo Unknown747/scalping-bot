@@ -147,6 +147,11 @@
       "take_profit_percent": 1.2,
       "stop_loss_percent": 0.6
     },
+    "trailing_stop": {
+      "enabled": true,
+      "activation_percent": 0.8,
+      "trailing_distance_percent": 0.4
+    },
     "cooldown_seconds": 15,
     "max_holding_minutes": 8
   },

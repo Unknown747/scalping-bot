@@ -729,6 +729,23 @@ func monitorPositions() {
                                 continue
                         }
 
+                        // Trailing stop: raise SL as price moves up to lock in profit
+                        if cfg.Scalping.TrailingStop.Enabled {
+                                activationPrice := pos.EntryPrice * (1 + cfg.Scalping.TrailingStop.ActivationPercent/100.0)
+                                if currentPrice >= activationPrice {
+                                        newTrailSL := currentPrice * (1 - cfg.Scalping.TrailingStop.TrailingDistancePct/100.0)
+                                        effectiveSL, firstActivation := posTracker.UpdateTrailingSL(pos.TokenAddress, newTrailSL)
+                                        if firstActivation {
+                                                broadcast("log", map[string]interface{}{
+                                                        "message": fmt.Sprintf("🎯 %s Trailing SL aktif! SL naik ke $%.6f (trail: -%.1f%%)",
+                                                                pos.Symbol, effectiveSL, cfg.Scalping.TrailingStop.TrailingDistancePct),
+                                                        "type": "success",
+                                                })
+                                        }
+                                        pos.SLPrice = effectiveSL
+                                }
+                        }
+
                         pnlPct := ((currentPrice - pos.EntryPrice) / pos.EntryPrice) * 100
 
                         // Determine exit condition
