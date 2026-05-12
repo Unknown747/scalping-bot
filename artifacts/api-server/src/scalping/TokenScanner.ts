@@ -32,9 +32,10 @@ const DEXSCREENER_URL = "https://api.dexscreener.com";
 // Tokens on any other DEX are filtered out at scan time to avoid wasting time on
 // safety checks, AI analysis, and swap attempts that will always fail.
 const SUPPORTED_DEX_IDS = new Set([
+  "uniswap",       // DexScreener dexId for Uniswap V2 on Base
+  "uniswap-v2",
   "uniswap-v3",
   "uniswap-v4",
-  "uniswap-v2",
   "aerodrome-v2",
   "aerodrome",
   "baseswap",
