@@ -1,18 +1,22 @@
 FROM node:24-bookworm-slim AS build
-RUN corepack enable && corepack prepare pnpm@latest --activate
+
+# Install pnpm directly (lebih reliable di Docker daripada corepack)
+RUN npm install -g pnpm@9
+
 WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json ./
 COPY lib/ ./lib/
 COPY artifacts/scalping-dashboard/package.json ./artifacts/scalping-dashboard/
 
-RUN pnpm install --frozen-lockfile --filter @workspace/scalping-dashboard...
+# --ignore-scripts: skip preinstall guard (hanya untuk dev environment)
+RUN pnpm install --frozen-lockfile --ignore-scripts --filter @workspace/scalping-dashboard...
 
 COPY artifacts/scalping-dashboard/ ./artifacts/scalping-dashboard/
 
 WORKDIR /app/artifacts/scalping-dashboard
 
-# PORT and BASE_PATH are required by vite.config.ts — set safe build-time defaults
+# PORT and BASE_PATH required by vite.config.ts at build time
 ENV PORT=80
 ENV BASE_PATH=/
 RUN pnpm run build
