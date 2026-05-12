@@ -131,14 +131,14 @@ export const DEFAULT_CONFIG: ScalpingConfigData = {
   tp1Percent: 8,                // TP1 at +8% — first secure target
   tp1SellPercent: 60,           // sell 60% at TP1 — lock majority of profit early
   tp2Percent: 20,               // TP2 at +20% — only reached on strong pumps
-  tp2SellPercent: 30,           // sell 30% at TP2
-  tp3Percent: 40,               // TP3 at +40% — moonshot, rare but possible on memes
-  tp3SellPercent: 10,           // last 10% rides to TP3
+  tp2SellPercent: 100,          // sell 100% remaining at TP2 — close all, no tiny leftover
+  tp3Percent: 40,               // TP3 kept for reference but won't trigger (position closed at TP2)
+  tp3SellPercent: 100,          // sell 100% if TP3 somehow reached
 
   // ── Stop Loss ────────────────────────────────────────────────────────────────
-  stopLossPercent: 5,                     // -5% hard stop (tight — memes dump violently)
+  stopLossPercent: 7,                     // -7% hard stop — room for normal meme volatility, avoid noise exits
   trailingStopActivatePercent: 8,         // trailing activates only after +8% (TP1 zone)
-  trailingStopDistancePercent: 4,         // 4% trail — wider to avoid whipsaw on volatile memes
+  trailingStopDistancePercent: 7,         // 7% trail — enough breathing room on volatile memes, avoids whipsaw
   trailingStopMinProfitToActivate: 8,     // must be 8%+ in profit before trailing kicks in
   trailingStopLockMinProfitPercent: 3,    // lock at least +3% profit when trailing active
 
@@ -184,7 +184,7 @@ export const DEFAULT_CONFIG: ScalpingConfigData = {
 
   // ── Peak Profit Exit ─────────────────────────────────────────────────────────
   enablePeakProfitExit: true,
-  peakProfitDropPercent: 25,    // exit if price drops 25% from the peak reached
+  peakProfitDropPercent: 15,    // exit if price drops 15% from the peak — tighter to protect accumulated profit
 
   // ── Telegram ─────────────────────────────────────────────────────────────────
   enableTelegram: !!(process.env["TELEGRAM_BOT_TOKEN"] && process.env["TELEGRAM_CHAT_ID"]),
@@ -193,7 +193,7 @@ export const DEFAULT_CONFIG: ScalpingConfigData = {
 
   // ── Deployer Reputation ──────────────────────────────────────────────────────
   enableDeployerCheck: true,
-  maxDeployerTokens24h: 3,      // flag deployers with 3+ launches in 24h (serial rugger)
+  maxDeployerTokens24h: 2,      // flag deployers with 2+ launches in 24h — stricter, serial rugger filter
 
   // ── Auto-Compounding ─────────────────────────────────────────────────────────
   enableAutoCompound: false,    // OFF — capital too small to meaningfully compound
@@ -234,17 +234,18 @@ export const RISK_PRESETS: Record<string, Partial<ScalpingConfigData>> = {
     maxConcurrentPositions: 1,    // only 1 open at a time
     minMomentumPercent: 20,       // wait for very strong momentum
     minSafetyScore: 75,
-    stopLossPercent: 4,           // -4% hard stop
+    stopLossPercent: 6,           // -6% hard stop — room for normal volatility without premature exit
     tp1Percent: 6,                // lower TP1 — easier to hit
     tp1SellPercent: 70,           // sell 70% at TP1 — very conservative, take profits fast
     tp2Percent: 15,
-    tp2SellPercent: 25,
+    tp2SellPercent: 100,          // close 100% remaining at TP2 — no tiny leftover
     tp3Percent: 30,
-    tp3SellPercent: 5,
+    tp3SellPercent: 100,
+    trailingStopDistancePercent: 6,  // 6% trail — tighter for conservative but still avoids whipsaw
     maxHoldMinutes: 6,
     minMemeScore: 70,
     enablePeakProfitExit: true,
-    peakProfitDropPercent: 20,
+    peakProfitDropPercent: 15,    // tighter peak exit — protect profits aggressively
     cooldownAfterCloseSeconds: 60,
     maxBuysPerFiveMinutes: 1,
     enableBreakEvenAfterTP1: true,
@@ -254,7 +255,7 @@ export const RISK_PRESETS: Record<string, Partial<ScalpingConfigData>> = {
     enableDynamicPositionSizing: false,
     newListingMaxHoldMinutes: 4,
     newListingMinBuySellRatio: 2.5,
-    maxDeployerTokens24h: 2,
+    maxDeployerTokens24h: 2,      // stricter — flag serial ruggers at 2 launches
     maxSellTaxPercent: 5,
   },
   moderate: {
@@ -263,17 +264,18 @@ export const RISK_PRESETS: Record<string, Partial<ScalpingConfigData>> = {
     maxConcurrentPositions: 2,
     minMomentumPercent: 12,
     minSafetyScore: 65,
-    stopLossPercent: 5,
+    stopLossPercent: 7,           // -7% hard stop — matches default, avoids noise exits
     tp1Percent: 8,
     tp1SellPercent: 60,
     tp2Percent: 20,
-    tp2SellPercent: 30,
+    tp2SellPercent: 100,          // close 100% remaining at TP2 — no tiny leftover
     tp3Percent: 40,
-    tp3SellPercent: 10,
+    tp3SellPercent: 100,
+    trailingStopDistancePercent: 7,  // 7% trail — breathing room for volatile memes
     maxHoldMinutes: 8,
     minMemeScore: 55,
     enablePeakProfitExit: true,
-    peakProfitDropPercent: 25,
+    peakProfitDropPercent: 15,    // tighter peak exit — protect profits
     cooldownAfterCloseSeconds: 30,
     maxBuysPerFiveMinutes: 2,
     enableBreakEvenAfterTP1: true,
@@ -283,7 +285,7 @@ export const RISK_PRESETS: Record<string, Partial<ScalpingConfigData>> = {
     enableDynamicPositionSizing: false,
     newListingMaxHoldMinutes: 5,
     newListingMinBuySellRatio: 2.0,
-    maxDeployerTokens24h: 3,
+    maxDeployerTokens24h: 2,      // stricter — flag serial ruggers at 2 launches
     maxSellTaxPercent: 8,
   },
   aggressive: {
@@ -292,17 +294,18 @@ export const RISK_PRESETS: Record<string, Partial<ScalpingConfigData>> = {
     maxConcurrentPositions: 2,
     minMomentumPercent: 10,
     minSafetyScore: 60,
-    stopLossPercent: 6,
+    stopLossPercent: 8,           // -8% hard stop — wider for aggressive plays, avoids shakeouts
     tp1Percent: 8,
     tp1SellPercent: 50,           // keep more riding for bigger moves
     tp2Percent: 25,
-    tp2SellPercent: 35,
+    tp2SellPercent: 100,          // close 100% remaining at TP2 — clean exit, redeploy to fresh trade
     tp3Percent: 50,
-    tp3SellPercent: 15,
+    tp3SellPercent: 100,
+    trailingStopDistancePercent: 8,  // 8% trail — widest for aggressive, lets winners run longer
     maxHoldMinutes: 10,
     minMemeScore: 50,
     enablePeakProfitExit: true,
-    peakProfitDropPercent: 30,
+    peakProfitDropPercent: 15,    // tighter peak exit — protect profits even on aggressive trades
     cooldownAfterCloseSeconds: 20,
     maxBuysPerFiveMinutes: 2,
     enableAutoCompound: false,
@@ -314,7 +317,7 @@ export const RISK_PRESETS: Record<string, Partial<ScalpingConfigData>> = {
     maxPositionSizeMultiplier: 1.0,
     newListingMaxHoldMinutes: 6,
     newListingMinBuySellRatio: 1.8,
-    maxDeployerTokens24h: 3,
+    maxDeployerTokens24h: 2,      // stricter — flag serial ruggers at 2 launches
     maxSellTaxPercent: 8,
   },
 };
