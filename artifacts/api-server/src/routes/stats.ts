@@ -2,6 +2,7 @@ import { Router } from "express";
 import { getBot } from "../botInstance.js";
 import * as db from "../scalping/database.js";
 import { PriceMonitor } from "../scalping/PriceMonitor.js";
+import { USD_TO_IDR } from "../lib/constants.js";
 
 const router = Router();
 const priceMonitor = new PriceMonitor();
@@ -20,7 +21,6 @@ router.get("/stats/both", async (req, res) => {
   try {
     const bot = getBot();
     const ethPrice = await priceMonitor.getEthPrice();
-    const usdToIdr = 16000;
 
     const liveToday = db.getTodayStats("live");
     const liveAllTime = db.getAllTimeStats("live");
@@ -34,7 +34,7 @@ router.get("/stats/both", async (req, res) => {
     ) => ({
       mode,
       todayPnlEth: today.pnlEth,
-      todayPnlIdr: today.pnlEth * ethPrice * usdToIdr,
+      todayPnlIdr: today.pnlEth * ethPrice * USD_TO_IDR,
       totalTradesDay: today.totalTrades,
       winningTradesDay: today.winningTrades,
       losingTradesDay: today.losingTrades,
@@ -55,7 +55,7 @@ router.get("/stats/both", async (req, res) => {
       paper: buildModeStats("paper", paperToday, paperAllTime),
       currentMode: (bot as any).config?.mode ?? "paper",
       capitalEth,
-      capitalIdr: capitalEth * ethPrice * usdToIdr,
+      capitalIdr: capitalEth * ethPrice * USD_TO_IDR,
       ethPriceUsd: ethPrice,
     });
   } catch (err) {

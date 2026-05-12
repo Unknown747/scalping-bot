@@ -9,6 +9,7 @@ import { calculateMemeScore } from "./MemeScorer.js";
 import { AIAnalyzer } from "./AIAnalyzer.js";
 import type { ScalpingConfigData } from "./config.js";
 import { DEFAULT_CONFIG } from "./config.js";
+import { USD_TO_IDR } from "../lib/constants.js";
 import * as db from "./database.js";
 
 export interface PositionState {
@@ -187,13 +188,11 @@ export class ScalpingBot {
 
     return {
       running: this.running,
-      isRunning: this.running,
       mode: this.config.mode,
       startedAt: this.startedAt?.toISOString() || null,
       dailyLossHit: this.isDailyLossHit(),
       cooldownUntil: this.cooldownUntil?.toISOString() || null,
       activePositions: this.positions.size,
-      openPositions: this.positions.size,
       maxPositions: this.config.maxConcurrentPositions,
       totalTradesDay: today.totalTrades,
       winRateDay: today.totalTrades > 0 ? (today.winningTrades / today.totalTrades) * 100 : 0,
@@ -309,11 +308,9 @@ export class ScalpingBot {
       try {
         const today = db.getTodayStats(this.config.mode);
         const ethPrice = await this.priceMonitor.getEthPrice();
-        const usdToIdr = 16000;
-
         await this.telegram.sendDailySummary({
           totalPnlEth: today.pnlEth,
-          totalPnlIdr: today.pnlEth * ethPrice * usdToIdr,
+          totalPnlIdr: today.pnlEth * ethPrice * USD_TO_IDR,
           totalTrades: today.totalTrades,
           winningTrades: today.winningTrades,
           losingTrades: today.losingTrades,
@@ -1134,12 +1131,11 @@ export class ScalpingBot {
     const today = db.getTodayStats(mode);
     const allTime = db.getAllTimeStats(mode);
     const ethPrice = await this.priceMonitor.getEthPrice();
-    const usdToIdr = 16000;
 
     return {
       mode,
       todayPnlEth: today.pnlEth,
-      todayPnlIdr: today.pnlEth * ethPrice * usdToIdr,
+      todayPnlIdr: today.pnlEth * ethPrice * USD_TO_IDR,
       totalTradesDay: today.totalTrades,
       winningTradesDay: today.winningTrades,
       losingTradesDay: today.losingTrades,
@@ -1151,7 +1147,7 @@ export class ScalpingBot {
       totalPnlAllTime: allTime.totalPnlEth,
       ethPriceUsd: ethPrice,
       capitalEth: this.config.totalCapitalEth,
-      capitalIdr: this.config.totalCapitalEth * ethPrice * usdToIdr,
+      capitalIdr: this.config.totalCapitalEth * ethPrice * USD_TO_IDR,
       accumulatedProfitEth: this.accumulatedProfitEth,
     };
   }

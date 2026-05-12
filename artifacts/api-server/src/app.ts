@@ -42,16 +42,15 @@ app.use(
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: false,
+      secure: process.env["NODE_ENV"] === "production",
       sameSite: "lax",
       maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
     },
   })
 );
 
-// Public routes — auth endpoints, health check, and security audit
+// Public routes — auth endpoints and security audit
 app.use("/api", authRouter);
-app.get("/api/healthz", (_req, res) => res.json({ status: "ok" }));
 
 // Security audit is public — shows only pass/fail status, no sensitive values
 app.get("/api/security-audit", (_req, res) => {
