@@ -34,6 +34,7 @@ export interface PositionState {
   dexUsed?: string;
   dexUrl?: string | null;
   dexId?: string | null;
+  executionDex?: string;
   marketData?: {
     volume5mUsd: number;
     liquidityUsd: number;
@@ -829,9 +830,10 @@ export class ScalpingBot {
       liquidityUsd: token.liquidityUsd,
       status: "open",
       peakProfitPercent: 0,
-      dexUsed: bestRoute.dex,
+      dexUsed: buyResult.executionDex || bestRoute.dex,
       dexUrl: token.dexUrl,
       dexId: token.dexId,
+      executionDex: buyResult.executionDex,
       marketData,
     };
 
@@ -858,7 +860,7 @@ export class ScalpingBot {
       dexId: token.dexId,
     });
 
-    const logMsg = `Bought ${token.symbol} @ $${token.priceUsd.toFixed(8)} | ${amountEth} ETH | Safety: ${safety.score}/100 | Meme: ${memeScore.score}/100 | DEX: ${bestRoute.dex}`;
+    const logMsg = `Bought ${token.symbol} @ $${token.priceUsd.toFixed(8)} | ${amountEth} ETH | Safety: ${safety.score}/100 | Meme: ${memeScore.score}/100 | DEX: ${buyResult.executionDex || bestRoute.dex}`;
     this.log("buy", logMsg, token.symbol);
     this.emit("scalp-alert", { type: "buy", message: `Bought ${token.symbol}` });
     this.emit("position-update", this.serializePosition(position, 0, 0));
@@ -912,7 +914,7 @@ export class ScalpingBot {
       tokenAddress,
       sellTokenAmount,
       sellEthEstimate,
-      pos.dexId
+      pos.executionDex || pos.dexId
     );
 
     const exitTime = new Date().toISOString();
@@ -1060,9 +1062,10 @@ export class ScalpingBot {
       liquidityUsd: token.liquidityUsd,
       status: "open",
       peakProfitPercent: 0,
-      dexUsed: bestRoute.dex,
+      dexUsed: buyResult.executionDex || bestRoute.dex,
       dexUrl: token.dexUrl,
       dexId: token.dexId,
+      executionDex: buyResult.executionDex,
       marketData,
     };
 

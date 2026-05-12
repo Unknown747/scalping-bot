@@ -15,6 +15,7 @@ export interface SwapResult {
   sandwichDetected?: boolean;
   actualSlippagePct?: number;
   expectedOut?: bigint;
+  executionDex?: string;
 }
 
 export interface TWAPResult {
@@ -381,12 +382,10 @@ export class SwapExecutor {
 
       const { fee, expectedOut } = feeTierResult;
 
-      // ── Pre-flight: no Uniswap V3 pool — always try Aerodrome V2 as fallback ──
-      // This covers: tokens explicitly dexId="aerodrome", AND GeckoTerminal tokens
-      // without dexId that happen to trade on Aerodrome.
+      // ── Pre-flight: no Uniswap V3 pool — query ALL V2 DEXes in parallel, pick best ──
       if (expectedOut === 0n) {
-        logger.info({ tokenAddress, dexId: dexId ?? "unknown" }, "No Uniswap V3 pool — trying Aerodrome V2 as fallback");
-        return this.buyTokenAerodrome(ethers, tokenAddress, amountEth, slippagePct);
+        logger.info({ tokenAddress, dexId: dexId ?? "unknown" }, "No Uniswap V3 pool — querying all V2 DEXes in parallel");
+        return this.buyTokenBestV2(ethers, tokenAddress, amountEth, slippagePct);
       }
 
       let amountOutMinimum =
@@ -624,6 +623,7 @@ export class SwapExecutor {
         sandwichDetected,
         actualSlippagePct,
         expectedOut,
+        executionDex: "Uniswap V3",
       };
     } catch (err: any) {
       const errMsg = err.shortMessage || err.reason || err.message || "Swap failed";
@@ -657,18 +657,31 @@ export class SwapExecutor {
       // ── Phase 1: READ (BASE_RPC_URL) ────────────────────────────────────
       const { provider: readProvider, ethers } = await getReadProvider();
 
-      // Route to Aerodrome if:
-      //   a) token was explicitly bought via Aerodrome (dexId set), OR
-      //   b) fee cache shows no V3 pool (fee=0) — covers GeckoTerminal tokens without dexId
-      const sellCacheKey = tokenAddress.toLowerCase();
-      const sellCached = feeTierCache.get(sellCacheKey);
-      const noV3Pool = sellCached && sellCached.fee === 0;
-      if (
-        (dexId && (dexId === "aerodrome" || dexId.startsWith("aerodrome"))) ||
-        noV3Pool
-      ) {
-        logger.info({ tokenAddress, dexId: dexId ?? "unknown", noV3Pool }, "Routing sell to Aerodrome V2");
-        return this.sellTokenAerodrome(ethers, tokenAddress, amountTokens);
+      // Route sell to correct DEX based on which DEX executed the buy.
+      // dexId here holds the executionDex from the buy result (stored in PositionState).
+      if (dexId) {
+        const d = dexId.toLowerCase();
+        if (d.includes("aerodrome")) {
+          logger.info({ tokenAddress, dexId }, "Routing sell → Aerodrome V2 (matched buy DEX)");
+          return this.sellTokenAerodrome(ethers, tokenAddress, amountTokens);
+        }
+        if (d.includes("baseswap")) {
+          logger.info({ tokenAddress, dexId }, "Routing sell → BaseSwap V2 (matched buy DEX)");
+          return this.sellTokenV2Standard(ethers, tokenAddress, amountTokens, BASE_CONTRACTS.BASESWAP_ROUTER, "BaseSwap V2");
+        }
+        if (d.includes("pancake")) {
+          logger.info({ tokenAddress, dexId }, "Routing sell → PancakeSwap V2 (matched buy DEX)");
+          return this.sellTokenV2Standard(ethers, tokenAddress, amountTokens, BASE_CONTRACTS.PANCAKESWAP_V2_ROUTER, "PancakeSwap V2");
+        }
+        // Uniswap V3 or unknown — fall through to V3 sell below
+      } else {
+        // No executionDex info — use fee cache to decide
+        const sellCached = feeTierCache.get(tokenAddress.toLowerCase());
+        const noV3Pool = sellCached && sellCached.fee === 0;
+        if (noV3Pool) {
+          logger.info({ tokenAddress }, "No V3 pool cached — routing sell → Aerodrome V2 fallback");
+          return this.sellTokenAerodrome(ethers, tokenAddress, amountTokens);
+        }
       }
 
       // Always read actual on-chain balance (avoid rounding mismatches)
@@ -763,14 +776,14 @@ export class SwapExecutor {
     }
   }
 
-  // ─── AERODROME V2 / BASESWAP V2 BUY / SELL ───────────────────────────────
+  // ─── MULTI-DEX V2 BUY: AERODROME + BASESWAP + PANCAKESWAP (PARALEL) ────────
 
   /**
-   * Buy token via Aerodrome V2 AMM (volatile pool, native ETH → token).
-   * Falls back to BaseSwap V2 if Aerodrome has no liquidity.
-   * Used when token has no Uniswap V3 pool.
+   * Query all V2 DEXes in parallel, pick the best quote, then execute on winner.
+   * DEXes: Aerodrome V2, BaseSwap V2, PancakeSwap V2.
+   * Called when token has no Uniswap V3 pool.
    */
-  private async buyTokenAerodrome(
+  private async buyTokenBestV2(
     ethers: any,
     tokenAddress: string,
     amountEth: number,
@@ -779,57 +792,80 @@ export class SwapExecutor {
     const amountInWei = ethers.parseEther(amountEth.toFixed(18));
     const { provider: readProvider } = await getReadProvider();
 
-    const aeroRouterAbi = [
+    // ── ABIs ──────────────────────────────────────────────────────────────
+    const aeroAbi = [
       "function getAmountsOut(uint256 amountIn, (address from, address to, bool stable, address factory)[] routes) view returns (uint256[] amounts)",
       "function swapExactETHForTokens(uint256 amountOutMin, (address from, address to, bool stable, address factory)[] routes, address to, uint256 deadline) payable returns (uint256[] amounts)",
     ];
+    const v2Abi = [
+      "function getAmountsOut(uint256 amountIn, address[] path) view returns (uint256[] amounts)",
+      "function swapExactETHForTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline) payable returns (uint256[] amounts)",
+    ];
 
-    const routes = [{
+    const aeroRoutes = [{
       from: BASE_CONTRACTS.WETH,
       to: tokenAddress,
       stable: false,
       factory: BASE_CONTRACTS.AERODROME_V2_FACTORY,
     }];
+    const v2Path = [BASE_CONTRACTS.WETH, tokenAddress];
 
-    // Quote from Aerodrome via read RPC
-    const aeroRead = new ethers.Contract(BASE_CONTRACTS.AERODROME_V2_ROUTER, aeroRouterAbi, readProvider);
-    let expectedOut = 0n;
-    try {
-      const amounts = await aeroRead.getAmountsOut(amountInWei, routes);
-      expectedOut = amounts[1] ?? 0n;
-    } catch (err) {
-      logger.warn({ tokenAddress, err }, "Aerodrome V2 getAmountsOut failed — trying BaseSwap V2 fallback");
+    // ── Quote all DEXes in parallel ───────────────────────────────────────
+    const aeroContract = new ethers.Contract(BASE_CONTRACTS.AERODROME_V2_ROUTER, aeroAbi, readProvider);
+    const bsContract   = new ethers.Contract(BASE_CONTRACTS.BASESWAP_ROUTER, v2Abi, readProvider);
+    const psContract   = new ethers.Contract(BASE_CONTRACTS.PANCAKESWAP_V2_ROUTER, v2Abi, readProvider);
+
+    const safeQuote = async (fn: () => Promise<bigint>, name: string): Promise<{ name: string; quote: bigint }> => {
+      try {
+        const q = await fn();
+        logger.info({ tokenAddress, dex: name, quote: q.toString() }, `[Multi-DEX] Quote from ${name}`);
+        return { name, quote: q };
+      } catch {
+        logger.warn({ tokenAddress, dex: name }, `[Multi-DEX] No pool / quote failed on ${name}`);
+        return { name, quote: 0n };
+      }
+    };
+
+    const [aeroResult, bsResult, psResult] = await Promise.all([
+      safeQuote(async () => { const a = await aeroContract.getAmountsOut(amountInWei, aeroRoutes); return a[1] ?? 0n; }, "Aerodrome V2"),
+      safeQuote(async () => { const a = await bsContract.getAmountsOut(amountInWei, v2Path); return a[1] ?? 0n; }, "BaseSwap V2"),
+      safeQuote(async () => { const a = await psContract.getAmountsOut(amountInWei, v2Path); return a[1] ?? 0n; }, "PancakeSwap V2"),
+    ]);
+
+    // ── Pick best DEX ─────────────────────────────────────────────────────
+    const candidates = [aeroResult, bsResult, psResult].filter(r => r.quote > 0n);
+    if (candidates.length === 0) {
+      return {
+        success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n,
+        error: "No liquidity on any DEX (Uniswap V3, Aerodrome V2, BaseSwap V2, PancakeSwap V2)",
+      };
     }
 
-    if (expectedOut === 0n) {
-      logger.info({ tokenAddress }, "Aerodrome V2 zero quote — trying BaseSwap V2 fallback");
-      return this.buyTokenBaseSwapV2(ethers, tokenAddress, amountEth, slippagePct);
-    }
+    const best = candidates.reduce((a, b) => (b.quote > a.quote ? b : a));
+    logger.info({ tokenAddress, winner: best.name, quote: best.quote.toString() }, "[Multi-DEX] Best V2 quote selected");
 
-    const amountOutMin = (expectedOut * BigInt(Math.floor((100 - slippagePct) * 100))) / 10000n;
+    const amountOutMin = (best.quote * BigInt(Math.floor((100 - slippagePct) * 100))) / 10000n;
     const deadline = Math.floor(Date.now() / 1000) + 120;
 
     const { provider: writeProvider, mevActive } = await getWriteProvider();
-    const writeWallet = new ethers.Wallet(this.privateKey, writeProvider);
+    const writeWallet = new ethers.Wallet(this.privateKey!, writeProvider);
     const feeData = await writeProvider.getFeeData();
     const gasParams = buildGasParams(ethers, feeData, this.config.maxPriorityFeeGwei);
 
-    const aeroRouter = new ethers.Contract(BASE_CONTRACTS.AERODROME_V2_ROUTER, aeroRouterAbi, writeWallet);
+    let tx: any;
 
-    logger.info(
-      { tokenAddress, amountEth, expectedOut: expectedOut.toString(), amountOutMin: amountOutMin.toString(), mevActive },
-      "Executing Aerodrome V2 buy (native ETH)"
-    );
+    if (best.name === "Aerodrome V2") {
+      const aeroWrite = new ethers.Contract(BASE_CONTRACTS.AERODROME_V2_ROUTER, aeroAbi, writeWallet);
+      logger.info({ tokenAddress, amountEth, amountOutMin: amountOutMin.toString(), mevActive }, "Executing Aerodrome V2 buy");
+      tx = await aeroWrite.swapExactETHForTokens(amountOutMin, aeroRoutes, this.walletAddress, deadline, { value: amountInWei, ...gasParams });
+    } else {
+      const routerAddr = best.name === "BaseSwap V2" ? BASE_CONTRACTS.BASESWAP_ROUTER : BASE_CONTRACTS.PANCAKESWAP_V2_ROUTER;
+      const v2Write = new ethers.Contract(routerAddr, v2Abi, writeWallet);
+      logger.info({ tokenAddress, amountEth, amountOutMin: amountOutMin.toString(), mevActive, dex: best.name }, `Executing ${best.name} buy`);
+      tx = await v2Write.swapExactETHForTokens(amountOutMin, v2Path, this.walletAddress, deadline, { value: amountInWei, ...gasParams });
+    }
 
-    const tx = await aeroRouter.swapExactETHForTokens(
-      amountOutMin,
-      routes,
-      this.walletAddress,
-      deadline,
-      { value: amountInWei, ...gasParams }
-    );
-
-    logger.info({ txHash: tx.hash, tokenAddress, mevActive }, mevActive ? "Aerodrome buy via MEV RPC" : "Aerodrome buy via standard RPC");
+    logger.info({ txHash: tx.hash, tokenAddress, dex: best.name, mevActive }, `${best.name} buy tx submitted`);
     const receipt = await waitForReceipt(tx.hash);
 
     // Parse amountOut from Transfer event (ERC-20 transfer to wallet)
@@ -847,8 +883,8 @@ export class SwapExecutor {
       }
     }
 
-    const actualSlippagePct = expectedOut > 0n && amountOut > 0n
-      ? Math.max(0, Number(expectedOut - amountOut) / Number(expectedOut) * 100)
+    const actualSlippagePct = best.quote > 0n && amountOut > 0n
+      ? Math.max(0, Number(best.quote - amountOut) / Number(best.quote) * 100)
       : 0;
 
     return {
@@ -861,101 +897,89 @@ export class SwapExecutor {
       mevProtected: mevActive,
       sandwichDetected: false,
       actualSlippagePct,
-      expectedOut,
+      expectedOut: best.quote,
+      executionDex: best.name,
     };
   }
 
+  // ─── V2 STANDARD SELL (BASESWAP / PANCAKESWAP) ───────────────────────────
+
   /**
-   * Buy token via BaseSwap V2 AMM (standard Uniswap V2 ABI, native ETH → token).
-   * Used as final fallback when both Uniswap V3 and Aerodrome V2 have no liquidity.
+   * Sell token via any standard Uniswap V2–compatible router (token → ETH).
+   * Used for BaseSwap V2 and PancakeSwap V2 sells.
    */
-  private async buyTokenBaseSwapV2(
+  private async sellTokenV2Standard(
     ethers: any,
     tokenAddress: string,
-    amountEth: number,
-    slippagePct: number
+    amountTokens: bigint,
+    routerAddr: string,
+    dexName: string
   ): Promise<SwapResult> {
-    const amountInWei = ethers.parseEther(amountEth.toFixed(18));
     const { provider: readProvider } = await getReadProvider();
-
-    const v2RouterAbi = [
-      "function getAmountsOut(uint256 amountIn, address[] path) view returns (uint256[] amounts)",
-      "function swapExactETHForTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline) payable returns (uint256[] amounts)",
-    ];
-
-    const path = [BASE_CONTRACTS.WETH, tokenAddress];
-
-    // Quote from BaseSwap via read RPC
-    const bsRead = new ethers.Contract(BASE_CONTRACTS.BASESWAP_ROUTER, v2RouterAbi, readProvider);
-    let expectedOut = 0n;
-    try {
-      const amounts = await bsRead.getAmountsOut(amountInWei, path);
-      expectedOut = amounts[1] ?? 0n;
-    } catch (err) {
-      logger.warn({ tokenAddress, err }, "BaseSwap V2 getAmountsOut failed — no pool");
-      return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: "No liquidity on any DEX (Uniswap V3, Aerodrome V2, BaseSwap V2)" };
+    const actualBalance = await this.getTokenBalance(ethers, readProvider, tokenAddress);
+    if (actualBalance === 0n) {
+      return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: "Zero balance" };
     }
-
-    if (expectedOut === 0n) {
-      return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: "No liquidity on any DEX (Uniswap V3, Aerodrome V2, BaseSwap V2)" };
-    }
-
-    const amountOutMin = (expectedOut * BigInt(Math.floor((100 - slippagePct) * 100))) / 10000n;
-    const deadline = Math.floor(Date.now() / 1000) + 120;
+    const sellAmount = actualBalance < amountTokens ? actualBalance : amountTokens;
 
     const { provider: writeProvider, mevActive } = await getWriteProvider();
     const writeWallet = new ethers.Wallet(this.privateKey!, writeProvider);
+
+    // Approve token for the router
+    const { provider: rp } = await getReadProvider();
+    const allowance = await this.getAllowance(ethers, rp, tokenAddress, routerAddr);
+    if (allowance < sellAmount) {
+      logger.info({ tokenAddress, dexName }, `Approving token for ${dexName} router`);
+      const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, writeWallet);
+      const approveTx = await tokenContract.approve(routerAddr, ethers.MaxUint256);
+      await waitForReceipt(approveTx.hash);
+    }
+
     const feeData = await writeProvider.getFeeData();
     const gasParams = buildGasParams(ethers, feeData, this.config.maxPriorityFeeGwei);
 
-    const bsRouter = new ethers.Contract(BASE_CONTRACTS.BASESWAP_ROUTER, v2RouterAbi, writeWallet);
+    const v2Abi = [
+      "function swapExactTokensForETH(uint256 amountIn, uint256 amountOutMin, address[] path, address to, uint256 deadline) returns (uint256[] amounts)",
+    ];
+    const router = new ethers.Contract(routerAddr, v2Abi, writeWallet);
+    const path = [tokenAddress, BASE_CONTRACTS.WETH];
+    const deadline = Math.floor(Date.now() / 1000) + 120;
 
-    logger.info(
-      { tokenAddress, amountEth, expectedOut: expectedOut.toString(), amountOutMin: amountOutMin.toString(), mevActive },
-      "Executing BaseSwap V2 buy (native ETH)"
-    );
+    logger.info({ tokenAddress, sellAmount: sellAmount.toString(), mevActive, dexName }, `Executing ${dexName} sell → ETH`);
 
-    const tx = await bsRouter.swapExactETHForTokens(
-      amountOutMin,
+    const tx = await router.swapExactTokensForETH(
+      sellAmount,
+      0n,
       path,
       this.walletAddress,
       deadline,
-      { value: amountInWei, ...gasParams }
+      { ...gasParams }
     );
 
-    logger.info({ txHash: tx.hash, tokenAddress, mevActive }, mevActive ? "BaseSwap buy via MEV RPC" : "BaseSwap buy via standard RPC");
+    logger.info({ txHash: tx.hash, tokenAddress, mevActive, dexName }, `${dexName} sell tx submitted`);
     const receipt = await waitForReceipt(tx.hash);
 
-    // Parse amountOut from Transfer event
+    // Parse ETH received from WETH Withdrawal event
     let amountOut = 0n;
-    const transferSig = ethers.id("Transfer(address,address,uint256)");
+    const withdrawalSig = ethers.id("Withdrawal(address,uint256)");
     for (const log of receipt.logs || []) {
       if (
-        log.topics[0] === transferSig &&
-        log.address.toLowerCase() === tokenAddress.toLowerCase() &&
-        log.topics[2] &&
-        ("0x" + log.topics[2].slice(26)).toLowerCase() === this.walletAddress!.toLowerCase()
+        log.address.toLowerCase() === BASE_CONTRACTS.WETH.toLowerCase() &&
+        log.topics[0] === withdrawalSig
       ) {
         amountOut = BigInt(log.data);
         break;
       }
     }
 
-    const actualSlippagePct = expectedOut > 0n && amountOut > 0n
-      ? Math.max(0, Number(expectedOut - amountOut) / Number(expectedOut) * 100)
-      : 0;
-
     return {
       success: receipt.status === 1,
       txHash: receipt.hash,
-      amountIn: amountInWei,
+      amountIn: sellAmount,
       amountOut,
       gasUsed: receipt.gasUsed,
       usedWeth: false,
       mevProtected: mevActive,
-      sandwichDetected: false,
-      actualSlippagePct,
-      expectedOut,
     };
   }
 
