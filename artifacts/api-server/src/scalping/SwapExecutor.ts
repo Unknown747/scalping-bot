@@ -438,29 +438,31 @@ export class SwapExecutor {
       const bsContract    = new ethers.Contract(BASE_CONTRACTS.BASESWAP_ROUTER, v2Abi, readProvider);
       const psContract    = new ethers.Contract(BASE_CONTRACTS.PANCAKESWAP_V2_ROUTER, v2Abi, readProvider);
       const sushiContract = new ethers.Contract(BASE_CONTRACTS.SUSHISWAP_V2_ROUTER, v2Abi, readProvider);
+      const uniV2Contract = new ethers.Contract(BASE_CONTRACTS.UNISWAP_V2_ROUTER, v2Abi, readProvider);
 
-      const [feeTierResult, wethBalance, aeroQuote, bsQuote, psQuote, sushiQuote, v4Result] = await Promise.all([
+      const [feeTierResult, wethBalance, aeroQuote, bsQuote, psQuote, sushiQuote, uniV2Quote, v4Result] = await Promise.all([
         this.getBestFeeTier(ethers, readProvider, tokenAddress, amountInWei),
         this.getWethBalance(ethers, readProvider),
         safeV2Quote(async () => { const a = await aeroContract.getAmountsOut(amountInWei, aeroRoutes); return a[1] ?? 0n; }, "Aerodrome V2"),
         safeV2Quote(async () => { const a = await bsContract.getAmountsOut(amountInWei, v2Path); return a[1] ?? 0n; }, "BaseSwap V2"),
         safeV2Quote(async () => { const a = await psContract.getAmountsOut(amountInWei, v2Path); return a[1] ?? 0n; }, "PancakeSwap V2"),
         safeV2Quote(async () => { const a = await sushiContract.getAmountsOut(amountInWei, v2Path); return a[1] ?? 0n; }, "SushiSwap V2"),
+        safeV2Quote(async () => { const a = await uniV2Contract.getAmountsOut(amountInWei, v2Path); return a[1] ?? 0n; }, "Uniswap V2"),
         this.getV4BestQuote(ethers, readProvider, tokenAddress, amountInWei),
       ]);
 
       const { fee, expectedOut: v3Quote } = feeTierResult;
       const v4Quote = v4Result?.quote ?? 0n;
 
-      // ── Compare all 6 DEX quotes (V3 + V4 + Aerodrome + BaseSwap + PancakeSwap + SushiSwap) ──
+      // ── Compare all 7 DEX quotes (V3 + V4 + Uniswap V2 + Aerodrome + BaseSwap + PancakeSwap + SushiSwap) ──
       const allQuotes = [
         { name: "Uniswap V3",   quote: v3Quote   },
         { name: "Uniswap V4",   quote: v4Quote   },
-        aeroQuote, bsQuote, psQuote, sushiQuote,
+        aeroQuote, bsQuote, psQuote, sushiQuote, uniV2Quote,
       ].filter(q => q.quote > 0n);
 
       if (allQuotes.length === 0) {
-        return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: "No liquidity on any DEX (V3/V4/Aerodrome/BaseSwap/PancakeSwap/SushiSwap)" };
+        return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: "No liquidity on any DEX (V3/V4/UniV2/Aerodrome/BaseSwap/PancakeSwap/SushiSwap)" };
       }
 
       const bestDEX = allQuotes.reduce((a, b) => b.quote > a.quote ? b : a);
@@ -469,11 +471,12 @@ export class SwapExecutor {
         `[Multi-DEX] Best quote → ${bestDEX.name}`
       );
 
-      // Build dexQuotes for all 6 DEXes (including zero-liquidity ones)
-      const allDEXNames = ["Uniswap V3", "Uniswap V4", "Aerodrome V2", "BaseSwap V2", "PancakeSwap V2", "SushiSwap V2"];
+      // Build dexQuotes for all 7 DEXes (including zero-liquidity ones)
+      const allDEXNames = ["Uniswap V3", "Uniswap V4", "Uniswap V2", "Aerodrome V2", "BaseSwap V2", "PancakeSwap V2", "SushiSwap V2"];
       const allRawQuotes = [
         { name: "Uniswap V3",   quote: v3Quote          },
         { name: "Uniswap V4",   quote: v4Quote          },
+        { name: "Uniswap V2",   quote: uniV2Quote.quote },
         { name: "Aerodrome V2", quote: aeroQuote.quote  },
         { name: "BaseSwap V2",  quote: bsQuote.quote    },
         { name: "PancakeSwap V2", quote: psQuote.quote  },
@@ -1098,6 +1101,7 @@ export class SwapExecutor {
       const bsContract    = new ethers.Contract(BASE_CONTRACTS.BASESWAP_ROUTER, v2Abi, readProvider);
       const psContract    = new ethers.Contract(BASE_CONTRACTS.PANCAKESWAP_V2_ROUTER, v2Abi, readProvider);
       const sushiContract = new ethers.Contract(BASE_CONTRACTS.SUSHISWAP_V2_ROUTER, v2Abi, readProvider);
+      const uniV2Contract = new ethers.Contract(BASE_CONTRACTS.UNISWAP_V2_ROUTER, v2Abi, readProvider);
 
       const safeQuote = async (fn: () => Promise<bigint>, name: string): Promise<{ name: string; quote: bigint }> => {
         try {
@@ -1110,18 +1114,19 @@ export class SwapExecutor {
         }
       };
 
-      const [aeroResult, bsResult, psResult, sushiResult] = await Promise.all([
+      const [aeroResult, bsResult, psResult, sushiResult, uniV2Result] = await Promise.all([
         safeQuote(async () => { const a = await aeroContract.getAmountsOut(amountInWei, aeroRoutes); return a[1] ?? 0n; }, "Aerodrome V2"),
         safeQuote(async () => { const a = await bsContract.getAmountsOut(amountInWei, v2Path); return a[1] ?? 0n; }, "BaseSwap V2"),
         safeQuote(async () => { const a = await psContract.getAmountsOut(amountInWei, v2Path); return a[1] ?? 0n; }, "PancakeSwap V2"),
         safeQuote(async () => { const a = await sushiContract.getAmountsOut(amountInWei, v2Path); return a[1] ?? 0n; }, "SushiSwap V2"),
+        safeQuote(async () => { const a = await uniV2Contract.getAmountsOut(amountInWei, v2Path); return a[1] ?? 0n; }, "Uniswap V2"),
       ]);
 
-      const candidates = [aeroResult, bsResult, psResult, sushiResult].filter(r => r.quote > 0n);
+      const candidates = [aeroResult, bsResult, psResult, sushiResult, uniV2Result].filter(r => r.quote > 0n);
       if (candidates.length === 0) {
         return {
           success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n,
-          error: "No liquidity on any V2 DEX (Aerodrome/BaseSwap/PancakeSwap/SushiSwap)",
+          error: "No liquidity on any V2 DEX (UniV2/Aerodrome/BaseSwap/PancakeSwap/SushiSwap)",
         };
       }
       best = candidates.reduce((a, b) => (b.quote > a.quote ? b : a));
@@ -1146,6 +1151,7 @@ export class SwapExecutor {
     } else {
       const routerAddr = best.name === "BaseSwap V2"  ? BASE_CONTRACTS.BASESWAP_ROUTER
                        : best.name === "SushiSwap V2" ? BASE_CONTRACTS.SUSHISWAP_V2_ROUTER
+                       : best.name === "Uniswap V2"   ? BASE_CONTRACTS.UNISWAP_V2_ROUTER
                        : BASE_CONTRACTS.PANCAKESWAP_V2_ROUTER;
       const v2Write = new ethers.Contract(routerAddr, v2Abi, writeWallet);
       logger.info({ tokenAddress, amountEth, amountOutMin: amountOutMin.toString(), mevActive, dex: best.name }, `Executing ${best.name} buy`);

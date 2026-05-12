@@ -28,6 +28,23 @@ export interface TokenData {
 
 const DEXSCREENER_URL = "https://api.dexscreener.com";
 
+// DEX IDs from DexScreener that map to DEXes the bot can actually execute swaps on.
+// Tokens on any other DEX are filtered out at scan time to avoid wasting time on
+// safety checks, AI analysis, and swap attempts that will always fail.
+const SUPPORTED_DEX_IDS = new Set([
+  "uniswap-v3",
+  "uniswap-v4",
+  "uniswap-v2",
+  "aerodrome-v2",
+  "aerodrome",
+  "baseswap",
+  "baseswap-v2",
+  "pancakeswap-v2",
+  "pancakeswap",
+  "sushiswap-v2",
+  "sushiswap",
+]);
+
 const tokenCache = new Map<string, { data: TokenData[]; timestamp: number }>();
 const CACHE_TTL_MS = 10000; // 10 seconds
 
@@ -201,7 +218,9 @@ export class TokenScanner {
       });
 
       const pairs: any[] = res.data?.pairs || [];
-      const basePairs = pairs.filter((p: any) => p?.chainId === "base");
+      const basePairs = pairs.filter(
+        (p: any) => p?.chainId === "base" && SUPPORTED_DEX_IDS.has(p?.dexId)
+      );
 
       const bestPairs = new Map<string, any>();
       for (const pair of basePairs) {
@@ -277,7 +296,9 @@ export class TokenScanner {
         );
 
         const pairs: any[] = res.data?.pairs || [];
-        const basePairs = pairs.filter((p: any) => p?.chainId === "base");
+        const basePairs = pairs.filter(
+          (p: any) => p?.chainId === "base" && SUPPORTED_DEX_IDS.has(p?.dexId)
+        );
 
         const bestPairs = new Map<string, any>();
         for (const pair of basePairs) {
