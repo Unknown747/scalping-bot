@@ -17,11 +17,6 @@ bash scripts/install-vps.sh
 
 Script akan tanya semua konfigurasi secara interaktif, lalu install dan setup semuanya otomatis (Node.js, pnpm, PM2, Nginx, firewall, .env).
 
-> Jika VPS kamu sudah ada Docker dan mau dihapus dulu:
-> ```bash
-> bash scripts/docker-cleanup-vps.sh
-> ```
-
 ---
 
 ## Yang Kamu Butuhkan
