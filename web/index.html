@@ -431,10 +431,19 @@
 
     function updateRPC(endpoints, activeRpc) {
         const container = document.getElementById('rpcStatus');
-        container.innerHTML = endpoints.map(ep =>
-            `<span><span class="rpc-dot rpc-${ep.status}"></span>${ep.name}</span>`
-        ).join('');
-        if (activeRpc) document.getElementById('activeRpc').textContent = activeRpc;
+        container.innerHTML = '';
+        (endpoints || []).forEach(ep => {
+            const span = document.createElement('span');
+            const dot = document.createElement('span');
+            const allowedStatuses = ['healthy', 'down', 'unknown'];
+            const safeStatus = allowedStatuses.includes(ep.status) ? ep.status : 'unknown';
+            dot.className = 'rpc-dot rpc-' + safeStatus;
+            const name = document.createTextNode(String(ep.name || '').slice(0, 40));
+            span.appendChild(dot);
+            span.appendChild(name);
+            container.appendChild(span);
+        });
+        if (activeRpc) document.getElementById('activeRpc').textContent = String(activeRpc).slice(0, 50);
     }
 
     function signalClass(signal) {
@@ -444,7 +453,12 @@
     }
 
     function getSignalHTML(signal) {
-        return `<span class="${signalClass(signal)}">${signal}</span>`;
+        const span = document.createElement('span');
+        const allowed = ['BUY', 'SELL', 'HOLD'];
+        const safeSignal = allowed.includes(signal) ? signal : 'HOLD';
+        span.className = signalClass(safeSignal);
+        span.textContent = safeSignal;
+        return span.outerHTML;
     }
 
     function addLog(message, type = 'info') {
