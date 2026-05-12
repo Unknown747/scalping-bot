@@ -1,7 +1,7 @@
 FROM node:24-bookworm-slim
 
-# Install pnpm directly (lebih reliable di Docker daripada corepack)
-RUN npm install -g pnpm@9
+# Install pnpm — versi harus sama dengan yang dipakai saat generate pnpm-lock.yaml
+RUN npm install -g pnpm@10
 
 # Build tools for better-sqlite3 native compilation
 RUN apt-get update && apt-get install -y --no-install-recommends \

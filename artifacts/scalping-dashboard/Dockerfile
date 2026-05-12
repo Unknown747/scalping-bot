@@ -1,7 +1,7 @@
 FROM node:24-bookworm-slim AS build
 
-# Install pnpm directly (lebih reliable di Docker daripada corepack)
-RUN npm install -g pnpm@9
+# Install pnpm — versi harus sama dengan yang dipakai saat generate pnpm-lock.yaml
+RUN npm install -g pnpm@10
 
 WORKDIR /app
 
