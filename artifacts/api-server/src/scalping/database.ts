@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import path from "path";
 import { fileURLToPath } from "url";
 import { logger } from "../lib/logger.js";
@@ -6,22 +6,22 @@ import { logger } from "../lib/logger.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = process.env["SQLITE_PATH"] || path.join(__dirname, "../../scalping.db");
 
-let _db: Database.Database | null = null;
+let _db: DatabaseSync | null = null;
 
-export function getDb(): Database.Database {
+export function getDb(): DatabaseSync {
   if (!_db) {
-    _db = new Database(DB_PATH);
-    _db.pragma("journal_mode = WAL");
-    _db.pragma("foreign_keys = ON");
-    _db.pragma("cache_size = -8000"); // 8MB cache
-    _db.pragma("temp_store = MEMORY");
+    _db = new DatabaseSync(DB_PATH);
+    _db.exec("PRAGMA journal_mode = WAL");
+    _db.exec("PRAGMA foreign_keys = ON");
+    _db.exec("PRAGMA cache_size = -8000");
+    _db.exec("PRAGMA temp_store = MEMORY");
     initSchema(_db);
     logger.info({ path: DB_PATH }, "SQLite database initialized");
   }
   return _db;
 }
 
-function initSchema(db: Database.Database): void {
+function initSchema(db: DatabaseSync): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS trades (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,6 +39,7 @@ function initSchema(db: Database.Database): void {
       hold_seconds INTEGER NOT NULL,
       exit_reason TEXT NOT NULL,
       tx_hash TEXT,
+      mev_protected INTEGER NOT NULL DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -109,7 +110,6 @@ function initSchema(db: Database.Database): void {
       updated_at TEXT DEFAULT (datetime('now'))
     );
 
-    -- Core indices
     CREATE INDEX IF NOT EXISTS idx_trades_exit_time ON trades(exit_time);
     CREATE INDEX IF NOT EXISTS idx_trades_token_address ON trades(token_address);
     CREATE INDEX IF NOT EXISTS idx_trades_created_at ON trades(created_at);
@@ -119,13 +119,6 @@ function initSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_bot_logs_level ON bot_logs(level);
     CREATE INDEX IF NOT EXISTS idx_positions_token_address ON positions(token_address);
   `);
-
-  // Migration: add mev_protected column if it doesn't exist yet
-  const cols = db.prepare("PRAGMA table_info(trades)").all() as { name: string }[];
-  if (!cols.some((c) => c.name === "mev_protected")) {
-    db.exec("ALTER TABLE trades ADD COLUMN mev_protected INTEGER NOT NULL DEFAULT 0");
-    logger.info({}, "Migration: added mev_protected column to trades table");
-  }
 }
 
 // Trade operations
@@ -147,11 +140,10 @@ export function insertTrade(trade: {
   mevProtected?: boolean;
 }): number {
   const db = getDb();
-  const stmt = db.prepare(`
+  const result = db.prepare(`
     INSERT INTO trades (token_address, token_symbol, token_name, entry_price, exit_price, amount_eth, amount_tokens, profit_percent, profit_eth, entry_time, exit_time, hold_seconds, exit_reason, tx_hash, mev_protected)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  const result = stmt.run(
+  `).run(
     trade.tokenAddress, trade.tokenSymbol, trade.tokenName,
     trade.entryPrice, trade.exitPrice, trade.amountEth,
     trade.amountTokens || 0, trade.profitPercent, trade.profitEth,
@@ -159,7 +151,7 @@ export function insertTrade(trade: {
     trade.exitReason, trade.txHash || null,
     trade.mevProtected ? 1 : 0
   );
-  return result.lastInsertRowid as number;
+  return Number(result.lastInsertRowid);
 }
 
 export function getTrades(
@@ -177,7 +169,7 @@ export function getTrades(
 
   const offset = (page - 1) * limit;
   const countRow = db.prepare(`SELECT COUNT(*) as total FROM trades ${whereClause}`).get() as any;
-  const total = countRow?.total || 0;
+  const total = Number(countRow?.total || 0);
   const totalPages = Math.ceil(total / limit);
 
   const trades = db.prepare(`
@@ -191,7 +183,6 @@ export function getTrades(
     ORDER BY exit_time DESC LIMIT ? OFFSET ?
   `).all(limit, offset) as any[];
 
-  // Normalize SQLite integer (0/1) to boolean
   for (const t of trades) {
     t.mevProtected = t.mevProtected === 1;
   }
@@ -298,7 +289,7 @@ export function insertScannedToken(token: {
 export function getScannedTokens(limit = 20, page = 1): any[] {
   const db = getDb();
   const offset = (page - 1) * limit;
-  return db.prepare(`
+  return (db.prepare(`
     SELECT id, address, symbol, name, price_usd as priceUsd,
            price_change_5m as priceChangePercent5m, price_change_1h as priceChangePercent1h,
            volume_5m_usd as volumeUsd5m, liquidity_usd as liquidityUsd,
@@ -308,7 +299,7 @@ export function getScannedTokens(limit = 20, page = 1): any[] {
            scanned_at as scannedAt
     FROM scanned_tokens
     ORDER BY scanned_at DESC LIMIT ? OFFSET ?
-  `).all(limit, offset).map((r: any) => ({ ...r, passedFilters: r.passedFilters === 1 })) as any[];
+  `).all(limit, offset) as any[]).map((r: any) => ({ ...r, passedFilters: r.passedFilters === 1 }));
 }
 
 // Bot logs
@@ -328,21 +319,25 @@ export function insertLog(log: {
 export function getLogs(limit = 100, page = 1, level?: string): any[] {
   const db = getDb();
   const offset = (page - 1) * limit;
-  const whereClause = level ? "WHERE level = ?" : "";
-  const params: any[] = level ? [level, limit, offset] : [limit, offset];
-
+  if (level) {
+    return db.prepare(`
+      SELECT id, level, message, token_symbol as tokenSymbol, data, timestamp
+      FROM bot_logs WHERE level = ?
+      ORDER BY timestamp DESC LIMIT ? OFFSET ?
+    `).all(level, limit, offset) as any[];
+  }
   return db.prepare(`
     SELECT id, level, message, token_symbol as tokenSymbol, data, timestamp
-    FROM bot_logs ${whereClause}
+    FROM bot_logs
     ORDER BY timestamp DESC LIMIT ? OFFSET ?
-  `).all(...params) as any[];
+  `).all(limit, offset) as any[];
 }
 
 // Daily stats
 export function getTodayStats(): { pnlEth: number; totalTrades: number; winningTrades: number; losingTrades: number } {
   const db = getDb();
   const row = db.prepare(`
-    SELECT 
+    SELECT
       COALESCE(SUM(profit_eth), 0) as pnlEth,
       COUNT(*) as totalTrades,
       SUM(CASE WHEN profit_eth > 0 THEN 1 ELSE 0 END) as winningTrades,
@@ -350,17 +345,17 @@ export function getTodayStats(): { pnlEth: number; totalTrades: number; winningT
     FROM trades WHERE date(exit_time) = date('now')
   `).get() as any;
   return {
-    pnlEth: row?.pnlEth || 0,
-    totalTrades: row?.totalTrades || 0,
-    winningTrades: row?.winningTrades || 0,
-    losingTrades: row?.losingTrades || 0,
+    pnlEth: Number(row?.pnlEth || 0),
+    totalTrades: Number(row?.totalTrades || 0),
+    winningTrades: Number(row?.winningTrades || 0),
+    losingTrades: Number(row?.losingTrades || 0),
   };
 }
 
 export function getAllTimeStats(): { totalPnlEth: number; avgProfitPercent: number; avgHoldSeconds: number; largestWin: number; largestLoss: number } {
   const db = getDb();
   const row = db.prepare(`
-    SELECT 
+    SELECT
       COALESCE(SUM(profit_eth), 0) as totalPnlEth,
       COALESCE(AVG(profit_percent), 0) as avgProfitPercent,
       COALESCE(AVG(hold_seconds), 0) as avgHoldSeconds,
@@ -369,18 +364,16 @@ export function getAllTimeStats(): { totalPnlEth: number; avgProfitPercent: numb
     FROM trades
   `).get() as any;
   return {
-    totalPnlEth: row?.totalPnlEth || 0,
-    avgProfitPercent: row?.avgProfitPercent || 0,
-    avgHoldSeconds: row?.avgHoldSeconds || 0,
-    largestWin: row?.largestWin || 0,
-    largestLoss: row?.largestLoss || 0,
+    totalPnlEth: Number(row?.totalPnlEth || 0),
+    avgProfitPercent: Number(row?.avgProfitPercent || 0),
+    avgHoldSeconds: Number(row?.avgHoldSeconds || 0),
+    largestWin: Number(row?.largestWin || 0),
+    largestLoss: Number(row?.largestLoss || 0),
   };
 }
 
 export function cleanOldLogs(keepDays = 7): void {
   const db = getDb();
-  db.prepare("DELETE FROM bot_logs WHERE timestamp < datetime('now', ?)")
-    .run(`-${keepDays} days`);
-  db.prepare("DELETE FROM scanned_tokens WHERE scanned_at < datetime('now', ?)")
-    .run("-1 days");
+  db.prepare("DELETE FROM bot_logs WHERE timestamp < datetime('now', ?)").run(`-${keepDays} days`);
+  db.prepare("DELETE FROM scanned_tokens WHERE scanned_at < datetime('now', ?)").run("-1 days");
 }

@@ -33,7 +33,7 @@ module.exports = {
       script: path.join(__dirname, "artifacts/api-server/dist/index.mjs"),
       cwd: __dirname,
       interpreter: "node",
-      interpreter_args: "--enable-source-maps",
+      interpreter_args: "--enable-source-maps --experimental-sqlite",
       env: {
         NODE_ENV: "production",
         PORT: "8080",
