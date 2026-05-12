@@ -1,0 +1,28 @@
+root@vps:~/scalping-bot# pm2 logs scalper-api --lines 20
+[TAILING] Tailing last 20 lines for [scalper-api] process (change the value with --lines option)
+/root/.pm2/logs/scalper-api-error.log last 20 lines:
+0|scalper- | 2026-05-12 09:06:24 +00:00: Warning: connect.session() MemoryStore is not
+0|scalper- | 2026-05-12 09:06:24 +00:00: designed for a production environment, as it will leak
+0|scalper- | 2026-05-12 09:06:24 +00:00: memory, and will not scale past a single process.
+0|scalper- | 2026-05-12 09:06:24 +00:00: (node:81019) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+0|scalper- | 2026-05-12 09:06:24 +00:00: (Use `node --trace-warnings ...` to show where the warning was created)
+0|scalper- | 2026-05-12 09:17:52 +00:00: Warning: connect.session() MemoryStore is not
+0|scalper- | 2026-05-12 09:17:52 +00:00: designed for a production environment, as it will leak
+0|scalper- | 2026-05-12 09:17:52 +00:00: memory, and will not scale past a single process.
+0|scalper- | 2026-05-12 09:17:52 +00:00: (node:81176) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+0|scalper- | 2026-05-12 09:17:52 +00:00: (Use `node --trace-warnings ...` to show where the warning was created)
+0|scalper- | 2026-05-12 09:24:37 +00:00: Warning: connect.session() MemoryStore is not
+0|scalper- | 2026-05-12 09:24:37 +00:00: designed for a production environment, as it will leak
+0|scalper- | 2026-05-12 09:24:37 +00:00: memory, and will not scale past a single process.
+0|scalper- | 2026-05-12 09:24:37 +00:00: (node:81311) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+0|scalper- | 2026-05-12 09:24:37 +00:00: (Use `node --trace-warnings ...` to show where the warning was created)
+0|scalper- | 2026-05-12 11:02:09 +00:00: Warning: connect.session() MemoryStore is not
+0|scalper- | 2026-05-12 11:02:09 +00:00: designed for a production environment, as it will leak
+0|scalper- | 2026-05-12 11:02:09 +00:00: memory, and will not scale past a single process.
+0|scalper- | 2026-05-12 11:02:09 +00:00: (node:82107) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+0|scalper- | 2026-05-12 11:02:09 +00:00: (Use `node --trace-warnings ...` to show where the warning was created)
+
+/root/.pm2/logs/scalper-api-out.log last 20 lines:
+0|scalper- | tusCode":401},"responseTime":3,"msg":"request completed"}
+0|scalper- | 2026-05-12 11:06:44 +00:00: {"level":30,"time":1778584004181,"pid":82107,"hostname":"vps.renbase.com","req":{"id":210,"method":"GET","url":"/api/positions"},"res":{"statusCode":401},"responseTime":1,"msg":"request completed"}
+0|scalper- | 2026-05-12 11:06:44 +00:00: {"level":30,"time":1778584004185,"pid":82107,"hostname":"vps.renbase.com","req":{"id":211,"method":"GET","url":"/api/wallet/balance"},"res":{"statusCode":401},"responseTime":1,"msg":"request completed"}
