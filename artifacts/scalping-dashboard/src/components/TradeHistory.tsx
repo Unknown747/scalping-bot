@@ -1,6 +1,7 @@
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { useGetTrades, getGetTradesQueryKey } from "@workspace/api-client-react";
+import { useGetBotStatus } from "@workspace/api-client-react";
 
 type Trade = {
   id: number;
@@ -34,9 +35,8 @@ const TIME_FILTER_LABELS: Record<string, string> = {
 };
 
 const MODE_FILTER_LABELS: Record<string, string> = {
-  all: "Live + Paper",
-  live: "Live",
-  paper: "Paper",
+  live: "LIVE",
+  paper: "PAPER",
 };
 
 const REASON_LABELS: Record<string, string> = {
@@ -97,32 +97,43 @@ function ModeBadge({ mode }: { mode?: string }) {
   );
 }
 
+async function fetchTrades(filter: string, limit: number, mode: "live" | "paper"): Promise<PaginatedTrades> {
+  const res = await fetch(`/api/trades?filter=${filter}&limit=${limit}&mode=${mode}`, {
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error("fetch trades failed");
+  return res.json();
+}
+
 export function TradeHistory() {
   const [timeFilter, setTimeFilter] = useState<"today" | "week" | "all">("today");
-  const [modeFilter, setModeFilter] = useState<"all" | "live" | "paper">("all");
+  const [modeFilter, setModeFilter] = useState<"live" | "paper" | null>(null);
 
-  const { data: raw } = useGetTrades(
-    { filter: timeFilter, limit: 200 },
-    { query: { refetchInterval: 10000, queryKey: getGetTradesQueryKey({ filter: timeFilter, limit: 200 }) } }
-  );
+  // Use bot status to know which mode is active, for default display
+  const { data: botStatus } = useGetBotStatus({
+    query: { refetchInterval: 10000 },
+  });
+  const currentBotMode = (botStatus?.mode as "live" | "paper") ?? "live";
+  const activeMode = modeFilter ?? currentBotMode;
 
-  const paginated = raw as PaginatedTrades | undefined;
-  const allTrades: Trade[] = paginated?.trades ?? (Array.isArray(raw) ? (raw as Trade[]) : []);
+  const { data: paginated } = useQuery({
+    queryKey: ["trade-history", timeFilter, activeMode],
+    queryFn: () => fetchTrades(timeFilter, 200, activeMode),
+    refetchInterval: 10000,
+  });
 
-  // Client-side mode filter
-  const trades = modeFilter === "all"
-    ? allTrades
-    : allTrades.filter((t) => (t.mode ?? "live") === modeFilter);
+  const trades: Trade[] = paginated?.trades ?? [];
 
-  // MEV stats (on filtered trades)
+  // P&L summary for current filtered view
+  const totalPnlEth = trades.reduce((s, t) => s + t.profitEth, 0);
+  const winCount = trades.filter((t) => t.profitEth > 0).length;
+  const lossCount = trades.filter((t) => t.profitEth <= 0).length;
+
+  // MEV stats
   const mevCount = trades.filter((t) => t.mevProtected).length;
   const mevPct = trades.length > 0 ? Math.round((mevCount / trades.length) * 100) : 0;
   const mevProfitEth = trades.filter((t) => t.mevProtected).reduce((s, t) => s + t.profitEth, 0);
   const stdProfitEth = trades.filter((t) => !t.mevProtected).reduce((s, t) => s + t.profitEth, 0);
-
-  // Mode breakdown
-  const liveCount = allTrades.filter((t) => (t.mode ?? "live") === "live").length;
-  const paperCount = allTrades.filter((t) => t.mode === "paper").length;
 
   const exportCsv = () => {
     if (!trades.length) return;
@@ -144,7 +155,7 @@ export function TradeHistory() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `trades_${timeFilter}_${modeFilter}_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `trades_${timeFilter}_${activeMode}_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -153,13 +164,46 @@ export function TradeHistory() {
     <div className="bg-card border border-border rounded-lg p-4 space-y-3">
       {/* Header */}
       <div className="flex items-center justify-between gap-2 flex-wrap">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">Trade History</div>
           {paginated?.total !== undefined && (
             <span className="text-[10px] text-muted-foreground font-mono">({trades.length} tampil / {paginated.total} total)</span>
           )}
+          {/* Active mode badge */}
+          <span className={`text-[9px] font-mono font-bold px-1.5 py-0.5 rounded border ${
+            activeMode === "live"
+              ? "bg-loss/10 text-loss border-loss/30"
+              : "bg-warn/10 text-warn border-warn/30"
+          }`}>
+            {activeMode === "live" ? "LIVE — Mainnet" : "PAPER — Simulasi"}
+            {modeFilter === null && " (aktif)"}
+          </span>
         </div>
+
         <div className="flex items-center gap-2 flex-wrap">
+          {/* Mode filter — LIVE / PAPER only, no "all" mix */}
+          <div className="flex rounded overflow-hidden border border-border">
+            {(["live", "paper"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setModeFilter(m)}
+                className={`px-2.5 py-1 text-[10px] font-mono transition-colors border-r border-border/30 last:border-r-0 ${
+                  activeMode === m && modeFilter !== null
+                    ? m === "live"
+                      ? "bg-loss/20 text-loss"
+                      : "bg-warn/20 text-warn"
+                    : activeMode === m && modeFilter === null
+                    ? m === "live"
+                      ? "bg-loss/10 text-loss/70"
+                      : "bg-warn/10 text-warn/70"
+                    : "text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                {MODE_FILTER_LABELS[m]}
+              </button>
+            ))}
+          </div>
+
           {/* Time filter */}
           <div className="flex rounded overflow-hidden border border-border">
             {(["today", "week", "all"] as const).map((f) => (
@@ -178,27 +222,6 @@ export function TradeHistory() {
             ))}
           </div>
 
-          {/* Mode filter */}
-          <div className="flex rounded overflow-hidden border border-border">
-            {(["all", "live", "paper"] as const).map((m) => (
-              <button
-                key={m}
-                onClick={() => setModeFilter(m)}
-                className={`px-2.5 py-1 text-[10px] font-mono transition-colors border-r border-border/30 last:border-r-0 ${
-                  modeFilter === m
-                    ? m === "live"
-                      ? "bg-loss/20 text-loss"
-                      : m === "paper"
-                      ? "bg-warn/20 text-warn"
-                      : "bg-primary/20 text-primary"
-                    : "text-muted-foreground hover:bg-muted"
-                }`}
-              >
-                {MODE_FILTER_LABELS[m]}
-              </button>
-            ))}
-          </div>
-
           <button
             data-testid="button-export-csv"
             onClick={exportCsv}
@@ -209,58 +232,49 @@ export function TradeHistory() {
         </div>
       </div>
 
-      {/* Mode breakdown summary */}
-      {allTrades.length > 0 && modeFilter === "all" && (
-        <div className="flex items-center gap-3 text-[10px] font-mono text-muted-foreground">
-          <span>Breakdown:</span>
-          <span className="text-loss font-bold">{liveCount} LIVE</span>
-          <span className="text-warn font-bold">{paperCount} PAPER</span>
-          <span className="text-muted-foreground/50">— gunakan filter mode untuk pisahkan</span>
-        </div>
-      )}
-
-      {/* MEV Summary Bar */}
+      {/* P&L Summary for current mode */}
       {trades.length > 0 && (
-        <div className="grid grid-cols-3 gap-2 p-2.5 rounded-lg bg-muted/30 border border-border/50">
+        <div className="grid grid-cols-3 gap-2 p-2.5 rounded-lg bg-muted/20 border border-border/50">
+          <div className="text-center">
+            <div className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider mb-0.5">Total PnL</div>
+            <div className={`text-sm font-bold font-mono ${totalPnlEth >= 0 ? "text-profit" : "text-loss"}`}>
+              {totalPnlEth >= 0 ? "+" : ""}{totalPnlEth.toFixed(5)} ETH
+            </div>
+            <div className="text-[10px] text-muted-foreground font-mono">{trades.length} trade</div>
+          </div>
+          <div className="text-center border-x border-border/50">
+            <div className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider mb-0.5">Win / Loss</div>
+            <div className="text-sm font-bold font-mono">
+              <span className="text-profit">{winCount}W</span>
+              <span className="text-muted-foreground mx-1">/</span>
+              <span className="text-loss">{lossCount}L</span>
+            </div>
+            <div className="text-[10px] text-muted-foreground font-mono">
+              {trades.length > 0 ? ((winCount / trades.length) * 100).toFixed(1) : "0.0"}% winrate
+            </div>
+          </div>
           <div className="text-center">
             <div className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider mb-0.5">MEV Protected</div>
             <div className="text-sm font-bold font-mono text-primary">{mevPct}%</div>
             <div className="text-[10px] text-muted-foreground font-mono">{mevCount}/{trades.length} trade</div>
           </div>
-          <div className="text-center border-x border-border/50">
-            <div className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider mb-0.5">P&L via MEV</div>
-            <div className={`text-sm font-bold font-mono ${mevProfitEth >= 0 ? "text-profit" : "text-loss"}`}>
-              {mevProfitEth >= 0 ? "+" : ""}{mevProfitEth.toFixed(5)} ETH
-            </div>
-            <div className="text-[10px] text-muted-foreground font-mono">dRPC MEV Blocker</div>
-          </div>
-          <div className="text-center">
-            <div className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider mb-0.5">P&L via STD</div>
-            <div className={`text-sm font-bold font-mono ${stdProfitEth >= 0 ? "text-profit" : "text-loss"}`}>
-              {stdProfitEth >= 0 ? "+" : ""}{stdProfitEth.toFixed(5)} ETH
-            </div>
-            <div className="text-[10px] text-muted-foreground font-mono">Standard RPC</div>
-          </div>
         </div>
       )}
 
-      {/* MEV bar chart */}
+      {/* MEV P&L breakdown */}
       {trades.length > 0 && (
-        <div className="space-y-1">
-          <div className="flex justify-between text-[10px] font-mono text-muted-foreground">
-            <span>MEV Protected</span>
-            <span>Standard RPC</span>
+        <div className="grid grid-cols-2 gap-2 p-2 rounded bg-muted/10 border border-border/30">
+          <div className="text-center">
+            <div className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider mb-0.5">P&L via MEV</div>
+            <div className={`text-xs font-bold font-mono ${mevProfitEth >= 0 ? "text-profit" : "text-loss"}`}>
+              {mevProfitEth >= 0 ? "+" : ""}{mevProfitEth.toFixed(5)} ETH
+            </div>
           </div>
-          <div className="flex h-1.5 rounded-full overflow-hidden bg-muted">
-            <div
-              className="bg-primary transition-all duration-500"
-              style={{ width: `${mevPct}%` }}
-            />
-            <div className="bg-border flex-1" />
-          </div>
-          <div className="flex justify-between text-[10px] font-mono">
-            <span className="text-primary">{mevPct}% ✓ MEV</span>
-            <span className="text-muted-foreground">{100 - mevPct}% STD</span>
+          <div className="text-center border-l border-border/50">
+            <div className="text-[10px] text-muted-foreground font-mono uppercase tracking-wider mb-0.5">P&L via STD</div>
+            <div className={`text-xs font-bold font-mono ${stdProfitEth >= 0 ? "text-profit" : "text-loss"}`}>
+              {stdProfitEth >= 0 ? "+" : ""}{stdProfitEth.toFixed(5)} ETH
+            </div>
           </div>
         </div>
       )}
@@ -324,7 +338,7 @@ export function TradeHistory() {
 
         {trades.length === 0 && (
           <div className="py-8 text-center text-muted-foreground text-[11px] font-mono" data-testid="text-no-trades">
-            Tidak ada trade {modeFilter !== "all" ? `mode ${modeFilter.toUpperCase()} ` : ""}untuk {TIME_FILTER_LABELS[timeFilter].toLowerCase()}
+            Tidak ada trade {activeMode.toUpperCase()} untuk {TIME_FILTER_LABELS[timeFilter].toLowerCase()}
           </div>
         )}
       </div>

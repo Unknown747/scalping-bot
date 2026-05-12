@@ -386,7 +386,7 @@ export class SwapExecutor {
         return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: reason };
       }
 
-      const amountOutMinimum =
+      let amountOutMinimum =
         (expectedOut * BigInt(Math.floor((100 - slippagePct) * 100))) / 10000n;
 
       const useWeth = wethBalance >= amountInWei;
@@ -438,14 +438,60 @@ export class SwapExecutor {
           { value: useWeth ? 0n : amountInWei }
         );
       } catch (simErr: any) {
-        const simMsg =
+        const simMsg: string =
           simErr.shortMessage ||
           simErr.reason ||
           simErr.revert?.args?.[0] ||
           simErr.message ||
           "swap simulation failed";
-        logger.warn({ tokenAddress, fee, simMsg }, "Swap simulation failed — skipping buy");
-        return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: `Simulation: ${simMsg}` };
+
+        // If slippage caused the fail ("Too little received" / "STF"), retry once
+        // with a higher slippage (up to 2× configured, max 20%)
+        const isSlippageRevert =
+          simMsg.includes("Too little received") ||
+          simMsg.includes("STF") ||
+          simMsg.includes("slippage");
+
+        if (isSlippageRevert) {
+          const retrySlippagePct = Math.min(slippagePct * 2, 20);
+          const retryAmountOutMinimum =
+            (expectedOut * BigInt(Math.floor((100 - retrySlippagePct) * 100))) / 10000n;
+
+          logger.warn(
+            { tokenAddress, fee, simMsg, retrySlippagePct },
+            `Slippage simulation fail — retrying with ${retrySlippagePct}% slippage`
+          );
+
+          try {
+            await routerRead.exactInputSingle.staticCall(
+              {
+                tokenIn: BASE_CONTRACTS.WETH,
+                tokenOut: tokenAddress,
+                fee,
+                recipient: this.walletAddress,
+                amountIn: amountInWei,
+                amountOutMinimum: retryAmountOutMinimum,
+                sqrtPriceLimitX96: 0,
+              },
+              { value: useWeth ? 0n : amountInWei }
+            );
+            // Retry succeeded — update amountOutMinimum for the real tx
+            (amountOutMinimum as any) = retryAmountOutMinimum;
+            logger.info({ tokenAddress, retrySlippagePct }, "Slippage retry simulation passed — continuing buy");
+          } catch (retryErr: any) {
+            const retryMsg =
+              retryErr.shortMessage ||
+              retryErr.reason ||
+              retryErr.revert?.args?.[0] ||
+              retryErr.message ||
+              "retry simulation failed";
+            logger.warn({ tokenAddress, fee, retryMsg }, "Slippage retry simulation also failed — skipping buy");
+            return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: `Simulation: ${retryMsg}` };
+          }
+        } else {
+          logger.warn({ tokenAddress, fee, simMsg }, "Swap simulation failed — skipping buy");
+          return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: `Simulation: ${simMsg}` };
+        }
       }
 
       let tx: any;

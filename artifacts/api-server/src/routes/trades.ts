@@ -11,10 +11,22 @@ router.get("/trades", (req, res) => {
   const validFilters = ["today", "week", "all"];
   const safeFilter = validFilters.includes(filter) ? (filter as "today" | "week" | "all") : "today";
 
-  // Filter trades by current bot mode so paper and mainnet stats are always separate
-  const bot = getBot();
-  const currentMode = bot.getConfig().mode as "live" | "paper";
-  const result = db.getTrades(safeFilter, limit, page, currentMode);
+  // mode param: "live" | "paper" | "all" — defaults to current bot mode if not provided
+  const modeParam = req.query["mode"] as string | undefined;
+  let modeFilter: "live" | "paper" | undefined;
+  if (modeParam === "live") {
+    modeFilter = "live";
+  } else if (modeParam === "paper") {
+    modeFilter = "paper";
+  } else if (modeParam === "all") {
+    modeFilter = undefined; // no filter
+  } else {
+    // backward compat: default to current bot mode
+    const bot = getBot();
+    modeFilter = bot.getConfig().mode as "live" | "paper";
+  }
+
+  const result = db.getTrades(safeFilter, limit, page, modeFilter);
   res.json(result);
 });
 
