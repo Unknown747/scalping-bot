@@ -1,6 +1,9 @@
 FROM node:24-alpine
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
+# Build tools required for better-sqlite3 native compilation
+RUN apk add --no-cache python3 make g++ sqlite-dev
+
 WORKDIR /app
 
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json ./
