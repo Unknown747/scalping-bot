@@ -1,5 +1,6 @@
 import { Router } from "express";
 import * as db from "../scalping/database.js";
+import { getBot } from "../botInstance.js";
 
 const router = Router();
 
@@ -9,7 +10,11 @@ router.get("/trades", (req, res) => {
   const page = Math.max(parseInt((req.query["page"] as string) || "1", 10), 1);
   const validFilters = ["today", "week", "all"];
   const safeFilter = validFilters.includes(filter) ? (filter as "today" | "week" | "all") : "today";
-  const result = db.getTrades(safeFilter, limit, page);
+
+  // Filter trades by current bot mode so paper and mainnet stats are always separate
+  const bot = getBot();
+  const currentMode = bot.getConfig().mode as "live" | "paper";
+  const result = db.getTrades(safeFilter, limit, page, currentMode);
   res.json(result);
 });
 

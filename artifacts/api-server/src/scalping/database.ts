@@ -40,6 +40,7 @@ function initSchema(db: DatabaseSync): void {
       exit_reason TEXT NOT NULL,
       tx_hash TEXT,
       mev_protected INTEGER NOT NULL DEFAULT 0,
+      mode TEXT NOT NULL DEFAULT 'live',
       created_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -119,6 +120,13 @@ function initSchema(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS idx_bot_logs_level ON bot_logs(level);
     CREATE INDEX IF NOT EXISTS idx_positions_token_address ON positions(token_address);
   `);
+
+  // Migration: add mode column to existing trades tables that don't have it yet
+  try {
+    db.exec(`ALTER TABLE trades ADD COLUMN mode TEXT NOT NULL DEFAULT 'live'`);
+  } catch {
+    // Column already exists — ignore
+  }
 }
 
 // Trade operations
@@ -138,18 +146,20 @@ export function insertTrade(trade: {
   exitReason: string;
   txHash?: string | null;
   mevProtected?: boolean;
+  mode?: "live" | "paper";
 }): number {
   const db = getDb();
   const result = db.prepare(`
-    INSERT INTO trades (token_address, token_symbol, token_name, entry_price, exit_price, amount_eth, amount_tokens, profit_percent, profit_eth, entry_time, exit_time, hold_seconds, exit_reason, tx_hash, mev_protected)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO trades (token_address, token_symbol, token_name, entry_price, exit_price, amount_eth, amount_tokens, profit_percent, profit_eth, entry_time, exit_time, hold_seconds, exit_reason, tx_hash, mev_protected, mode)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     trade.tokenAddress, trade.tokenSymbol, trade.tokenName,
     trade.entryPrice, trade.exitPrice, trade.amountEth,
     trade.amountTokens || 0, trade.profitPercent, trade.profitEth,
     trade.entryTime, trade.exitTime, trade.holdSeconds,
     trade.exitReason, trade.txHash || null,
-    trade.mevProtected ? 1 : 0
+    trade.mevProtected ? 1 : 0,
+    trade.mode || "live"
   );
   return Number(result.lastInsertRowid);
 }
@@ -157,15 +167,20 @@ export function insertTrade(trade: {
 export function getTrades(
   filter: "today" | "week" | "all" = "today",
   limit = 100,
-  page = 1
+  page = 1,
+  mode?: "live" | "paper"
 ): { trades: any[]; total: number; page: number; totalPages: number } {
   const db = getDb();
-  let whereClause = "";
+  const conditions: string[] = [];
   if (filter === "today") {
-    whereClause = "WHERE date(exit_time) = date('now')";
+    conditions.push("date(exit_time) = date('now')");
   } else if (filter === "week") {
-    whereClause = "WHERE exit_time >= datetime('now', '-7 days')";
+    conditions.push("exit_time >= datetime('now', '-7 days')");
   }
+  if (mode) {
+    conditions.push(`mode = '${mode}'`);
+  }
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
   const offset = (page - 1) * limit;
   const countRow = db.prepare(`SELECT COUNT(*) as total FROM trades ${whereClause}`).get() as any;
@@ -178,7 +193,7 @@ export function getTrades(
            profit_percent as profitPercent, profit_eth as profitEth,
            entry_time as entryTime, exit_time as exitTime, hold_seconds as holdSeconds,
            exit_reason as exitReason, tx_hash as txHash,
-           mev_protected as mevProtected
+           mev_protected as mevProtected, mode
     FROM trades ${whereClause}
     ORDER BY exit_time DESC LIMIT ? OFFSET ?
   `).all(limit, offset) as any[];
@@ -334,15 +349,16 @@ export function getLogs(limit = 100, page = 1, level?: string): any[] {
 }
 
 // Daily stats
-export function getTodayStats(): { pnlEth: number; totalTrades: number; winningTrades: number; losingTrades: number } {
+export function getTodayStats(mode?: "live" | "paper"): { pnlEth: number; totalTrades: number; winningTrades: number; losingTrades: number } {
   const db = getDb();
+  const modeClause = mode ? `AND mode = '${mode}'` : "";
   const row = db.prepare(`
     SELECT
       COALESCE(SUM(profit_eth), 0) as pnlEth,
       COUNT(*) as totalTrades,
       SUM(CASE WHEN profit_eth > 0 THEN 1 ELSE 0 END) as winningTrades,
       SUM(CASE WHEN profit_eth <= 0 THEN 1 ELSE 0 END) as losingTrades
-    FROM trades WHERE date(exit_time) = date('now')
+    FROM trades WHERE date(exit_time) = date('now') ${modeClause}
   `).get() as any;
   return {
     pnlEth: Number(row?.pnlEth || 0),
@@ -352,8 +368,9 @@ export function getTodayStats(): { pnlEth: number; totalTrades: number; winningT
   };
 }
 
-export function getAllTimeStats(): { totalPnlEth: number; avgProfitPercent: number; avgHoldSeconds: number; largestWin: number; largestLoss: number } {
+export function getAllTimeStats(mode?: "live" | "paper"): { totalPnlEth: number; avgProfitPercent: number; avgHoldSeconds: number; largestWin: number; largestLoss: number } {
   const db = getDb();
+  const modeClause = mode ? `WHERE mode = '${mode}'` : "";
   const row = db.prepare(`
     SELECT
       COALESCE(SUM(profit_eth), 0) as totalPnlEth,
@@ -361,7 +378,7 @@ export function getAllTimeStats(): { totalPnlEth: number; avgProfitPercent: numb
       COALESCE(AVG(hold_seconds), 0) as avgHoldSeconds,
       COALESCE(MAX(profit_percent), 0) as largestWin,
       COALESCE(MIN(profit_percent), 0) as largestLoss
-    FROM trades
+    FROM trades ${modeClause}
   `).get() as any;
   return {
     totalPnlEth: Number(row?.totalPnlEth || 0),

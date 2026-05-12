@@ -181,7 +181,7 @@ export class ScalpingBot {
   }
 
   getStatus() {
-    const today = db.getTodayStats();
+    const today = db.getTodayStats(this.config.mode);
     const buysInWindow = this.cooldownManager.getBuysInWindow();
     const postCloseCooldown = this.cooldownManager.getRemainingCooldown(this.config.cooldownAfterCloseSeconds);
 
@@ -307,7 +307,7 @@ export class ScalpingBot {
     // Send daily summary every 24 hours
     this.dailySummaryInterval = setInterval(async () => {
       try {
-        const today = db.getTodayStats();
+        const today = db.getTodayStats(this.config.mode);
         const ethPrice = await this.priceMonitor.getEthPrice();
         const usdToIdr = 16000;
 
@@ -834,6 +834,10 @@ export class ScalpingBot {
     const profitPercent = ((pos.currentPrice - pos.entryPrice) / pos.entryPrice) * 100;
     const profitEth = pos.amountEth * (profitPercent / 100) * (sellPercent / 100);
 
+    // Compute sell amounts BEFORE mutating position (fix: partial sell was using already-reduced amounts)
+    const sellTokenAmount = BigInt(Math.floor(pos.amountTokens * (sellPercent / 100)));
+    const sellEthEstimate = pos.amountEth * (sellPercent / 100);
+
     if (reason === "tp1") pos.tp1Hit = true;
     if (reason === "tp2") pos.tp2Hit = true;
 
@@ -855,8 +859,8 @@ export class ScalpingBot {
 
     const sellResult = await this.swapExecutor.sellToken(
       tokenAddress,
-      BigInt(Math.floor(pos.amountTokens * (sellPercent / 100))),
-      pos.amountEth * (sellPercent / 100)
+      sellTokenAmount,
+      sellEthEstimate
     );
 
     const exitTime = new Date().toISOString();
@@ -866,7 +870,7 @@ export class ScalpingBot {
       tokenName: pos.tokenName,
       entryPrice: pos.entryPrice,
       exitPrice: pos.currentPrice,
-      amountEth: pos.amountEth * (sellPercent / 100),
+      amountEth: sellEthEstimate,
       profitPercent,
       profitEth,
       entryTime: pos.entryTime.toISOString(),
@@ -875,6 +879,7 @@ export class ScalpingBot {
       exitReason: reason,
       txHash: sellResult.txHash,
       mevProtected: sellResult.mevProtected ?? false,
+      mode: this.config.mode,
     });
 
     if (profitEth < 0) {
@@ -1081,6 +1086,7 @@ export class ScalpingBot {
       exitReason: "manual_sell",
       txHash: sellResult.txHash,
       mevProtected: sellResult.mevProtected ?? false,
+      mode: this.config.mode,
     });
 
     this.log("sell", `MANUAL SELL SUCCESS: ${symbol} | received ${ethReceived.toFixed(6)} ETH | txHash: ${sellResult.txHash}`, symbol);
@@ -1112,12 +1118,14 @@ export class ScalpingBot {
   }
 
   async buildStats() {
-    const today = db.getTodayStats();
-    const allTime = db.getAllTimeStats();
+    const mode = this.config.mode;
+    const today = db.getTodayStats(mode);
+    const allTime = db.getAllTimeStats(mode);
     const ethPrice = await this.priceMonitor.getEthPrice();
     const usdToIdr = 16000;
 
     return {
+      mode,
       todayPnlEth: today.pnlEth,
       todayPnlIdr: today.pnlEth * ethPrice * usdToIdr,
       totalTradesDay: today.totalTrades,

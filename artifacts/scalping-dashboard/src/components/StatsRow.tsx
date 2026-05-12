@@ -10,6 +10,7 @@ type Stats = {
   capitalEth: number;
   capitalIdr: number;
   ethPriceUsd: number;
+  mode?: string;
 };
 
 type BotStatus = {
@@ -58,11 +59,13 @@ export function StatsRow({ stats, botStatus }: { stats?: Stats; botStatus?: BotS
   const avgHold = stats?.avgHoldSeconds || 0;
   const capital = stats?.capitalEth || 0;
   const capitalIdr = stats?.capitalIdr || 0;
+  const mode = stats?.mode || "live";
+  const isPaper = mode === "paper";
 
   return (
     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2" data-testid="stats-row">
       <StatCard
-        label="Today PnL"
+        label={isPaper ? "Today PnL [PAPER]" : "Today PnL [LIVE]"}
         value={`${pnlEth >= 0 ? "+" : ""}${pnlEth.toFixed(6)} ETH`}
         sub={`${pnlIdr >= 0 ? "+" : "-"}${formatIdr(pnlIdr)}`}
         positive={pnlEth > 0 ? true : pnlEth < 0 ? false : null}
