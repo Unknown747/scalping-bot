@@ -42,6 +42,23 @@ const FEE_TIERS = [10000, 3000, 500, 100]; // 1%, 0.3%, 0.05%, 0.01%
 const feeTierCache = new Map<string, { fee: number; timestamp: number }>();
 const FEE_CACHE_TTL = 5 * 60 * 1000; // 5 min
 
+// ─── Uniswap V4 constants ─────────────────────────────────────────────────────
+// Actions enum values (from @uniswap/v4-sdk v2.1.x)
+const V4_SWAP_EXACT_IN_SINGLE = 6;
+const V4_SETTLE_ALL            = 12;
+const V4_TAKE_ALL              = 15;
+// UniversalRouter V2 command byte for V4_SWAP
+const V4_SWAP_CMD = "0x10";
+// Common (fee, tickSpacing) combos for V4 pools — sorted most-likely first for meme coins
+const V4_POOLS = [
+  { fee: 10000, tickSpacing: 200 },  // 1%    — most new meme coins
+  { fee: 3000,  tickSpacing: 60  },  // 0.3%
+  { fee: 500,   tickSpacing: 10  },  // 0.05%
+  { fee: 100,   tickSpacing: 1   },  // 0.01%
+] as const;
+// Cache fee/tickSpacing per token after a successful V4 quote (TTL same as V3)
+const v4FeeCache = new Map<string, { fee: number; tickSpacing: number; timestamp: number }>();
+
 const ERC20_ABI = [
   "function approve(address spender, uint256 amount) returns (bool)",
   "function allowance(address owner, address spender) view returns (uint256)",
@@ -398,28 +415,33 @@ export class SwapExecutor {
         catch { return { name, quote: 0n }; }
       };
 
-      const aeroContract = new ethers.Contract(BASE_CONTRACTS.AERODROME_V2_ROUTER, aeroAbi, readProvider);
-      const bsContract   = new ethers.Contract(BASE_CONTRACTS.BASESWAP_ROUTER, v2Abi, readProvider);
-      const psContract   = new ethers.Contract(BASE_CONTRACTS.PANCAKESWAP_V2_ROUTER, v2Abi, readProvider);
+      const aeroContract  = new ethers.Contract(BASE_CONTRACTS.AERODROME_V2_ROUTER, aeroAbi, readProvider);
+      const bsContract    = new ethers.Contract(BASE_CONTRACTS.BASESWAP_ROUTER, v2Abi, readProvider);
+      const psContract    = new ethers.Contract(BASE_CONTRACTS.PANCAKESWAP_V2_ROUTER, v2Abi, readProvider);
+      const sushiContract = new ethers.Contract(BASE_CONTRACTS.SUSHISWAP_V2_ROUTER, v2Abi, readProvider);
 
-      const [feeTierResult, wethBalance, aeroQuote, bsQuote, psQuote] = await Promise.all([
+      const [feeTierResult, wethBalance, aeroQuote, bsQuote, psQuote, sushiQuote, v4Result] = await Promise.all([
         this.getBestFeeTier(ethers, readProvider, tokenAddress, amountInWei),
         this.getWethBalance(ethers, readProvider),
         safeV2Quote(async () => { const a = await aeroContract.getAmountsOut(amountInWei, aeroRoutes); return a[1] ?? 0n; }, "Aerodrome V2"),
         safeV2Quote(async () => { const a = await bsContract.getAmountsOut(amountInWei, v2Path); return a[1] ?? 0n; }, "BaseSwap V2"),
         safeV2Quote(async () => { const a = await psContract.getAmountsOut(amountInWei, v2Path); return a[1] ?? 0n; }, "PancakeSwap V2"),
+        safeV2Quote(async () => { const a = await sushiContract.getAmountsOut(amountInWei, v2Path); return a[1] ?? 0n; }, "SushiSwap V2"),
+        this.getV4BestQuote(ethers, readProvider, tokenAddress, amountInWei),
       ]);
 
       const { fee, expectedOut: v3Quote } = feeTierResult;
+      const v4Quote = v4Result?.quote ?? 0n;
 
-      // ── Compare all 4 DEX quotes ─────────────────────────────────────────
+      // ── Compare all 6 DEX quotes (V3 + V4 + Aerodrome + BaseSwap + PancakeSwap + SushiSwap) ──
       const allQuotes = [
-        { name: "Uniswap V3", quote: v3Quote },
-        aeroQuote, bsQuote, psQuote,
+        { name: "Uniswap V3",   quote: v3Quote   },
+        { name: "Uniswap V4",   quote: v4Quote   },
+        aeroQuote, bsQuote, psQuote, sushiQuote,
       ].filter(q => q.quote > 0n);
 
       if (allQuotes.length === 0) {
-        return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: "No liquidity on any DEX (Uniswap V3, Aerodrome V2, BaseSwap V2, PancakeSwap V2)" };
+        return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: "No liquidity on any DEX (V3/V4/Aerodrome/BaseSwap/PancakeSwap/SushiSwap)" };
       }
 
       const bestDEX = allQuotes.reduce((a, b) => b.quote > a.quote ? b : a);
@@ -428,13 +450,15 @@ export class SwapExecutor {
         `[Multi-DEX] Best quote → ${bestDEX.name}`
       );
 
-      // Build dexQuotes for all 4 DEXes (including those with zero liquidity)
-      const allDEXNames = ["Uniswap V3", "Aerodrome V2", "BaseSwap V2", "PancakeSwap V2"];
+      // Build dexQuotes for all 6 DEXes (including zero-liquidity ones)
+      const allDEXNames = ["Uniswap V3", "Uniswap V4", "Aerodrome V2", "BaseSwap V2", "PancakeSwap V2", "SushiSwap V2"];
       const allRawQuotes = [
-        { name: "Uniswap V3", quote: v3Quote },
-        { name: "Aerodrome V2", quote: aeroQuote.quote },
-        { name: "BaseSwap V2", quote: bsQuote.quote },
-        { name: "PancakeSwap V2", quote: psQuote.quote },
+        { name: "Uniswap V3",   quote: v3Quote          },
+        { name: "Uniswap V4",   quote: v4Quote          },
+        { name: "Aerodrome V2", quote: aeroQuote.quote  },
+        { name: "BaseSwap V2",  quote: bsQuote.quote    },
+        { name: "PancakeSwap V2", quote: psQuote.quote  },
+        { name: "SushiSwap V2", quote: sushiQuote.quote },
       ];
       const dexQuotes: DexQuoteEntry[] = allDEXNames.map(name => {
         const found = allRawQuotes.find(q => q.name === name);
@@ -444,6 +468,13 @@ export class SwapExecutor {
           winner: name === bestDEX.name,
         };
       });
+
+      // ── If V4 has the best quote, route via UniversalRouter V2 ───────────
+      if (bestDEX.name === "Uniswap V4" && v4Result) {
+        v4FeeCache.set(tokenAddress.toLowerCase(), { fee: v4Result.fee, tickSpacing: v4Result.tickSpacing, timestamp: Date.now() });
+        const v4BuyResult = await this.buyTokenV4(ethers, tokenAddress, amountEth, slippagePct, v4Result);
+        return { ...v4BuyResult, dexQuotes };
+      }
 
       // ── If a V2 DEX has the best quote, route there (skip V3 execution) ──
       if (bestDEX.name !== "Uniswap V3") {
@@ -740,6 +771,14 @@ export class SwapExecutor {
           logger.info({ tokenAddress, dexId }, "Routing sell → PancakeSwap V2 (matched buy DEX)");
           return this.sellTokenV2Standard(ethers, tokenAddress, amountTokens, BASE_CONTRACTS.PANCAKESWAP_V2_ROUTER, "PancakeSwap V2");
         }
+        if (d.includes("sushi")) {
+          logger.info({ tokenAddress, dexId }, "Routing sell → SushiSwap V2 (matched buy DEX)");
+          return this.sellTokenV2Standard(ethers, tokenAddress, amountTokens, BASE_CONTRACTS.SUSHISWAP_V2_ROUTER, "SushiSwap V2");
+        }
+        if (d.includes("v4") || d.includes("uniswap v4")) {
+          logger.info({ tokenAddress, dexId }, "Routing sell → Uniswap V4 (matched buy DEX)");
+          return this.sellTokenV4(ethers, tokenAddress, amountTokens);
+        }
         // Uniswap V3 or unknown — fall through to V3 sell below
       } else {
         // No executionDex info — use fee cache to decide
@@ -843,7 +882,155 @@ export class SwapExecutor {
     }
   }
 
-  // ─── MULTI-DEX V2 BUY: AERODROME + BASESWAP + PANCAKESWAP (PARALEL) ────────
+  // ─── UNISWAP V4 QUOTE ─────────────────────────────────────────────────────
+
+  /**
+   * Query V4 Quoter for best fee/tickSpacing for a given ETH→TOKEN swap.
+   * Tries all 4 common fee/tickSpacing pairs in parallel; returns the best.
+   * V4 pools always use native ETH (address(0)) as currency0 since 0x0 < any token address.
+   */
+  private async getV4BestQuote(
+    ethers: any,
+    provider: any,
+    tokenAddress: string,
+    amountInWei: bigint
+  ): Promise<{ fee: number; tickSpacing: number; quote: bigint } | null> {
+    // Check cache first
+    const cacheKey = tokenAddress.toLowerCase();
+    const cached = v4FeeCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < FEE_CACHE_TTL) {
+      try {
+        const quoterAbi = ["function quoteExactInputSingle(((address,address,uint24,int24,address),bool,uint128,bytes) params) returns (uint256 amountOut, uint256 gasEstimate)"];
+        const quoter = new ethers.Contract(BASE_CONTRACTS.UNISWAP_V4_QUOTER, quoterAbi, provider);
+        const [amountOut] = await quoter.quoteExactInputSingle.staticCall([
+          [ethers.ZeroAddress, ethers.getAddress(tokenAddress), cached.fee, cached.tickSpacing, ethers.ZeroAddress],
+          true, amountInWei, "0x",
+        ]);
+        if (amountOut > 0n) return { fee: cached.fee, tickSpacing: cached.tickSpacing, quote: amountOut };
+      } catch { /* fall through to full scan */ }
+    }
+
+    const quoterAbi = ["function quoteExactInputSingle(((address,address,uint24,int24,address),bool,uint128,bytes) params) returns (uint256 amountOut, uint256 gasEstimate)"];
+    const quoter = new ethers.Contract(BASE_CONTRACTS.UNISWAP_V4_QUOTER, quoterAbi, provider);
+    const tokenAddr = ethers.getAddress(tokenAddress);
+
+    let best: { fee: number; tickSpacing: number; quote: bigint } | null = null;
+
+    const results = await Promise.allSettled(
+      V4_POOLS.map(async ({ fee, tickSpacing }) => {
+        const [amountOut] = await quoter.quoteExactInputSingle.staticCall([
+          [ethers.ZeroAddress, tokenAddr, fee, tickSpacing, ethers.ZeroAddress],
+          true, amountInWei, "0x",
+        ]);
+        return { fee, tickSpacing, quote: amountOut as bigint };
+      })
+    );
+
+    for (const r of results) {
+      if (r.status === "fulfilled" && r.value.quote > 0n) {
+        if (!best || r.value.quote > best.quote) best = r.value;
+      }
+    }
+    return best;
+  }
+
+  // ─── UNISWAP V4 BUY ───────────────────────────────────────────────────────
+
+  /**
+   * Execute ETH→TOKEN swap via Uniswap V4 UniversalRouter V2.
+   * Uses native ETH as currency0 (address(0)) — the standard for new meme coin pools on V4.
+   */
+  private async buyTokenV4(
+    ethers: any,
+    tokenAddress: string,
+    amountEth: number,
+    slippagePct: number,
+    poolInfo: { fee: number; tickSpacing: number; quote: bigint }
+  ): Promise<SwapResult> {
+    const amountInWei = ethers.parseEther(amountEth.toFixed(18));
+    const amountOutMin = (poolInfo.quote * BigInt(Math.floor((100 - slippagePct) * 100))) / 10000n;
+    const deadline = Math.floor(Date.now() / 1000) + 120;
+
+    const ETH_V4  = ethers.ZeroAddress;
+    const HOOKS   = ethers.ZeroAddress;
+    const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+
+    // V4 actions: SWAP_EXACT_IN_SINGLE(6) → SETTLE_ALL(12) → TAKE_ALL(15)
+    const actions = ethers.concat([
+      ethers.toBeHex(V4_SWAP_EXACT_IN_SINGLE, 1),
+      ethers.toBeHex(V4_SETTLE_ALL, 1),
+      ethers.toBeHex(V4_TAKE_ALL, 1),
+    ]);
+
+    // Param 0: SWAP_EXACT_IN_SINGLE struct
+    const swapParam = abiCoder.encode(
+      ["((address,address,uint24,int24,address),bool,uint128,uint128,bytes)"],
+      [[[ETH_V4, tokenAddress, poolInfo.fee, poolInfo.tickSpacing, HOOKS], true, amountInWei, amountOutMin, "0x"]]
+    );
+    // Param 1: SETTLE_ALL — pay native ETH from msg.value
+    const settleParam = abiCoder.encode(["address", "uint256"], [ETH_V4, amountInWei]);
+    // Param 2: TAKE_ALL — receive tokens to wallet
+    const takeParam   = abiCoder.encode(["address", "uint256"], [tokenAddress, amountOutMin]);
+
+    const v4Input = abiCoder.encode(["bytes", "bytes[]"], [actions, [swapParam, settleParam, takeParam]]);
+
+    const { provider: writeProvider, mevActive } = await getWriteProvider();
+    const writeWallet = new ethers.Wallet(this.privateKey!, writeProvider);
+    const feeData = await writeProvider.getFeeData();
+    const gasParams = buildGasParams(ethers, feeData, this.config.maxPriorityFeeGwei);
+
+    const urAbi = ["function execute(bytes commands, bytes[] inputs, uint256 deadline) payable"];
+    const router = new ethers.Contract(BASE_CONTRACTS.UNISWAP_V4_UNIVERSAL_ROUTER, urAbi, writeWallet);
+
+    logger.info(
+      { tokenAddress, amountEth, fee: poolInfo.fee, tickSpacing: poolInfo.tickSpacing, amountOutMin: amountOutMin.toString(), mevActive },
+      "Executing Uniswap V4 buy"
+    );
+
+    const tx = await router.execute(V4_SWAP_CMD, [v4Input], deadline, {
+      value: amountInWei,
+      gasLimit: 500000n,
+      ...gasParams,
+    });
+
+    logger.info({ txHash: tx.hash, tokenAddress, fee: poolInfo.fee, mevActive }, "V4 buy tx submitted");
+    const receipt = await waitForReceipt(tx.hash);
+
+    // Parse received tokens from Transfer event (ERC-20 transfer to wallet)
+    let amountOut = 0n;
+    const transferSig = ethers.id("Transfer(address,address,uint256)");
+    for (const log of receipt.logs || []) {
+      if (
+        log.topics[0] === transferSig &&
+        log.address.toLowerCase() === tokenAddress.toLowerCase() &&
+        log.topics[2] &&
+        ("0x" + log.topics[2].slice(26)).toLowerCase() === this.walletAddress!.toLowerCase()
+      ) {
+        amountOut = BigInt(log.data);
+        break;
+      }
+    }
+
+    const actualSlippagePct = poolInfo.quote > 0n && amountOut > 0n
+      ? Math.max(0, Number(poolInfo.quote - amountOut) / Number(poolInfo.quote) * 100)
+      : 0;
+
+    return {
+      success: receipt.status === 1,
+      txHash: receipt.hash,
+      amountIn: amountInWei,
+      amountOut,
+      gasUsed: receipt.gasUsed,
+      usedWeth: false,
+      mevProtected: mevActive,
+      sandwichDetected: false,
+      actualSlippagePct,
+      expectedOut: poolInfo.quote,
+      executionDex: `Uniswap V4 (fee=${poolInfo.fee})`,
+    };
+  }
+
+  // ─── MULTI-DEX V2 BUY: AERODROME + BASESWAP + PANCAKESWAP + SUSHISWAP ───────
 
   /**
    * Execute buy on the best V2 DEX.
@@ -886,9 +1073,10 @@ export class SwapExecutor {
     } else {
       // Standalone call (e.g. from TWAP) — query all V2 DEXes in parallel
       const { provider: readProvider } = await getReadProvider();
-      const aeroContract = new ethers.Contract(BASE_CONTRACTS.AERODROME_V2_ROUTER, aeroAbi, readProvider);
-      const bsContract   = new ethers.Contract(BASE_CONTRACTS.BASESWAP_ROUTER, v2Abi, readProvider);
-      const psContract   = new ethers.Contract(BASE_CONTRACTS.PANCAKESWAP_V2_ROUTER, v2Abi, readProvider);
+      const aeroContract  = new ethers.Contract(BASE_CONTRACTS.AERODROME_V2_ROUTER, aeroAbi, readProvider);
+      const bsContract    = new ethers.Contract(BASE_CONTRACTS.BASESWAP_ROUTER, v2Abi, readProvider);
+      const psContract    = new ethers.Contract(BASE_CONTRACTS.PANCAKESWAP_V2_ROUTER, v2Abi, readProvider);
+      const sushiContract = new ethers.Contract(BASE_CONTRACTS.SUSHISWAP_V2_ROUTER, v2Abi, readProvider);
 
       const safeQuote = async (fn: () => Promise<bigint>, name: string): Promise<{ name: string; quote: bigint }> => {
         try {
@@ -901,17 +1089,18 @@ export class SwapExecutor {
         }
       };
 
-      const [aeroResult, bsResult, psResult] = await Promise.all([
+      const [aeroResult, bsResult, psResult, sushiResult] = await Promise.all([
         safeQuote(async () => { const a = await aeroContract.getAmountsOut(amountInWei, aeroRoutes); return a[1] ?? 0n; }, "Aerodrome V2"),
         safeQuote(async () => { const a = await bsContract.getAmountsOut(amountInWei, v2Path); return a[1] ?? 0n; }, "BaseSwap V2"),
         safeQuote(async () => { const a = await psContract.getAmountsOut(amountInWei, v2Path); return a[1] ?? 0n; }, "PancakeSwap V2"),
+        safeQuote(async () => { const a = await sushiContract.getAmountsOut(amountInWei, v2Path); return a[1] ?? 0n; }, "SushiSwap V2"),
       ]);
 
-      const candidates = [aeroResult, bsResult, psResult].filter(r => r.quote > 0n);
+      const candidates = [aeroResult, bsResult, psResult, sushiResult].filter(r => r.quote > 0n);
       if (candidates.length === 0) {
         return {
           success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n,
-          error: "No liquidity on any DEX (Uniswap V3, Aerodrome V2, BaseSwap V2, PancakeSwap V2)",
+          error: "No liquidity on any V2 DEX (Aerodrome/BaseSwap/PancakeSwap/SushiSwap)",
         };
       }
       best = candidates.reduce((a, b) => (b.quote > a.quote ? b : a));
@@ -934,7 +1123,9 @@ export class SwapExecutor {
       logger.info({ tokenAddress, amountEth, amountOutMin: amountOutMin.toString(), mevActive }, "Executing Aerodrome V2 buy");
       tx = await aeroWrite.swapExactETHForTokens(amountOutMin, aeroRoutes, this.walletAddress, deadline, { value: amountInWei, ...gasParams });
     } else {
-      const routerAddr = best.name === "BaseSwap V2" ? BASE_CONTRACTS.BASESWAP_ROUTER : BASE_CONTRACTS.PANCAKESWAP_V2_ROUTER;
+      const routerAddr = best.name === "BaseSwap V2"  ? BASE_CONTRACTS.BASESWAP_ROUTER
+                       : best.name === "SushiSwap V2" ? BASE_CONTRACTS.SUSHISWAP_V2_ROUTER
+                       : BASE_CONTRACTS.PANCAKESWAP_V2_ROUTER;
       const v2Write = new ethers.Contract(routerAddr, v2Abi, writeWallet);
       logger.info({ tokenAddress, amountEth, amountOutMin: amountOutMin.toString(), mevActive, dex: best.name }, `Executing ${best.name} buy`);
       tx = await v2Write.swapExactETHForTokens(amountOutMin, v2Path, this.walletAddress, deadline, { value: amountInWei, ...gasParams });
@@ -1128,6 +1319,130 @@ export class SwapExecutor {
         log.topics[1] &&
         ("0x" + log.topics[1].slice(26)).toLowerCase() === BASE_CONTRACTS.AERODROME_V2_ROUTER.toLowerCase()
       ) {
+        amountOut = BigInt(log.data);
+        break;
+      }
+    }
+
+    return {
+      success: receipt.status === 1,
+      txHash: receipt.hash,
+      amountIn: sellAmount,
+      amountOut,
+      gasUsed: receipt.gasUsed,
+      usedWeth: false,
+      mevProtected: mevActive,
+    };
+  }
+
+  // ─── UNISWAP V4 SELL ──────────────────────────────────────────────────────
+
+  /**
+   * Execute TOKEN→ETH swap via Uniswap V4 UniversalRouter V2.
+   * Approves token to PoolManager (V4 transfer authority), then routes via UniversalRouter V2.
+   * Uses fee/tickSpacing from v4FeeCache if available; otherwise tries all combos.
+   */
+  private async sellTokenV4(
+    ethers: any,
+    tokenAddress: string,
+    amountTokens: bigint
+  ): Promise<SwapResult> {
+    const { provider: readProvider } = await getReadProvider();
+    const actualBalance = await this.getTokenBalance(ethers, readProvider, tokenAddress);
+    if (actualBalance === 0n) {
+      return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: "Zero balance" };
+    }
+    const sellAmount = actualBalance < amountTokens ? actualBalance : amountTokens;
+
+    // Determine fee/tickSpacing — try cache, then scan
+    let fee = 10000;
+    let tickSpacing = 200;
+    const cached = v4FeeCache.get(tokenAddress.toLowerCase());
+    if (cached && Date.now() - cached.timestamp < FEE_CACHE_TTL) {
+      fee = cached.fee;
+      tickSpacing = cached.tickSpacing;
+    } else {
+      // Scan all fee tiers for sell direction (TOKEN→ETH, zeroForOne=false)
+      const quoterAbi = ["function quoteExactInputSingle(((address,address,uint24,int24,address),bool,uint128,bytes) params) returns (uint256 amountOut, uint256 gasEstimate)"];
+      const quoter = new ethers.Contract(BASE_CONTRACTS.UNISWAP_V4_QUOTER, quoterAbi, readProvider);
+      const tokenAddr = ethers.getAddress(tokenAddress);
+      let bestOut = 0n;
+      const scans = await Promise.allSettled(
+        V4_POOLS.map(async (p) => {
+          const [amountOut] = await quoter.quoteExactInputSingle.staticCall([
+            [ethers.ZeroAddress, tokenAddr, p.fee, p.tickSpacing, ethers.ZeroAddress],
+            false, sellAmount, "0x",
+          ]);
+          return { ...p, quote: amountOut as bigint };
+        })
+      );
+      for (const r of scans) {
+        if (r.status === "fulfilled" && r.value.quote > bestOut) {
+          bestOut = r.value.quote;
+          fee = r.value.fee;
+          tickSpacing = r.value.tickSpacing;
+        }
+      }
+    }
+
+    const { provider: writeProvider, mevActive } = await getWriteProvider();
+    const writeWallet = new ethers.Wallet(this.privateKey!, writeProvider);
+
+    // Approve token to PoolManager (V4 transfer authority for SETTLE_ALL)
+    const allowance = await this.getAllowance(ethers, readProvider, tokenAddress, BASE_CONTRACTS.UNISWAP_V4_POOL_MANAGER);
+    if (allowance < sellAmount) {
+      logger.info({ tokenAddress }, "Approving token for V4 PoolManager");
+      const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, writeWallet);
+      const approveTx = await tokenContract.approve(BASE_CONTRACTS.UNISWAP_V4_POOL_MANAGER, ethers.MaxUint256);
+      await waitForReceipt(approveTx.hash);
+      logger.info({ tokenAddress }, "V4 PoolManager approval confirmed");
+    }
+
+    const ETH_V4  = ethers.ZeroAddress;
+    const HOOKS   = ethers.ZeroAddress;
+    const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+
+    // V4 sell: TOKEN→ETH — zeroForOne=false (currency1→currency0)
+    const actions = ethers.concat([
+      ethers.toBeHex(V4_SWAP_EXACT_IN_SINGLE, 1),
+      ethers.toBeHex(V4_SETTLE_ALL, 1),
+      ethers.toBeHex(V4_TAKE_ALL, 1),
+    ]);
+
+    const swapParam   = abiCoder.encode(
+      ["((address,address,uint24,int24,address),bool,uint128,uint128,bytes)"],
+      [[[ETH_V4, tokenAddress, fee, tickSpacing, HOOKS], false, sellAmount, 0n, "0x"]]
+    );
+    // SETTLE_ALL: pay tokens to pool
+    const settleParam = abiCoder.encode(["address", "uint256"], [tokenAddress, sellAmount]);
+    // TAKE_ALL: receive native ETH (address(0)) — 0 = take all available
+    const takeParam   = abiCoder.encode(["address", "uint256"], [ETH_V4, 0n]);
+
+    const v4Input = abiCoder.encode(["bytes", "bytes[]"], [actions, [swapParam, settleParam, takeParam]]);
+
+    const feeData = await writeProvider.getFeeData();
+    const gasParams = buildGasParams(ethers, feeData, this.config.maxPriorityFeeGwei);
+
+    const urAbi = ["function execute(bytes commands, bytes[] inputs, uint256 deadline) payable"];
+    const router = new ethers.Contract(BASE_CONTRACTS.UNISWAP_V4_UNIVERSAL_ROUTER, urAbi, writeWallet);
+    const deadline = Math.floor(Date.now() / 1000) + 120;
+
+    logger.info({ tokenAddress, sellAmount: sellAmount.toString(), fee, tickSpacing, mevActive }, "Executing V4 sell → ETH");
+
+    const tx = await router.execute(V4_SWAP_CMD, [v4Input], deadline, {
+      gasLimit: 500000n,
+      ...gasParams,
+    });
+
+    logger.info({ txHash: tx.hash, tokenAddress, mevActive }, "V4 sell tx submitted");
+    const receipt = await waitForReceipt(tx.hash);
+
+    // Parse ETH received: in V4 native ETH is transferred directly, check Withdrawal on WETH
+    // (V4 PoolManager wraps/unwraps internally) or just trust receipt
+    let amountOut = 0n;
+    const withdrawalSig = ethers.id("Withdrawal(address,uint256)");
+    for (const log of receipt.logs || []) {
+      if (log.address.toLowerCase() === BASE_CONTRACTS.WETH.toLowerCase() && log.topics[0] === withdrawalSig) {
         amountOut = BigInt(log.data);
         break;
       }
