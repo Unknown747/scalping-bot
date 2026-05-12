@@ -742,6 +742,22 @@ export class ScalpingBot {
       return;
     }
 
+    // ── MEV Sandwich Alert ────────────────────────────────────────────────
+    if (buyResult.sandwichDetected) {
+      const msg = `⚠️ MEV sandwich kemungkinan terjadi saat beli ${token.symbol}! Slippage aktual: ${buyResult.actualSlippagePct?.toFixed(2)}% (konfigurasi: ${this.config.maxSlippagePercent}%). TX: ${buyResult.txHash}`;
+      this.log("warn", msg, token.symbol);
+      this.emit("mev-alert", {
+        type: "sandwich",
+        symbol: token.symbol,
+        tokenAddress: token.address,
+        txHash: buyResult.txHash,
+        actualSlippagePct: buyResult.actualSlippagePct,
+        configuredSlippagePct: this.config.maxSlippagePercent,
+        mevProtected: buyResult.mevProtected,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
     // Track buy for rate limiting
     this.cooldownManager.recordBuy();
 

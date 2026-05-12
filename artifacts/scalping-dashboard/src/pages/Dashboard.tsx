@@ -9,7 +9,7 @@ import {
   getGetTradesQueryKey, getGetConfigQueryKey,
   getGetScannedTokensQueryKey, getGetLogsQueryKey, getGetWalletBalanceQueryKey,
 } from "@workspace/api-client-react";
-import { useSocket, type AIDecisionEntry } from "../hooks/useSocket";
+import { useSocket, type AIDecisionEntry, type MevAlertEntry } from "../hooks/useSocket";
 import { useAuth } from "../hooks/useAuth";
 import { StatsRow } from "../components/StatsRow";
 import { ControlPanel } from "../components/ControlPanel";
@@ -36,6 +36,7 @@ export function Dashboard() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [liveTokens, setLiveTokens] = useState<TokenEntry[]>([]);
   const [aiDecisions, setAIDecisions] = useState<AIDecisionEntry[]>([]);
+  const [mevAlerts, setMevAlerts] = useState<MevAlertEntry[]>([]);
   const queryClient = useQueryClient();
   const { logout } = useAuth();
 
@@ -110,6 +111,13 @@ export function Dashboard() {
     },
     onAIDecision: (entry) => {
       setAIDecisions((prev) => [entry, ...prev].slice(0, 100));
+    },
+    onMevAlert: (entry) => {
+      setMevAlerts((prev) => [entry, ...prev].slice(0, 50));
+      toast.error(
+        `⚠️ MEV Sandwich: ${entry.symbol} — slippage ${entry.actualSlippagePct.toFixed(1)}% (config: ${entry.configuredSlippagePct}%)${entry.mevProtected ? " [MEV protected]" : " [TIDAK terlindungi]"}`,
+        { duration: 10000 }
+      );
     },
   });
 

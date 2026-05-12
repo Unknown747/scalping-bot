@@ -44,11 +44,23 @@ export type AIDecisionEntry = {
   timestamp: string;
 };
 
+export type MevAlertEntry = {
+  type: "sandwich";
+  symbol: string;
+  tokenAddress: string;
+  txHash: string | null;
+  actualSlippagePct: number;
+  configuredSlippagePct: number;
+  mevProtected: boolean;
+  timestamp: string;
+};
+
 type SocketCallbacks = {
   onTradeExecuted?: (data: { tokenSymbol: string; profitPercent: number; exitTime: string }) => void;
   onLogs?: (logs: LogEntry[]) => void;
   onTokens?: (tokens: TokenEntry[]) => void;
   onAIDecision?: (entry: AIDecisionEntry) => void;
+  onMevAlert?: (entry: MevAlertEntry) => void;
 };
 
 let socketInstance: Socket | null = null;
@@ -100,6 +112,10 @@ export function useSocket(callbacks: SocketCallbacks) {
       callbacksRef.current.onAIDecision?.(entry);
     });
 
+    socket.on("mev-alert", (entry: MevAlertEntry) => {
+      callbacksRef.current.onMevAlert?.(entry);
+    });
+
     return () => {
       socket.off("bot-status");
       socket.off("position-update");
@@ -108,6 +124,7 @@ export function useSocket(callbacks: SocketCallbacks) {
       socket.off("log");
       socket.off("new-token");
       socket.off("ai-decision");
+      socket.off("mev-alert");
     };
   }, [queryClient]);
 

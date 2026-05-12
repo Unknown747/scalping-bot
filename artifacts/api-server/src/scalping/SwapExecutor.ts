@@ -12,6 +12,9 @@ export interface SwapResult {
   error?: string;
   usedWeth?: boolean;
   mevProtected?: boolean;
+  sandwichDetected?: boolean;
+  actualSlippagePct?: number;
+  expectedOut?: bigint;
 }
 
 export interface TWAPResult {
@@ -447,6 +450,32 @@ export class SwapExecutor {
         }
       }
 
+      // ── MEV Sandwich Detection ──────────────────────────────────────────
+      // Compare expected tokens from quote vs actual tokens received.
+      // If actual slippage exceeds configured slippage + 2% buffer → sandwich suspected.
+      let sandwichDetected = false;
+      let actualSlippagePct = 0;
+      const SANDWICH_BUFFER_PCT = 2;
+      if (expectedOut > 0n && amountOut > 0n) {
+        const slippageLost = Number(expectedOut - amountOut) / Number(expectedOut) * 100;
+        actualSlippagePct = Math.max(0, slippageLost);
+        if (actualSlippagePct > slippagePct + SANDWICH_BUFFER_PCT) {
+          sandwichDetected = true;
+          logger.warn(
+            {
+              tokenAddress,
+              txHash: receipt.hash,
+              expectedOut: expectedOut.toString(),
+              actualOut: amountOut.toString(),
+              configuredSlippage: slippagePct,
+              actualSlippage: actualSlippagePct.toFixed(2),
+              mevProtected: mevActive,
+            },
+            `⚠️ MEV SANDWICH TERDETEKSI: actual slippage ${actualSlippagePct.toFixed(2)}% >> configured ${slippagePct}%`
+          );
+        }
+      }
+
       return {
         success: receipt.status === 1,
         txHash: receipt.hash,
@@ -455,6 +484,9 @@ export class SwapExecutor {
         gasUsed: receipt.gasUsed,
         usedWeth: useWeth,
         mevProtected: mevActive,
+        sandwichDetected,
+        actualSlippagePct,
+        expectedOut,
       };
     } catch (err: any) {
       logger.error({ err, tokenAddress, amountEth }, "Buy swap failed");
