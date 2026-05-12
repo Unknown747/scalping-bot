@@ -763,11 +763,12 @@ export class SwapExecutor {
     }
   }
 
-  // ─── AERODROME V2 BUY / SELL ──────────────────────────────────────────────
+  // ─── AERODROME V2 / BASESWAP V2 BUY / SELL ───────────────────────────────
 
   /**
    * Buy token via Aerodrome V2 AMM (volatile pool, native ETH → token).
-   * Used when token has no Uniswap V3 pool but lives on Aerodrome.
+   * Falls back to BaseSwap V2 if Aerodrome has no liquidity.
+   * Used when token has no Uniswap V3 pool.
    */
   private async buyTokenAerodrome(
     ethers: any,
@@ -797,12 +798,12 @@ export class SwapExecutor {
       const amounts = await aeroRead.getAmountsOut(amountInWei, routes);
       expectedOut = amounts[1] ?? 0n;
     } catch (err) {
-      logger.warn({ tokenAddress, err }, "Aerodrome V2 getAmountsOut failed — no pool");
-      return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: "No Aerodrome V2 liquidity" };
+      logger.warn({ tokenAddress, err }, "Aerodrome V2 getAmountsOut failed — trying BaseSwap V2 fallback");
     }
 
     if (expectedOut === 0n) {
-      return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: "No Aerodrome V2 liquidity (zero quote)" };
+      logger.info({ tokenAddress }, "Aerodrome V2 zero quote — trying BaseSwap V2 fallback");
+      return this.buyTokenBaseSwapV2(ethers, tokenAddress, amountEth, slippagePct);
     }
 
     const amountOutMin = (expectedOut * BigInt(Math.floor((100 - slippagePct) * 100))) / 10000n;
@@ -832,6 +833,100 @@ export class SwapExecutor {
     const receipt = await waitForReceipt(tx.hash);
 
     // Parse amountOut from Transfer event (ERC-20 transfer to wallet)
+    let amountOut = 0n;
+    const transferSig = ethers.id("Transfer(address,address,uint256)");
+    for (const log of receipt.logs || []) {
+      if (
+        log.topics[0] === transferSig &&
+        log.address.toLowerCase() === tokenAddress.toLowerCase() &&
+        log.topics[2] &&
+        ("0x" + log.topics[2].slice(26)).toLowerCase() === this.walletAddress!.toLowerCase()
+      ) {
+        amountOut = BigInt(log.data);
+        break;
+      }
+    }
+
+    const actualSlippagePct = expectedOut > 0n && amountOut > 0n
+      ? Math.max(0, Number(expectedOut - amountOut) / Number(expectedOut) * 100)
+      : 0;
+
+    return {
+      success: receipt.status === 1,
+      txHash: receipt.hash,
+      amountIn: amountInWei,
+      amountOut,
+      gasUsed: receipt.gasUsed,
+      usedWeth: false,
+      mevProtected: mevActive,
+      sandwichDetected: false,
+      actualSlippagePct,
+      expectedOut,
+    };
+  }
+
+  /**
+   * Buy token via BaseSwap V2 AMM (standard Uniswap V2 ABI, native ETH → token).
+   * Used as final fallback when both Uniswap V3 and Aerodrome V2 have no liquidity.
+   */
+  private async buyTokenBaseSwapV2(
+    ethers: any,
+    tokenAddress: string,
+    amountEth: number,
+    slippagePct: number
+  ): Promise<SwapResult> {
+    const amountInWei = ethers.parseEther(amountEth.toFixed(18));
+    const { provider: readProvider } = await getReadProvider();
+
+    const v2RouterAbi = [
+      "function getAmountsOut(uint256 amountIn, address[] path) view returns (uint256[] amounts)",
+      "function swapExactETHForTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline) payable returns (uint256[] amounts)",
+    ];
+
+    const path = [BASE_CONTRACTS.WETH, tokenAddress];
+
+    // Quote from BaseSwap via read RPC
+    const bsRead = new ethers.Contract(BASE_CONTRACTS.BASESWAP_ROUTER, v2RouterAbi, readProvider);
+    let expectedOut = 0n;
+    try {
+      const amounts = await bsRead.getAmountsOut(amountInWei, path);
+      expectedOut = amounts[1] ?? 0n;
+    } catch (err) {
+      logger.warn({ tokenAddress, err }, "BaseSwap V2 getAmountsOut failed — no pool");
+      return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: "No liquidity on any DEX (Uniswap V3, Aerodrome V2, BaseSwap V2)" };
+    }
+
+    if (expectedOut === 0n) {
+      return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: "No liquidity on any DEX (Uniswap V3, Aerodrome V2, BaseSwap V2)" };
+    }
+
+    const amountOutMin = (expectedOut * BigInt(Math.floor((100 - slippagePct) * 100))) / 10000n;
+    const deadline = Math.floor(Date.now() / 1000) + 120;
+
+    const { provider: writeProvider, mevActive } = await getWriteProvider();
+    const writeWallet = new ethers.Wallet(this.privateKey!, writeProvider);
+    const feeData = await writeProvider.getFeeData();
+    const gasParams = buildGasParams(ethers, feeData, this.config.maxPriorityFeeGwei);
+
+    const bsRouter = new ethers.Contract(BASE_CONTRACTS.BASESWAP_ROUTER, v2RouterAbi, writeWallet);
+
+    logger.info(
+      { tokenAddress, amountEth, expectedOut: expectedOut.toString(), amountOutMin: amountOutMin.toString(), mevActive },
+      "Executing BaseSwap V2 buy (native ETH)"
+    );
+
+    const tx = await bsRouter.swapExactETHForTokens(
+      amountOutMin,
+      path,
+      this.walletAddress,
+      deadline,
+      { value: amountInWei, ...gasParams }
+    );
+
+    logger.info({ txHash: tx.hash, tokenAddress, mevActive }, mevActive ? "BaseSwap buy via MEV RPC" : "BaseSwap buy via standard RPC");
+    const receipt = await waitForReceipt(tx.hash);
+
+    // Parse amountOut from Transfer event
     let amountOut = 0n;
     const transferSig = ethers.id("Transfer(address,address,uint256)");
     for (const log of receipt.logs || []) {
