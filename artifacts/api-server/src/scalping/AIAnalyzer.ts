@@ -413,27 +413,23 @@ export class AIAnalyzer {
     return result.decision === "buy" && result.confidence >= this.minConfidence;
   }
 
-  // Returns status of all 3 providers for dashboard display
+  // Returns status of all providers for dashboard display
   getProviderStatus(): Array<{
     name: string;
     label: string;
     configured: boolean;
     healthy: boolean;
     failures: number;
-    rotationSlot: number | null;
   }> {
-    const roster = buildAvailableRoster();
     return ALL_PROVIDERS.map((p) => {
       const configured = !!process.env[p.envKey];
       const f = this.providerFailures.get(p.name);
-      const slotIndex = roster.findIndex((r) => r.name === p.name);
       return {
         name: p.name,
         label: p.label,
         configured,
         healthy: configured ? this.isProviderHealthy(p.name) : false,
         failures: f?.count ?? 0,
-        rotationSlot: slotIndex >= 0 ? slotIndex : null,
       };
     });
   }

@@ -4,6 +4,7 @@ import { SafetyChecker } from "./SafetyChecker.js";
 import { PriceMonitor } from "./PriceMonitor.js";
 import { SwapExecutor } from "./SwapExecutor.js";
 import { DEXAggregator } from "./DEXAggregator.js";
+import { getReadProvider } from "./RpcProvider.js";
 import { TelegramNotifier } from "./TelegramNotifier.js";
 import { calculateMemeScore } from "./MemeScorer.js";
 import { AIAnalyzer } from "./AIAnalyzer.js";
@@ -257,7 +258,6 @@ export class ScalpingBot {
         status: p.status,
         peakProfitPercent: 0,
       });
-      this.priceMonitor.addToken(p.tokenAddress);
     }
 
     this.scanInterval = setInterval(
@@ -793,7 +793,6 @@ export class ScalpingBot {
     };
 
     this.positions.set(token.address.toLowerCase(), position);
-    this.priceMonitor.addToken(token.address);
 
     db.upsertPosition({
       tokenAddress: token.address,
@@ -1021,7 +1020,6 @@ export class ScalpingBot {
     };
 
     this.positions.set(token.address.toLowerCase(), position);
-    this.priceMonitor.addToken(token.address);
 
     db.upsertPosition({
       tokenAddress: token.address,
@@ -1062,7 +1060,7 @@ export class ScalpingBot {
 
     // No tracked position — sell directly using SwapExecutor with on-chain balance
     const walletAddr = this.swapExecutor.getWalletAddress() || process.env["WALLET_ADDRESS"] || "";
-    const { provider, ethers } = await import("./RpcProvider.js").then(m => m.getReadProvider());
+    const { provider, ethers } = await getReadProvider();
     const erc20 = new ethers.Contract(tokenAddress, ["function balanceOf(address) view returns (uint256)", "function symbol() view returns (string)", "function name() view returns (string)"], provider);
     const balance: bigint = await erc20.balanceOf(walletAddr);
     if (balance === 0n) {

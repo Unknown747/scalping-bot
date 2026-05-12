@@ -14,19 +14,8 @@ const DEXSCREENER_URL = "https://api.dexscreener.com/latest/dex";
 const priceCache = new Map<string, { price: number; timestamp: number }>();
 
 export class PriceMonitor {
-  private activeAddresses = new Set<string>();
-
-  addToken(address: string): void {
-    this.activeAddresses.add(address.toLowerCase());
-  }
-
   removeToken(address: string): void {
-    this.activeAddresses.delete(address.toLowerCase());
     priceCache.delete(address.toLowerCase());
-  }
-
-  getTrackedCount(): number {
-    return this.activeAddresses.size;
   }
 
   async getPrices(addresses: string[]): Promise<Map<string, PriceUpdate>> {
@@ -87,7 +76,7 @@ export class PriceMonitor {
         { timeout: 5000 }
       );
       const pairs = response.data?.pairs || [];
-      const ethPair = pairs.find((p: any) => 
+      const ethPair = pairs.find((p: any) =>
         p.quoteToken?.symbol === "USDC" || p.quoteToken?.symbol === "USDT"
       );
       const price = parseFloat(ethPair?.priceUsd || "0") || 3200;

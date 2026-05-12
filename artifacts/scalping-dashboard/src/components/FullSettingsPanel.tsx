@@ -214,7 +214,7 @@ export function FullSettingsPanel() {
                       { key: "enablePeakProfitExit", label: "Peak Profit Exit", desc: "Force-exit when profit drops from peak" },
                       { key: "enableTWAP", label: "TWAP Execution", desc: "Split buys into multiple slices" },
                       { key: "enableDynamicSlippage", label: "Dynamic Slippage", desc: "Auto-adjust slippage by liquidity/volatility" },
-                      { key: "enableMultiDEX", label: "Multi-DEX Router", desc: "Compare Uniswap/Aerodrome/BaseSwap" },
+                      { key: "enableMultiDEX", label: "Multi-DEX Router", desc: "Tidak aktif — swap selalu lewat Uniswap V3" },
                       { key: "enableAutoCompound", label: "Auto-Compound", desc: "Reinvest profits into larger trade sizes" },
                       { key: "enableDeployerCheck", label: "Deployer Reputation", desc: "Block tokens from serial deployers" },
                     ].map(({ key, label, desc }) => (
