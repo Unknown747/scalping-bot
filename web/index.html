@@ -7,7 +7,6 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 body{font-family:'Segoe UI',monospace;background:#0a0a0f;color:#00ffcc;min-height:100vh;}
-/* ── Header ── */
 .header{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid #00ffcc22;background:#0d0d18;}
 .header-left h1{font-size:20px;letter-spacing:2px;color:#00ffcc;}
 .header-left .sub{font-size:10px;color:#444;margin-top:2px;letter-spacing:1px;}
@@ -19,45 +18,32 @@ body{font-family:'Segoe UI',monospace;background:#0a0a0f;color:#00ffcc;min-heigh
 .badge-sim{color:#ffaa00;border-color:#ffaa0055;background:#ffaa0008;display:none;}
 .badge-tg{color:#4285f4;border-color:#4285f455;background:#4285f408;display:none;}
 .badge-logout{color:#ff6688;border-color:#ff336655;background:#ff336608;text-decoration:none;cursor:pointer;}
-.ws-dot{font-size:11px;color:#555;}
-.ws-dot.on{color:#00ff88;}
-/* ── Tabs ── */
+.ws-dot{font-size:11px;color:#555;}.ws-dot.on{color:#00ff88;}
 .tab-nav{display:flex;gap:0;padding:0 20px;background:#0d0d18;border-bottom:1px solid #1a1a2e;overflow-x:auto;}
 .tab-btn{background:none;border:none;padding:12px 18px;color:#555;font-size:13px;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;transition:all .2s;font-family:inherit;}
-.tab-btn:hover{color:#00ffcc;}
-.tab-btn.active{color:#00ffcc;border-bottom-color:#00ffcc;}
+.tab-btn:hover{color:#00ffcc;}.tab-btn.active{color:#00ffcc;border-bottom-color:#00ffcc;}
 .tab-count{display:inline-block;background:#00ffcc22;color:#00ffcc;border-radius:10px;padding:1px 7px;font-size:10px;margin-left:5px;}
-.tab-count.red{background:#ff336622;color:#ff3366;}
-/* ── Tab panes ── */
-.tab-pane{display:none;padding:20px;animation:fadeIn .15s ease;}
-.tab-pane.active{display:block;}
+.tab-pane{display:none;padding:20px;animation:fadeIn .15s ease;}.tab-pane.active{display:block;}
 @keyframes fadeIn{from{opacity:.4}to{opacity:1}}
-/* ── Stats grid ── */
 .stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px;}
 .stat-card{background:#13131f;border-radius:10px;padding:14px;border:1px solid #1e1e35;transition:all .2s;}
 .stat-card:hover{border-color:#00ffcc33;box-shadow:0 0 12px #00ffcc0f;}
 .stat-label{font-size:10px;color:#555;letter-spacing:1px;text-transform:uppercase;}
 .stat-value{font-size:24px;font-weight:bold;margin-top:6px;}
 .stat-value.sm{font-size:18px;}
-.profit{color:#00ff88;} .loss{color:#ff3366;} .neutral{color:#00ffcc;} .dim{color:#888;}
-/* ── Panel ── */
+.profit{color:#00ff88;}.loss{color:#ff3366;}.neutral{color:#00ffcc;}.dim{color:#888;}
 .panel{background:#13131f;border-radius:10px;padding:18px;margin-bottom:16px;border:1px solid #1e1e35;}
 .panel-title{font-size:15px;margin-bottom:14px;color:#00ffcc;display:flex;align-items:center;gap:8px;}
 .panel-hdr{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
 hr{border:none;border-top:1px solid #1a1a2e;margin:14px 0;}
-/* ── Controls ── */
 .config-row{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;margin-bottom:14px;}
 .config-group{display:flex;flex-direction:column;gap:4px;}
 .config-group label{font-size:10px;color:#555;letter-spacing:.5px;text-transform:uppercase;}
 input,select{background:#0a0a0f;border:1px solid #222;color:#00ffcc;padding:8px 12px;border-radius:7px;font-family:monospace;font-size:12px;min-width:100px;}
 input:focus,select:focus{outline:none;border-color:#00ffcc55;}
-.sim-toggle{display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:7px;border:1px solid #ffaa0033;background:#ffaa0008;cursor:pointer;user-select:none;}
-.sim-toggle input[type=checkbox]{width:16px;height:16px;accent-color:#ffaa00;cursor:pointer;}
-.sim-toggle span{font-size:12px;color:#ffaa00;}
 .btn-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:4px;}
 .btn{padding:9px 20px;border-radius:7px;cursor:pointer;font-weight:bold;font-size:12px;border:none;transition:all .18s;white-space:nowrap;font-family:inherit;}
-.btn:hover{transform:translateY(-1px);}
-.btn:active{transform:translateY(0);}
+.btn:hover{transform:translateY(-1px);}.btn:active{transform:translateY(0);}
 .btn-green{background:linear-gradient(135deg,#00ffcc,#00aa88);color:#0a0a0f;}
 .btn-green:hover{box-shadow:0 3px 14px #00ffcc44;}
 .btn-stop{background:linear-gradient(135deg,#ff3366,#cc0044);color:#fff;}
@@ -65,8 +51,7 @@ input:focus,select:focus{outline:none;border-color:#00ffcc55;}
 .btn-sim{background:linear-gradient(135deg,#ffaa00,#cc8800);color:#0a0a0f;}
 .btn-sim:hover{box-shadow:0 3px 14px #ffaa0044;}
 .btn-sm{padding:7px 13px;font-size:11px;}
-.btn-gray{background:#1e1e35;color:#888;border:1px solid #2a2a4a;}
-.btn-gray:hover{color:#00ffcc;}
+.btn-gray{background:#1e1e35;color:#888;border:1px solid #2a2a4a;}.btn-gray:hover{color:#00ffcc;}
 .btn-blue{background:linear-gradient(135deg,#4285f4,#1a5cc8);color:#fff;}
 .btn-blue:hover{box-shadow:0 3px 14px #4285f444;}
 .btn-csv{background:linear-gradient(135deg,#00cc66,#008844);color:#fff;}
@@ -75,9 +60,9 @@ input:focus,select:focus{outline:none;border-color:#00ffcc55;}
 .ai-signals{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px;}
 .ai-card{background:#0a0a0f;border-radius:9px;padding:14px;text-align:center;border:1px solid #1a1a2e;}
 .ai-name{font-size:13px;font-weight:bold;margin-bottom:7px;}
-.ai-gemini .ai-name{color:#4285f4;} .ai-groq .ai-name{color:#f9ab00;} .ai-huangfing .ai-name{color:#9c27b0;}
+.ai-gemini .ai-name{color:#4285f4;}.ai-groq .ai-name{color:#f9ab00;}.ai-huangfing .ai-name{color:#9c27b0;}
 .ai-signal{font-size:20px;font-weight:bold;margin:6px 0;}
-.signal-buy{color:#00ff88;} .signal-sell{color:#ff3366;} .signal-hold{color:#ffaa00;}
+.signal-buy{color:#00ff88;}.signal-sell{color:#ff3366;}.signal-hold{color:#ffaa00;}
 .ai-conf{font-size:11px;color:#555;}
 .consensus-bar{display:flex;justify-content:space-between;align-items:center;background:#0a0a0f;border-radius:9px;padding:14px 18px;border:1px solid #1a1a2e;}
 .consensus-label{font-size:10px;color:#555;margin-bottom:3px;text-transform:uppercase;}
@@ -92,28 +77,47 @@ tbody tr:hover{background:#1a1a2e55;}
 tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
 .trail-badge{display:inline-block;background:#00ffcc22;color:#00ffcc;border-radius:4px;padding:1px 6px;font-size:10px;}
 .conf-bar{display:inline-block;height:6px;border-radius:3px;background:#00ffcc55;vertical-align:middle;margin-right:4px;}
-.reason-tp{color:#00ff88;font-weight:bold;}
-.reason-sl{color:#ff3366;font-weight:bold;}
-.reason-timeout{color:#ffaa00;font-weight:bold;}
-.reason-stopped{color:#888;font-weight:bold;}
+.reason-tp{color:#00ff88;font-weight:bold;}.reason-sl{color:#ff3366;font-weight:bold;}
+.reason-timeout{color:#ffaa00;font-weight:bold;}.reason-stopped{color:#888;font-weight:bold;}
 .empty-state{text-align:center;padding:40px 20px;color:#333;font-size:13px;}
 .empty-state .icon{font-size:32px;margin-bottom:8px;}
 .sim-tag{display:inline-block;background:#ffaa0022;color:#ffaa00;border-radius:3px;padding:1px 5px;font-size:9px;margin-left:4px;}
-/* ── Sparkline ── */
-#pnlSparkline{width:100%;height:56px;margin-top:4px;}
+/* ── PnL Chart ── */
+.chart-wrap{position:relative;width:100%;background:#0a0a0f;border-radius:8px;overflow:visible;}
+#chartSvg{display:block;width:100%;}
+.chart-tooltip{
+  position:absolute;background:#0d0d18;border:1px solid #2a2a4a;border-radius:8px;
+  padding:9px 13px;font-size:12px;color:#ccc;pointer-events:none;display:none;z-index:20;
+  min-width:130px;box-shadow:0 6px 24px #00000066;backdrop-filter:blur(4px);
+}
+.chart-mode-btn{
+  padding:4px 12px;border-radius:5px;font-size:11px;border:1px solid #2a2a4a;
+  background:#0a0a0f;color:#555;cursor:pointer;font-family:inherit;transition:all .15s;
+}
+.chart-mode-btn.active{background:#00ffcc14;color:#00ffcc;border-color:#00ffcc44;}
+.chart-chip{
+  font-size:10px;padding:3px 9px;border-radius:10px;font-family:monospace;
+  background:#1a1a2e;border:1px solid #2a2a3a;
+}
+.chart-xaxis{display:flex;justify-content:space-between;padding:2px 0 0 42px;margin-top:2px;}
+.chart-xaxis span{font-size:9px;color:#2a2a3a;text-align:center;min-width:1px;}
+@keyframes chartPulse{0%{r:5;opacity:.7;}100%{r:14;opacity:0;}}
+.chart-pulse-ring{animation:chartPulse 1.6s ease-out infinite;}
+@keyframes chartDotIn{from{r:0;opacity:0;}to{opacity:1;}}
+.chart-dot-new{animation:chartDotIn .3s ease-out;}
 /* ── RPC ── */
 .rpc-grid{display:flex;flex-wrap:wrap;gap:8px;}
 .rpc-item{display:flex;align-items:center;gap:5px;font-size:11px;color:#666;}
 .rpc-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
-.rpc-healthy{background:#00ff88;} .rpc-down{background:#ff3366;} .rpc-unknown{background:#ffaa00;}
+.rpc-healthy{background:#00ff88;}.rpc-down{background:#ff3366;}.rpc-unknown{background:#ffaa00;}
 /* ── Log ── */
 .log-panel{background:#0a0a0f;border-radius:8px;padding:12px;height:280px;overflow-y:auto;font-family:'Courier New',monospace;font-size:11px;}
 .log-entry{padding:2px 0;border-bottom:1px solid #0f0f0f;}
-.log-entry.info{color:#00ffcc;} .log-entry.error{color:#ff3366;} .log-entry.success{color:#00ff88;} .log-entry.warning{color:#ffaa00;} .log-entry.default{color:#666;}
+.log-entry.info{color:#00ffcc;}.log-entry.error{color:#ff3366;}.log-entry.success{color:#00ff88;}.log-entry.warning{color:#ffaa00;}.log-entry.default{color:#666;}
 /* ── Check ── */
 .check-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px;}
 .check-item{display:flex;align-items:flex-start;gap:8px;background:#0a0a0f;border-radius:7px;padding:10px;border-left:3px solid #333;}
-.check-item.ok{border-color:#00ff88;} .check-item.error{border-color:#ff3366;} .check-item.missing{border-color:#ffaa00;}
+.check-item.ok{border-color:#00ff88;}.check-item.error{border-color:#ff3366;}.check-item.missing{border-color:#ffaa00;}
 .check-icon{font-size:16px;flex-shrink:0;}
 .check-name{font-size:12px;font-weight:bold;color:#ccc;}
 .check-msg{font-size:10px;color:#666;margin-top:2px;}
@@ -122,17 +126,16 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
 /* ── Notification ── */
 #notifBtn{padding:6px 12px;border-radius:6px;border:1px solid #333;background:#13131f;color:#555;font-size:11px;cursor:pointer;}
 #notifBtn.on{color:#00ffcc;border-color:#00ffcc44;}
-/* ── Responsive ── */
 @media(max-width:640px){
   .ai-signals{grid-template-columns:1fr;}
   .stats-grid{grid-template-columns:repeat(2,1fr);}
   .header{flex-direction:column;gap:10px;align-items:flex-start;}
+  .panel-hdr{flex-direction:column;align-items:flex-start;gap:8px;}
 }
 </style>
 </head>
 <body>
 
-<!-- Header -->
 <div class="header">
   <div class="header-left">
     <h1>⚡ MEME SCALPER AI PRO</h1>
@@ -148,7 +151,6 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
   </div>
 </div>
 
-<!-- Tabs -->
 <nav class="tab-nav">
   <button class="tab-btn active" data-tab="dashboard">📊 Dashboard</button>
   <button class="tab-btn" data-tab="positions">📈 Positions <span class="tab-count" id="posCount">0</span></button>
@@ -159,7 +161,6 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
 <!-- ── TAB: Dashboard ── -->
 <div id="tab-dashboard" class="tab-pane active">
 
-  <!-- Stats row 1: core -->
   <div class="stats-grid">
     <div class="stat-card">
       <div class="stat-label">Total Trades</div>
@@ -189,7 +190,6 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
         <span class="loss" id="losses">0</span>
       </div>
     </div>
-    <!-- Row 2: advanced -->
     <div class="stat-card">
       <div class="stat-label">Sharpe Ratio</div>
       <div class="stat-value sm neutral" id="sharpeRatio">—</div>
@@ -210,13 +210,30 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
       <div class="stat-label">Avg Hold Time</div>
       <div class="stat-value sm neutral" id="avgHold">—</div>
     </div>
-    <!-- PnL Sparkline card -->
-    <div class="stat-card" style="grid-column:span 2;">
-      <div class="stat-label">PnL Curve (last 20 trades)</div>
-      <svg id="pnlSparkline" viewBox="0 0 300 56" preserveAspectRatio="none">
-        <text x="150" y="36" text-anchor="middle" fill="#333" font-size="11">No trades yet</text>
-      </svg>
+  </div>
+
+  <!-- ── PnL Chart Panel ── -->
+  <div class="panel">
+    <div class="panel-hdr" style="margin-bottom:12px;flex-wrap:wrap;gap:8px;">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+        <div class="panel-title" style="margin:0;">📊 PnL Curve</div>
+        <div style="display:flex;gap:5px;">
+          <button class="chart-mode-btn active" id="modePerTrade">Per-Trade %</button>
+          <button class="chart-mode-btn" id="modeCumulative">Cumulative</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;" id="chartMeta">
+        <span class="chart-chip" id="chipTrades" style="color:#555;">0 trades</span>
+        <span class="chart-chip" id="chipNet" style="color:#555;">Net: —</span>
+        <span class="chart-chip" id="chipBest" style="color:#555;">Best: —</span>
+        <span class="chart-chip" id="chipWorst" style="color:#555;">Worst: —</span>
+      </div>
     </div>
+    <div class="chart-wrap" id="chartWrap">
+      <svg id="chartSvg" height="140" style="overflow:visible;"></svg>
+      <div class="chart-tooltip" id="chartTooltip"></div>
+    </div>
+    <div class="chart-xaxis" id="chartXAxis"></div>
   </div>
 
   <!-- Controls -->
@@ -318,22 +335,11 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
       <div style="font-size:11px;color:#444;">Auto-refresh every 5s</div>
     </div>
     <div class="tbl-wrap">
-      <table id="posTable">
-        <thead>
-          <tr>
-            <th>Symbol</th>
-            <th>Entry $</th>
-            <th>Current $</th>
-            <th>PnL %</th>
-            <th>PnL $</th>
-            <th>TP $</th>
-            <th>SL $</th>
-            <th>Held</th>
-            <th>Trail</th>
-            <th>Conf</th>
-            <th>Mode</th>
-          </tr>
-        </thead>
+      <table>
+        <thead><tr>
+          <th>Symbol</th><th>Entry $</th><th>Current $</th><th>PnL %</th><th>PnL $</th>
+          <th>TP $</th><th>SL $</th><th>Held</th><th>Trail</th><th>Conf</th><th>Mode</th>
+        </tr></thead>
         <tbody id="posBody">
           <tr><td colspan="11"><div class="empty-state"><div class="icon">📭</div>No open positions. Start the bot to begin trading.</div></td></tr>
         </tbody>
@@ -348,27 +354,18 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
     <div class="panel-hdr">
       <div class="panel-title" style="margin:0;">📋 Trade History</div>
       <div style="display:flex;gap:8px;">
-        <a href="/api/history/export" class="btn btn-csv btn-sm" id="exportBtn" style="text-decoration:none;">📥 Export CSV</a>
+        <a href="/api/history/export" class="btn btn-csv btn-sm" style="text-decoration:none;">📥 Export CSV</a>
         <button class="btn btn-gray btn-sm" id="clearHistBtn">Clear</button>
       </div>
     </div>
     <div class="tbl-wrap">
-      <table id="histTable">
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Symbol</th>
-            <th>Entry $</th>
-            <th>Exit $</th>
-            <th>PnL $</th>
-            <th>PnL %</th>
-            <th>Reason</th>
-            <th>Held</th>
-            <th>Mode</th>
-          </tr>
-        </thead>
+      <table>
+        <thead><tr>
+          <th>Time</th><th>Symbol</th><th>Entry $</th><th>Exit $</th>
+          <th>PnL $</th><th>PnL %</th><th>Reason</th><th>Held</th><th>Mode</th>
+        </tr></thead>
         <tbody id="histBody">
-          <tr><td colspan="9"><div class="empty-state"><div class="icon">🕐</div>No trades closed yet. History appears here.</div></td></tr>
+          <tr><td colspan="9"><div class="empty-state"><div class="icon">🕐</div>No trades closed yet.</div></td></tr>
         </tbody>
       </table>
     </div>
@@ -377,7 +374,6 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
 
 <!-- ── TAB: System ── -->
 <div id="tab-system" class="tab-pane">
-
   <div class="panel">
     <div class="panel-hdr">
       <div class="panel-title" style="margin:0;">🔍 System Check</div>
@@ -391,7 +387,6 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
     </div>
     <div id="tgTestResult" style="display:none;margin-top:10px;padding:10px;background:#0a0a0f;border-radius:7px;font-size:12px;"></div>
   </div>
-
   <div class="panel">
     <div class="panel-title">📡 RPC Endpoints</div>
     <div style="font-size:11px;color:#444;margin-bottom:8px;">Active: <span id="activeRpc" style="color:#00ffcc;">—</span></div>
@@ -399,7 +394,6 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
       <div class="rpc-item"><span class="rpc-dot rpc-unknown"></span><span>Checking...</span></div>
     </div>
   </div>
-
   <div class="panel">
     <div class="panel-hdr">
       <div class="panel-title" style="margin:0;">📋 Live Log</div>
@@ -409,92 +403,314 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
       <div class="log-entry info">[--:--:--] 🚀 MemeScalper AI Pro — Connecting...</div>
     </div>
   </div>
-
-</div><!-- end tab-system -->
+</div>
 
 <script>
+'use strict';
 let ws, reconnectTimer;
-let historyData = [];
 let histCount = 0;
-let pnlHistory = [];
 let notifEnabled = false;
+let chartMode = 'pertrade';
 
-// ── Notification permission ─────────────────────────────────────────────────
-function requestNotif() {
+// pnlHistory stores rich objects: {pnlPct, pnl, symbol, reason, closedAt}
+let pnlHistory = [];
+
+// ── Notification ─────────────────────────────────────────────────────────────
+(function(){
+  if (window.Notification && Notification.permission === 'granted') {
+    notifEnabled = true;
+    const b = document.getElementById('notifBtn');
+    b.textContent = '🔔 Notif On'; b.className = 'on';
+  }
+})();
+document.getElementById('notifBtn').onclick = () => {
   if (!('Notification' in window)) return;
   Notification.requestPermission().then(p => {
-    notifEnabled = (p === 'granted');
-    const btn = document.getElementById('notifBtn');
-    btn.textContent = notifEnabled ? '🔔 Notif On' : '🔔 Notif Off';
-    btn.className = notifEnabled ? 'on' : '';
+    notifEnabled = p === 'granted';
+    const b = document.getElementById('notifBtn');
+    b.textContent = notifEnabled ? '🔔 Notif On' : '🔔 Notif Off';
+    b.className   = notifEnabled ? 'on' : '';
   });
-}
-document.getElementById('notifBtn').onclick = requestNotif;
-// Auto-check existing permission
-if (Notification && Notification.permission === 'granted') {
-  notifEnabled = true;
-  const btn = document.getElementById('notifBtn');
-  btn.textContent = '🔔 Notif On';
-  btn.className = 'on';
-}
-
-function pushNotif(title, body, type) {
+};
+function pushNotif(title, body) {
   if (!notifEnabled || document.visibilityState === 'visible') return;
-  const icons = { TP: '✅', SL: '❌', TIMEOUT: '⏱', BOT_STOPPED: '🛑' };
-  try {
-    new Notification('⚡ ' + title, { body, icon: '/favicon.ico' });
-  } catch(_) {}
+  try { new Notification('⚡ ' + title, { body }); } catch(_) {}
 }
 
-// ── PnL Sparkline ───────────────────────────────────────────────────────────
-function drawSparkline(points) {
-  const svg = document.getElementById('pnlSparkline');
-  if (!points || points.length < 2) {
-    svg.innerHTML = '<text x="150" y="36" text-anchor="middle" fill="#333" font-size="11">No trades yet</text>';
+// ── PnL Chart ─────────────────────────────────────────────────────────────────
+const REASON_COLOR = { TP:'#00ff88', SL:'#ff3366', TIMEOUT:'#ffaa00', BOT_STOPPED:'#888' };
+
+function buildSmoothPath(xs, ys) {
+  if (xs.length === 0) return '';
+  if (xs.length === 1) return `M ${xs[0]},${ys[0]}`;
+  let d = `M ${xs[0].toFixed(2)},${ys[0].toFixed(2)}`;
+  for (let i = 1; i < xs.length; i++) {
+    const cpx = ((xs[i-1] + xs[i]) / 2).toFixed(2);
+    d += ` C ${cpx},${ys[i-1].toFixed(2)} ${cpx},${ys[i].toFixed(2)} ${xs[i].toFixed(2)},${ys[i].toFixed(2)}`;
+  }
+  return d;
+}
+
+function drawChart(animateNew) {
+  const wrap = document.getElementById('chartWrap');
+  const svg  = document.getElementById('chartSvg');
+  const tip  = document.getElementById('chartTooltip');
+  const xax  = document.getElementById('chartXAxis');
+
+  const W = wrap.clientWidth || 600;
+  const H = 140;
+  const padL = 44, padR = 14, padT = 12, padB = 22;
+  const cW = W - padL - padR;
+  const cH = H - padT - padB;
+
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.setAttribute('width', W);
+  svg.setAttribute('height', H);
+
+  const last = pnlHistory.slice(-20);
+  const n    = last.length;
+
+  // ── Empty state ──────────────────────────────────────────────────────────
+  if (n === 0) {
+    svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle" dominant-baseline="middle" fill="#2a2a3a" font-size="12" font-family="monospace">No trades yet — start the bot to see performance</text>`;
+    xax.innerHTML = '';
+    updateChartMeta([]);
     return;
   }
-  const last = points.slice(-20);
-  const W = 300, H = 56, pad = 4;
-  const min = Math.min(...last), max = Math.max(...last);
-  const range = max - min || 1;
-  const xs = last.map((_, i) => pad + (i / (last.length - 1)) * (W - pad * 2));
-  const ys = last.map(v => H - pad - ((v - min) / range) * (H - pad * 2));
-  const pts = xs.map((x, i) => x + ',' + ys[i]).join(' ');
-  const zero = H - pad - ((0 - min) / range) * (H - pad * 2);
-  const color = last[last.length - 1] >= 0 ? '#00ff88' : '#ff3366';
+
+  // ── Compute values ───────────────────────────────────────────────────────
+  let vals;
+  if (chartMode === 'cumulative') {
+    let cum = 0;
+    vals = last.map(t => { cum += t.pnlPct; return cum; });
+  } else {
+    vals = last.map(t => t.pnlPct);
+  }
+
+  const rawMin = Math.min(...vals);
+  const rawMax = Math.max(...vals);
+  const min    = Math.min(rawMin, 0) - Math.abs(rawMax - rawMin) * 0.08;
+  const max    = Math.max(rawMax, 0) + Math.abs(rawMax - rawMin) * 0.08;
+  const range  = max - min || 1;
+
+  const toX = i => padL + (n === 1 ? cW / 2 : (i / (n - 1)) * cW);
+  const toY = v => padT + cH - ((v - min) / range) * cH;
+
+  const xs    = last.map((_, i) => toX(i));
+  const ys    = vals.map(v => toY(v));
+  const zeroY = toY(0);
+  const lastV = vals[n - 1];
+  const lineColor = lastV >= 0 ? '#00ff88' : '#ff3366';
+
+  // ── Paths ────────────────────────────────────────────────────────────────
+  const linePath = buildSmoothPath(xs, ys);
+  let areaPath = '';
+  if (n > 1) {
+    areaPath = linePath + ` L ${xs[n-1].toFixed(2)},${zeroY.toFixed(2)} L ${xs[0].toFixed(2)},${zeroY.toFixed(2)} Z`;
+  }
+
+  // ── Grid ─────────────────────────────────────────────────────────────────
+  let grid = '';
+  [0, 0.25, 0.5, 0.75, 1].forEach(f => {
+    const y = (padT + f * cH).toFixed(1);
+    grid += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="#151520" stroke-width="1"/>`;
+  });
+
+  // ── Y-axis labels ────────────────────────────────────────────────────────
+  let ylabels = '';
+  const yTicks = [rawMax, 0, rawMin].filter((v, i, a) => a.findIndex(x => Math.abs(x-v) < 0.001) === i);
+  yTicks.forEach(v => {
+    const y = toY(v);
+    if (y < padT - 4 || y > H - padB + 4) return;
+    const col = v > 0 ? '#00ff8866' : v < 0 ? '#ff336666' : '#2a2a4a';
+    ylabels += `<text x="${padL - 4}" y="${y.toFixed(1)}" text-anchor="end" dominant-baseline="middle" fill="${col}" font-size="9" font-family="monospace">${v >= 0 ? '+' : ''}${v.toFixed(1)}%</text>`;
+  });
+
+  // ── Zero baseline ────────────────────────────────────────────────────────
+  const zLine = `<line x1="${padL}" y1="${zeroY.toFixed(1)}" x2="${W - padR}" y2="${zeroY.toFixed(1)}" stroke="#2a2a3a" stroke-width="1" stroke-dasharray="4,3"/>`;
+
+  // ── Dots ─────────────────────────────────────────────────────────────────
+  let dots = '';
+  last.forEach((t, i) => {
+    const isLast = i === n - 1;
+    const dc = REASON_COLOR[t.reason] || '#888';
+    const r  = isLast ? 4.5 : 3;
+    const cls = (isLast && animateNew) ? ' class="chart-dot-new"' : '';
+    dots += `<circle${cls} cx="${xs[i].toFixed(1)}" cy="${ys[i].toFixed(1)}" r="${r}" fill="${dc}" stroke="#0a0a0f" stroke-width="1.5" style="cursor:pointer;" data-i="${i}"/>`;
+    if (isLast) {
+      dots += `<circle class="chart-pulse-ring" cx="${xs[i].toFixed(1)}" cy="${ys[i].toFixed(1)}" r="${r}" fill="none" stroke="${dc}" stroke-width="1.5"/>`;
+    }
+  });
+
+  // ── Hover overlay ─────────────────────────────────────────────────────────
+  const overlay = `<rect id="chartOverlay" x="${padL}" y="${padT}" width="${cW}" height="${cH}" fill="transparent" style="cursor:crosshair;"/>`;
+
+  // ── Render ────────────────────────────────────────────────────────────────
   svg.innerHTML = `
-    <line x1="${pad}" y1="${zero.toFixed(1)}" x2="${W - pad}" y2="${zero.toFixed(1)}" stroke="#222" stroke-width="1"/>
-    <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>
-    ${last.map((v, i) => `<circle cx="${xs[i].toFixed(1)}" cy="${ys[i].toFixed(1)}" r="2" fill="${v >= 0 ? '#00ff88' : '#ff3366'}"/>`).join('')}
+    <defs>
+      <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="${lineColor}" stop-opacity="0.25"/>
+        <stop offset="100%" stop-color="${lineColor}" stop-opacity="0.02"/>
+      </linearGradient>
+      <clipPath id="cClip"><rect x="${padL}" y="${padT}" width="${cW}" height="${cH}"/></clipPath>
+    </defs>
+    ${grid}
+    ${zLine}
+    ${ylabels}
+    ${areaPath ? `<path d="${areaPath}" fill="url(#areaGrad)" clip-path="url(#cClip)"/>` : ''}
+    <path d="${linePath}" fill="none" stroke="${lineColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" clip-path="url(#cClip)"/>
+    ${dots}
+    ${overlay}
   `;
+
+  // ── X-axis labels ──────────────────────────────────────────────────────────
+  const totalTrades = pnlHistory.length;
+  const startIdx    = totalTrades - n;
+  xax.innerHTML = '';
+  xax.style.paddingLeft = padL + 'px';
+  xax.style.paddingRight = padR + 'px';
+  last.forEach((_, i) => {
+    const s = document.createElement('span');
+    s.style.cssText = 'font-size:9px;color:#2a2a3a;';
+    s.textContent   = '#' + (startIdx + i + 1);
+    xax.appendChild(s);
+  });
+
+  updateChartMeta(vals.length > 0 ? last : []);
+
+  // ── Hover logic ────────────────────────────────────────────────────────────
+  const overlayEl = svg.getElementById('chartOverlay');
+  if (!overlayEl) return;
+
+  let hoverLine = null;
+
+  overlayEl.addEventListener('mousemove', e => {
+    const rect = svg.getBoundingClientRect();
+    const mx   = (e.clientX - rect.left) * (W / rect.width);
+
+    // Nearest dot
+    let minD = Infinity, idx = -1;
+    xs.forEach((x, i) => { const d = Math.abs(x - mx); if (d < minD) { minD = d; idx = i; } });
+    if (idx < 0 || minD > (cW / n) * 0.7 + 12) { tip.style.display = 'none'; removeHoverLine(); return; }
+
+    const t = last[idx];
+    const v = vals[idx];
+    const sign = v >= 0 ? '+' : '';
+    const rc   = REASON_COLOR[t.reason] || '#888';
+
+    tip.innerHTML = `
+      <div style="font-weight:bold;color:#fff;margin-bottom:4px;font-size:13px;">${esc(t.symbol)}</div>
+      <div style="color:${v >= 0 ? '#00ff88' : '#ff3366'};font-size:16px;font-weight:bold;line-height:1;">${sign}${v.toFixed(2)}%</div>
+      <div style="color:#888;font-size:10px;margin-top:1px;">${sign}$${Math.abs(t.pnl||0).toFixed(4)}</div>
+      <div style="margin-top:5px;display:flex;gap:6px;align-items:center;">
+        <span style="background:${rc}22;color:${rc};border-radius:4px;padding:1px 7px;font-size:10px;font-weight:bold;">${t.reason}</span>
+        <span style="color:#444;font-size:10px;">${t.closedAt||''}</span>
+      </div>
+      <div style="color:#2a2a3a;font-size:9px;margin-top:3px;">Trade #${startIdx + idx + 1}</div>
+    `;
+
+    // Position tooltip — flip if near right edge
+    const scaleX = rect.width / W;
+    const tx = xs[idx] * scaleX;
+    const ty = ys[idx] * (rect.height / H);
+    const tipW = 148, tipH = 90;
+    const left = (tx + 14 + tipW > rect.width) ? tx - tipW - 10 : tx + 14;
+    const top  = Math.max(4, ty - tipH / 2);
+    tip.style.left    = left + 'px';
+    tip.style.top     = top + 'px';
+    tip.style.display = 'block';
+
+    // Hover crosshair line
+    removeHoverLine();
+    hoverLine = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    hoverLine.setAttribute('x1', xs[idx].toFixed(1));
+    hoverLine.setAttribute('x2', xs[idx].toFixed(1));
+    hoverLine.setAttribute('y1', padT);
+    hoverLine.setAttribute('y2', H - padB);
+    hoverLine.setAttribute('stroke', '#2a2a4a');
+    hoverLine.setAttribute('stroke-width', '1');
+    hoverLine.setAttribute('stroke-dasharray', '3,2');
+    hoverLine.setAttribute('pointer-events', 'none');
+    svg.insertBefore(hoverLine, svg.lastElementChild);
+  });
+
+  overlayEl.addEventListener('mouseleave', () => {
+    tip.style.display = 'none';
+    removeHoverLine();
+  });
+
+  function removeHoverLine() {
+    if (hoverLine && hoverLine.parentNode) { hoverLine.parentNode.removeChild(hoverLine); hoverLine = null; }
+  }
 }
 
-// ── Tab switching ──────────────────────────────────────────────────────────
+function updateChartMeta(trades) {
+  const n = trades.length;
+  setText('chipTrades', n + (n === 20 ? ' (last 20)' : '') + ' trade' + (n !== 1 ? 's' : ''));
+
+  if (n === 0) {
+    setText('chipNet', 'Net: —');
+    setText('chipBest', 'Best: —');
+    setText('chipWorst', 'Worst: —');
+    return;
+  }
+
+  const pcts = trades.map(t => t.pnlPct);
+  const net  = pcts.reduce((a, b) => a + b, 0);
+  const best = Math.max(...pcts);
+  const worst= Math.min(...pcts);
+
+  const el = document.getElementById('chipNet');
+  el.textContent = 'Net: ' + (net >= 0 ? '+' : '') + net.toFixed(2) + '%';
+  el.style.color = net >= 0 ? '#00ff88' : '#ff3366';
+  setText('chipBest',  'Best: +' + best.toFixed(2) + '%');
+  document.getElementById('chipBest').style.color = '#00ff88';
+  setText('chipWorst', 'Worst: ' + worst.toFixed(2) + '%');
+  document.getElementById('chipWorst').style.color = '#ff3366';
+}
+
+// Redraw on resize
+let resizeTimer;
+window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => drawChart(false), 120); });
+
+// Mode toggle
+document.getElementById('modePerTrade').onclick = () => {
+  chartMode = 'pertrade';
+  document.getElementById('modePerTrade').classList.add('active');
+  document.getElementById('modeCumulative').classList.remove('active');
+  drawChart(false);
+};
+document.getElementById('modeCumulative').onclick = () => {
+  chartMode = 'cumulative';
+  document.getElementById('modeCumulative').classList.add('active');
+  document.getElementById('modePerTrade').classList.remove('active');
+  drawChart(false);
+};
+
+// ── Tab switching ─────────────────────────────────────────────────────────────
 function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.querySelectorAll('.tab-pane').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
+  if (name === 'dashboard') drawChart(false);
 }
-document.querySelectorAll('.tab-btn').forEach(btn => {
-  btn.onclick = () => switchTab(btn.dataset.tab);
-});
+document.querySelectorAll('.tab-btn').forEach(btn => { btn.onclick = () => switchTab(btn.dataset.tab); });
 
-// ── WebSocket ──────────────────────────────────────────────────────────────
+// ── WebSocket ─────────────────────────────────────────────────────────────────
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
   ws = new WebSocket(`${proto}://${location.host}/ws`);
-  ws.onopen = () => { setWS(true); clearTimeout(reconnectTimer); addLog('WebSocket connected', 'success'); };
+  ws.onopen  = () => { setWS(true);  clearTimeout(reconnectTimer); addLog('WebSocket connected', 'success'); };
   ws.onclose = () => { setWS(false); reconnectTimer = setTimeout(connect, 3000); };
   ws.onerror = () => {};
   ws.onmessage = e => { try { handleMsg(JSON.parse(e.data)); } catch(_){} };
 }
-
 function setWS(on) {
   const el = document.getElementById('wsDot');
   el.textContent = on ? '● Connected' : '● Disconnected';
-  el.className = 'ws-dot' + (on ? ' on' : '');
+  el.className   = 'ws-dot' + (on ? ' on' : '');
 }
 
-// ── Message handler ────────────────────────────────────────────────────────
+// ── Message handler ───────────────────────────────────────────────────────────
 function handleMsg(msg) {
   const d = msg.data;
   switch (msg.type) {
@@ -512,43 +728,32 @@ function handleMsg(msg) {
       if (d.rpcEndpoints) updateRPC(d.rpcEndpoints, d.activeRpc);
       if (d.telegram)     document.getElementById('tgBadge').style.display = '';
       break;
-    case 'log':
-      if (d) addLog(d.message, d.type);
-      break;
-    case 'ai_update':
-      if (d.ai) updateAI(d.ai);
-      break;
-    case 'positions_update':
-      renderPositions(d);
-      break;
+    case 'log':          if (d) addLog(d.message, d.type); break;
+    case 'ai_update':   if (d.ai) updateAI(d.ai); break;
+    case 'positions_update': renderPositions(d); break;
     case 'history_add':
       if (d) {
         prependHistoryRow(d);
-        pnlHistory.push(d.pnlPct || 0);
-        drawSparkline(pnlHistory);
-        const icon = d.reason === 'TP' ? '✅' : d.reason === 'SL' ? '❌' : '⏱';
-        const sign = d.pnl >= 0 ? '+' : '';
+        // Prepend to pnlHistory (newest first → reverse for chart)
+        pnlHistory.push({ pnlPct: d.pnlPct || 0, pnl: d.pnl || 0, symbol: d.symbol || '?', reason: d.reason || '?', closedAt: d.closedAt || '' });
+        drawChart(true);
+        const sign = (d.pnl || 0) >= 0 ? '+' : '';
         pushNotif(
-          `${icon} ${d.symbol} — ${d.reason}`,
-          `PnL: ${sign}$${Math.abs(d.pnl||0).toFixed(4)} (${sign}${(d.pnlPct||0).toFixed(2)}%)`,
-          d.reason
+          `${d.reason === 'TP' ? '✅' : d.reason === 'SL' ? '❌' : '⏱'} ${d.symbol} — ${d.reason}`,
+          `PnL: ${sign}$${Math.abs(d.pnl||0).toFixed(4)} (${sign}${(d.pnlPct||0).toFixed(2)}%)`
         );
       }
       break;
-    case 'check_result':
-      renderCheckResults(d);
-      break;
-    case 'telegram_test':
-      renderTgTest(d);
-      break;
+    case 'check_result':  renderCheckResults(d); break;
+    case 'telegram_test': renderTgTest(d); break;
   }
 }
 
-// ── Stats ──────────────────────────────────────────────────────────────────
+// ── Stats ─────────────────────────────────────────────────────────────────────
 function updateStats(s) {
   const profit = s.totalProfitUSD || 0;
-  const daily  = s.dailyPnL || 0;
-  const wr     = s.winRate  || 0;
+  const daily  = s.dailyPnL      || 0;
+  const wr     = s.winRate       || 0;
   setText('totalTrades', s.totalTrades || 0);
   setText('winRate',     wr.toFixed(1) + '%');
   setText('totalProfit', '$' + profit.toFixed(4));
@@ -556,11 +761,11 @@ function updateStats(s) {
   setText('activePos',   s.activePositions || 0);
   setText('wins',        s.winningTrades || 0);
   setText('losses',      s.losingTrades  || 0);
+  setText('posCount',    s.activePositions || 0);
   setClass('totalProfit', 'stat-value ' + pnlClass(profit));
   setClass('dailyPnl',    'stat-value ' + pnlClass(daily));
   setClass('winRate',     'stat-value ' + (wr >= 55 ? 'profit' : wr >= 35 ? 'neutral' : 'loss'));
-  setText('posCount',  s.activePositions || 0);
-  // Advanced stats
+  // Advanced
   const sharpe = s.sharpeRatio || 0;
   setText('sharpeRatio', sharpe === 0 ? '—' : sharpe.toFixed(2));
   setClass('sharpeRatio', 'stat-value sm ' + (sharpe > 1 ? 'profit' : sharpe > 0 ? 'neutral' : sharpe < 0 ? 'loss' : 'dim'));
@@ -584,7 +789,7 @@ function updateBotBadge(running, simMode) {
   simB.style.display = (running && simMode) ? '' : 'none';
 }
 
-// ── AI ─────────────────────────────────────────────────────────────────────
+// ── AI ────────────────────────────────────────────────────────────────────────
 function updateAI(ai) {
   ['gemini','groq','huangfing'].forEach(p => {
     if (!ai[p]) return;
@@ -601,46 +806,41 @@ function updateAI(ai) {
   if (ai.consensus !== undefined) setText('consensusScore', ai.consensus + '%');
 }
 
-// ── RPC ────────────────────────────────────────────────────────────────────
+// ── RPC ───────────────────────────────────────────────────────────────────────
 function updateRPC(endpoints, activeRpc) {
-  const container = document.getElementById('rpcStatus');
-  container.innerHTML = '';
+  const c = document.getElementById('rpcStatus');
+  c.innerHTML = '';
   (endpoints || []).forEach(ep => {
-    const item = document.createElement('div');
-    item.className = 'rpc-item';
     const safe = ['healthy','down','unknown'].includes(ep.status) ? ep.status : 'unknown';
-    item.innerHTML = `<span class="rpc-dot rpc-${safe}"></span><span>${String(ep.name||'').slice(0,35)}</span>`;
-    container.appendChild(item);
+    const d = document.createElement('div');
+    d.className   = 'rpc-item';
+    d.innerHTML   = `<span class="rpc-dot rpc-${safe}"></span><span>${String(ep.name||'').slice(0,35)}</span>`;
+    c.appendChild(d);
   });
   if (activeRpc) setText('activeRpc', String(activeRpc).slice(0, 40));
 }
 
-// ── Positions table ────────────────────────────────────────────────────────
+// ── Positions table ───────────────────────────────────────────────────────────
 function renderPositions(positions) {
   const body  = document.getElementById('posBody');
   const count = document.getElementById('posCount');
   if (!positions || positions.length === 0) {
-    body.innerHTML = '<tr><td colspan="11"><div class="empty-state"><div class="icon">📭</div>No open positions.</div></td></tr>';
-    count.textContent = '0';
-    count.className = 'tab-count';
-    return;
+    body.innerHTML  = '<tr><td colspan="11"><div class="empty-state"><div class="icon">📭</div>No open positions.</div></td></tr>';
+    count.textContent = '0'; count.className = 'tab-count'; return;
   }
-  count.textContent = positions.length;
-  count.className = 'tab-count';
+  count.textContent = positions.length; count.className = 'tab-count';
   body.innerHTML = '';
   positions.forEach(p => {
-    const pnlPct = (p.pnlPct || 0);
-    const pnl    = (p.pnl    || 0);
+    const pnlPct = p.pnlPct || 0, pnl = p.pnl || 0;
     const cls    = pnlPct >= 0 ? 'profit' : 'loss';
     const trail  = p.trailingActivated ? '<span class="trail-badge">🎯 Trail</span>' : '—';
     const mode   = p.simMode ? '<span class="sim-tag">SIM</span>' : '<span style="color:#444;font-size:9px;">LIVE</span>';
-    const conf   = (p.aiConfidence || 0);
-    const confBar = `<span class="conf-bar" style="width:${conf.toFixed(0)}px;max-width:60px;"></span>${conf.toFixed(0)}%`;
+    const conf   = p.aiConfidence || 0;
+    const confBar= `<span class="conf-bar" style="width:${Math.min(conf,100).toFixed(0)}px;max-width:60px;"></span>${conf.toFixed(0)}%`;
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td style="font-weight:bold;color:#fff;">${esc(p.symbol)}</td>
-      <td>$${fmt(p.entryPrice)}</td>
-      <td>$${fmt(p.currentPrice)}</td>
+      <td>$${fmt(p.entryPrice)}</td><td>$${fmt(p.currentPrice)}</td>
       <td class="${cls}">${pnlPct>=0?'+':''}${pnlPct.toFixed(2)}%</td>
       <td class="${cls}">${pnl>=0?'+':''}$${Math.abs(pnl).toFixed(4)}</td>
       <td style="color:#00ff8888;">$${fmt(p.tpPrice)}</td>
@@ -653,19 +853,20 @@ function renderPositions(positions) {
   });
 }
 
-// ── History table ──────────────────────────────────────────────────────────
+// ── History table ─────────────────────────────────────────────────────────────
 function loadHistory(records) {
   if (!records || records.length === 0) return;
   const body = document.getElementById('histBody');
   body.innerHTML = '';
-  records.forEach(r => {
-    body.appendChild(buildHistoryRow(r));
-    pnlHistory.push(r.pnlPct || 0);
+  // records arrive newest-first; build pnlHistory oldest-first for chart
+  const rev = [...records].reverse();
+  rev.forEach(r => {
+    pnlHistory.push({ pnlPct: r.pnlPct||0, pnl: r.pnl||0, symbol: r.symbol||'?', reason: r.reason||'?', closedAt: r.closedAt||'' });
   });
-  pnlHistory.reverse();
-  drawSparkline(pnlHistory);
+  records.forEach(r => body.appendChild(buildHistoryRow(r)));
   histCount = records.length;
   setText('histCount', histCount);
+  drawChart(false);
 }
 
 function prependHistoryRow(record) {
@@ -677,104 +878,82 @@ function prependHistoryRow(record) {
 }
 
 function buildHistoryRow(r) {
-  const pnlCls    = r.pnl >= 0 ? 'profit' : 'loss';
+  const pnlCls    = (r.pnl||0) >= 0 ? 'profit' : 'loss';
   const reasonCls = { TP:'reason-tp', SL:'reason-sl', TIMEOUT:'reason-timeout', BOT_STOPPED:'reason-stopped' }[r.reason] || '';
   const mode      = r.simMode ? '<span class="sim-tag">SIM</span>' : '';
   const tr = document.createElement('tr');
   tr.innerHTML = `
     <td style="color:#555;">${esc(r.closedAt||'—')}</td>
     <td style="font-weight:bold;color:#fff;">${esc(r.symbol)}${mode}</td>
-    <td>$${fmt(r.entryPrice)}</td>
-    <td>$${fmt(r.exitPrice)}</td>
-    <td class="${pnlCls}">${r.pnl>=0?'+':''}$${Math.abs(r.pnl).toFixed(4)}</td>
-    <td class="${pnlCls}">${r.pnlPct>=0?'+':''}${(r.pnlPct||0).toFixed(2)}%</td>
+    <td>$${fmt(r.entryPrice)}</td><td>$${fmt(r.exitPrice)}</td>
+    <td class="${pnlCls}">${(r.pnl||0)>=0?'+':''}$${Math.abs(r.pnl||0).toFixed(4)}</td>
+    <td class="${pnlCls}">${(r.pnlPct||0)>=0?'+':''}${(r.pnlPct||0).toFixed(2)}%</td>
     <td class="${reasonCls}">${esc(r.reason||'—')}</td>
     <td style="color:#555;">${formatHeld(r.heldSecs||0)}</td>
     <td>${mode||'<span style="color:#333;font-size:9px;">LIVE</span>'}</td>`;
   return tr;
 }
 
-// ── System Check ───────────────────────────────────────────────────────────
+// ── System ────────────────────────────────────────────────────────────────────
 function renderCheckResults(report) {
   const grid = document.getElementById('checkGrid');
   grid.innerHTML = '';
   if (!report || !report.results || !report.results.length) {
-    grid.innerHTML = '<div class="check-placeholder">No results</div>';
-    return;
+    grid.innerHTML = '<div class="check-placeholder">No results</div>'; return;
   }
   report.results.forEach(r => {
     const safe = ['ok','error','missing'].includes(r.status) ? r.status : 'error';
     const icon = safe === 'ok' ? '✅' : safe === 'missing' ? '⚠️' : '❌';
-    const div = document.createElement('div');
-    div.className = 'check-item ' + safe;
-    div.innerHTML = `
-      <div class="check-icon">${icon}</div>
-      <div>
-        <div class="check-name">${esc(String(r.name||'').slice(0,40))}</div>
-        <div class="check-msg">${esc(String(r.message||'').slice(0,80))}</div>
-        ${r.latency_ms > 0 ? `<div class="check-lat">${r.latency_ms}ms</div>` : ''}
-      </div>`;
-    grid.appendChild(div);
+    const d = document.createElement('div');
+    d.className = 'check-item ' + safe;
+    d.innerHTML = `<div class="check-icon">${icon}</div><div>
+      <div class="check-name">${esc(String(r.name||'').slice(0,40))}</div>
+      <div class="check-msg">${esc(String(r.message||'').slice(0,80))}</div>
+      ${r.latency_ms > 0 ? `<div class="check-lat">${r.latency_ms}ms</div>` : ''}
+    </div>`;
+    grid.appendChild(d);
   });
 }
-
 function renderTgTest(result) {
   const el = document.getElementById('tgTestResult');
-  el.style.display = '';
-  el.style.color = result.ok ? '#00ff88' : '#ff3366';
-  el.textContent  = (result.ok ? '✅ ' : '❌ ') + (result.message || '') + (result.bot_name ? ' — ' + result.bot_name : '');
+  el.style.display = ''; el.style.color = result.ok ? '#00ff88' : '#ff3366';
+  el.textContent = (result.ok ? '✅ ' : '❌ ') + (result.message||'') + (result.bot_name ? ' — ' + result.bot_name : '');
 }
 
-// ── Log ────────────────────────────────────────────────────────────────────
+// ── Log ───────────────────────────────────────────────────────────────────────
 function addLog(message, type='info') {
   const panel = document.getElementById('logPanel');
-  const time  = new Date().toLocaleTimeString();
   const div   = document.createElement('div');
   const safe  = ['info','error','success','warning','default'].includes(type) ? type : 'default';
   div.className   = 'log-entry ' + safe;
-  div.textContent = '[' + time + '] ' + String(message).slice(0, 220);
+  div.textContent = '[' + new Date().toLocaleTimeString() + '] ' + String(message).slice(0, 220);
   panel.appendChild(div);
   panel.scrollTop = panel.scrollHeight;
   while (panel.children.length > 500) panel.removeChild(panel.firstChild);
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function fmt(v) {
   const n = parseFloat(v) || 0;
   if (n === 0) return '0';
-  if (n < 0.0001) return n.toExponential(3);
-  if (n < 0.01)   return n.toFixed(6);
-  if (n < 1)      return n.toFixed(4);
+  if (Math.abs(n) < 0.0001) return n.toExponential(3);
+  if (Math.abs(n) < 0.01)   return n.toFixed(6);
+  if (Math.abs(n) < 1)      return n.toFixed(4);
   return n.toFixed(2);
 }
-
 function formatHeld(secs) {
   if (!secs) return '0s';
-  if (secs < 60)  return secs + 's';
+  if (secs < 60) return secs + 's';
   const m = Math.floor(secs / 60), s = secs % 60;
   if (m < 60) return m + 'm ' + s + 's';
-  const h = Math.floor(m / 60);
-  return h + 'h ' + (m % 60) + 'm';
+  return Math.floor(m/60) + 'h ' + (m%60) + 'm';
 }
-
-function sigClass(s) {
-  if (s === 'BUY')  return 'signal-buy';
-  if (s === 'SELL') return 'signal-sell';
-  return 'signal-hold';
-}
-
+function sigClass(s) { return s === 'BUY' ? 'signal-buy' : s === 'SELL' ? 'signal-sell' : 'signal-hold'; }
 function pnlClass(v) { return v > 0 ? 'profit' : v < 0 ? 'loss' : 'neutral'; }
-function setText(id, v) { const e = document.getElementById(id); if(e) e.textContent = v; }
-function setClass(id, c) { const e = document.getElementById(id); if(e) e.className = c; }
-function esc(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
-function send(action, params={}) {
-  if (ws && ws.readyState === WebSocket.OPEN)
-    ws.send(JSON.stringify({ action, ...params }));
-}
-
+function setText(id, v) { const e = document.getElementById(id); if (e) e.textContent = v; }
+function setClass(id, c) { const e = document.getElementById(id); if (e) e.className = c; }
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function send(action, params={}) { if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({action,...params})); }
 function buildConfig() {
   return {
     positionSize:  parseFloat(document.getElementById('positionSize').value) || 1,
@@ -786,48 +965,30 @@ function buildConfig() {
   };
 }
 
-// ── Button bindings ────────────────────────────────────────────────────────
-document.getElementById('startLiveBtn').onclick = () => {
-  send('start', { config: buildConfig(), simMode: false });
-  addLog('Starting bot in LIVE mode...', 'info');
-};
-document.getElementById('startSimBtn').onclick = () => {
-  send('start', { config: buildConfig(), simMode: true });
-  addLog('Starting bot in SIMULATION mode...', 'warning');
-};
+// ── Button bindings ───────────────────────────────────────────────────────────
+document.getElementById('startLiveBtn').onclick = () => { send('start', {config:buildConfig(), simMode:false}); addLog('Starting bot in LIVE mode...','info'); };
+document.getElementById('startSimBtn').onclick  = () => { send('start', {config:buildConfig(), simMode:true});  addLog('Starting bot in SIMULATION mode...','warning'); };
 document.getElementById('stopBtn').onclick      = () => send('stop');
 document.getElementById('withdrawBtn').onclick  = () => send('withdraw');
 document.getElementById('resetStatsBtn').onclick = () => {
   send('reset_stats');
-  historyData = [];
-  pnlHistory  = [];
-  histCount   = 0;
-  setText('histCount', '0');
-  drawSparkline([]);
-  document.getElementById('histBody').innerHTML =
-    '<tr><td colspan="9"><div class="empty-state"><div class="icon">🕐</div>No trades closed yet.</div></td></tr>';
+  pnlHistory = []; histCount = 0;
+  setText('histCount','0');
+  drawChart(false);
+  document.getElementById('histBody').innerHTML = '<tr><td colspan="9"><div class="empty-state"><div class="icon">🕐</div>No trades closed yet.</div></td></tr>';
 };
 document.getElementById('clearHistBtn').onclick = () => {
-  historyData = [];
-  pnlHistory  = [];
-  histCount   = 0;
-  setText('histCount', '0');
-  drawSparkline([]);
-  document.getElementById('histBody').innerHTML =
-    '<tr><td colspan="9"><div class="empty-state"><div class="icon">🕐</div>History cleared.</div></td></tr>';
+  pnlHistory = []; histCount = 0;
+  setText('histCount','0');
+  drawChart(false);
+  document.getElementById('histBody').innerHTML = '<tr><td colspan="9"><div class="empty-state"><div class="icon">🕐</div>History cleared.</div></td></tr>';
 };
-document.getElementById('runCheckBtn').onclick = () => {
-  document.getElementById('checkGrid').innerHTML = '<div class="check-placeholder">⏳ Running checks...</div>';
-  send('run_check');
-};
-document.getElementById('tgTestBtn').onclick = () => {
-  document.getElementById('tgTestResult').style.display = 'none';
-  send('test_telegram');
-};
-document.getElementById('clearLogBtn').onclick = () => {
-  document.getElementById('logPanel').innerHTML = '<div class="log-entry info">[--:--:--] Log cleared</div>';
-};
+document.getElementById('runCheckBtn').onclick  = () => { document.getElementById('checkGrid').innerHTML = '<div class="check-placeholder">⏳ Running checks...</div>'; send('run_check'); };
+document.getElementById('tgTestBtn').onclick    = () => { document.getElementById('tgTestResult').style.display='none'; send('test_telegram'); };
+document.getElementById('clearLogBtn').onclick  = () => { document.getElementById('logPanel').innerHTML = '<div class="log-entry info">[--:--:--] Log cleared</div>'; };
 
+// Draw initial empty chart, then connect
+drawChart(false);
 connect();
 </script>
 </body>
