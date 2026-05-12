@@ -73,6 +73,20 @@ export type FilterRejectionEntry = {
   timestamp: string;
 };
 
+export type DexQuoteItem = {
+  name: string;
+  quoteEth: string;
+  winner: boolean;
+};
+
+export type DexQuoteEntry = {
+  tokenSymbol: string;
+  tokenAddress: string;
+  quotes: DexQuoteItem[];
+  winner: string;
+  timestamp: string;
+};
+
 type SocketCallbacks = {
   onTradeExecuted?: (data: { tokenSymbol: string; profitPercent: number; exitTime: string }) => void;
   onLogs?: (logs: LogEntry[]) => void;
@@ -80,6 +94,7 @@ type SocketCallbacks = {
   onAIDecision?: (entry: AIDecisionEntry) => void;
   onMevAlert?: (entry: MevAlertEntry) => void;
   onFilterRejection?: (entry: FilterRejectionEntry) => void;
+  onDexQuote?: (entry: DexQuoteEntry) => void;
 };
 
 let socketInstance: Socket | null = null;
@@ -139,6 +154,10 @@ export function useSocket(callbacks: SocketCallbacks) {
       callbacksRef.current.onFilterRejection?.(entry);
     });
 
+    socket.on("dex-quote", (entry: DexQuoteEntry) => {
+      callbacksRef.current.onDexQuote?.(entry);
+    });
+
     return () => {
       socket.off("bot-status");
       socket.off("position-update");
@@ -149,6 +168,7 @@ export function useSocket(callbacks: SocketCallbacks) {
       socket.off("ai-decision");
       socket.off("mev-alert");
       socket.off("filter-rejection");
+      socket.off("dex-quote");
     };
   }, [queryClient]);
 

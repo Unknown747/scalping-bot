@@ -777,6 +777,17 @@ export class ScalpingBot {
       );
     }
 
+    // Emit multi-DEX quote comparison for dashboard visualisation
+    if (buyResult.dexQuotes && buyResult.dexQuotes.length > 0) {
+      this.emit("dex-quote", {
+        tokenSymbol: token.symbol,
+        tokenAddress: token.address,
+        quotes: buyResult.dexQuotes,
+        winner: buyResult.executionDex ?? "unknown",
+        timestamp: new Date().toISOString(),
+      });
+    }
+
     if (!buyResult.success) {
       this.log("error", `Buy failed for ${token.symbol}: ${buyResult.error}`, token.symbol);
       // Auto-blacklist permanently if simulation detected honeypot or fee-on-transfer

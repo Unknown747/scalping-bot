@@ -3,6 +3,12 @@ import type { ScalpingConfigData } from "./config.js";
 import { BASE_CONTRACTS, calculateDynamicSlippage } from "./config.js";
 import { getReadProvider, getWriteProvider, withRpcRetry, waitForReceipt } from "./RpcProvider.js";
 
+export interface DexQuoteEntry {
+  name: string;
+  quoteEth: string;
+  winner: boolean;
+}
+
 export interface SwapResult {
   success: boolean;
   txHash: string | null;
@@ -16,6 +22,7 @@ export interface SwapResult {
   actualSlippagePct?: number;
   expectedOut?: bigint;
   executionDex?: string;
+  dexQuotes?: DexQuoteEntry[];
 }
 
 export interface TWAPResult {
@@ -421,9 +428,27 @@ export class SwapExecutor {
         `[Multi-DEX] Best quote → ${bestDEX.name}`
       );
 
+      // Build dexQuotes for all 4 DEXes (including those with zero liquidity)
+      const allDEXNames = ["Uniswap V3", "Aerodrome V2", "BaseSwap V2", "PancakeSwap V2"];
+      const allRawQuotes = [
+        { name: "Uniswap V3", quote: v3Quote },
+        { name: "Aerodrome V2", quote: aeroQuote.quote },
+        { name: "BaseSwap V2", quote: bsQuote.quote },
+        { name: "PancakeSwap V2", quote: psQuote.quote },
+      ];
+      const dexQuotes: DexQuoteEntry[] = allDEXNames.map(name => {
+        const found = allRawQuotes.find(q => q.name === name);
+        return {
+          name,
+          quoteEth: found && found.quote > 0n ? ethers.formatEther(found.quote) : "0",
+          winner: name === bestDEX.name,
+        };
+      });
+
       // ── If a V2 DEX has the best quote, route there (skip V3 execution) ──
       if (bestDEX.name !== "Uniswap V3") {
-        return this.buyTokenBestV2(ethers, tokenAddress, amountEth, slippagePct, bestDEX);
+        const v2Result = await this.buyTokenBestV2(ethers, tokenAddress, amountEth, slippagePct, bestDEX);
+        return { ...v2Result, dexQuotes };
       }
 
       // ── V3 wins — continue below with existing V3 execution path ─────────
@@ -665,6 +690,7 @@ export class SwapExecutor {
         actualSlippagePct,
         expectedOut,
         executionDex: "Uniswap V3",
+        dexQuotes,
       };
     } catch (err: any) {
       const errMsg = err.shortMessage || err.reason || err.message || "Swap failed";
