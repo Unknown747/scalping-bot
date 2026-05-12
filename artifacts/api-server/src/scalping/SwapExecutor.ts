@@ -423,107 +423,111 @@ export class SwapExecutor {
       const router = new ethers.Contract(BASE_CONTRACTS.UNISWAP_V3_ROUTER, routerAbi, writeWallet);
 
       // ── Pre-flight simulation (read RPC, no gas) ─────────────────────────
-      // Only blocks the buy for SLIPPAGE errors ("Too little received" / STF).
-      // Non-slippage errors (e.g. approval not set yet) are ignored — the real
-      // tx will handle approval via ensureWethApproval.
-      // We pass `from: walletAddress` so the simulator uses the wallet's actual
-      // on-chain allowance state (avoids false failures on WETH path).
+      // IMPORTANT: Only run simulation for the native ETH path.
+      //
+      // WETH path simulation CANNOT be run before approval is set:
+      //   - Simulation uses `from: walletAddress` (real on-chain state)
+      //   - Router calls WETH.transferFrom(wallet, router, amount)
+      //   - If WETH not yet approved → TransferHelper error → would be misclassified as honeypot
+      //   - Approval is handled in the WRITE phase via ensureWethApproval()
+      //
+      // ETH path simulation is safe and useful for detecting actual honeypots:
+      //   - Router wraps the sent ETH itself (no transferFrom needed from wallet)
+      //   - TransferHelper error here = token's transfer() is broken = real honeypot
       const routerRead = new ethers.Contract(BASE_CONTRACTS.UNISWAP_V3_ROUTER, routerAbi, readProvider);
-      try {
-        await routerRead.exactInputSingle.staticCall(
-          {
-            tokenIn: BASE_CONTRACTS.WETH,
-            tokenOut: tokenAddress,
-            fee,
-            recipient: this.walletAddress,
-            amountIn: amountInWei,
-            amountOutMinimum,
-            sqrtPriceLimitX96: 0,
-          },
-          { value: useWeth ? 0n : amountInWei, from: this.walletAddress }
-        );
-        logger.debug({ tokenAddress, fee }, "Pre-flight simulation passed");
-      } catch (simErr: any) {
-        const simMsg: string =
-          simErr.shortMessage ||
-          simErr.reason ||
-          simErr.revert?.args?.[0] ||
-          simErr.message ||
-          "swap simulation failed";
 
-        // Classify the simulation error into 3 categories:
-        // 1. Slippage → retry with 2× slippage
-        // 2. Contract revert (honeypot / FoT / broken token) → skip immediately
-        // 3. Infrastructure (approval not set, RPC rate limit) → proceed anyway
-
-        const isSlippageRevert =
-          simMsg.includes("Too little received") ||
-          simMsg.includes("STF") ||
-          simMsg.includes("slippage");
-
-        // "missing revert data" = contract reverted without reason string
-        // Typical for honeypots, fee-on-transfer tokens, and transfer restrictions
-        const isContractRevert =
-          simMsg.includes("missing revert data") ||
-          simMsg.includes("execution reverted") ||
-          simMsg.includes("reverted") ||
-          simMsg.includes("TRANSFER_FROM_FAILED") ||
-          simMsg.includes("TransferHelper");
-
-        // Infrastructure errors that we should ignore (let real tx proceed)
-        const isInfraError =
-          simMsg.includes("rate limit") ||
-          simMsg.includes("over rate limit") ||
-          simMsg.includes("could not coalesce") ||
-          simMsg.includes("timeout") ||
-          simMsg.includes("network");
-
-        if (isSlippageRevert) {
-          // Retry once with 2× slippage (up to 20%)
-          const retrySlippagePct = Math.min(slippagePct * 2, 20);
-          amountOutMinimum =
-            (expectedOut * BigInt(Math.floor((100 - retrySlippagePct) * 100))) / 10000n;
-
-          logger.warn(
-            { tokenAddress, fee, simMsg, retrySlippagePct },
-            `Slippage simulation fail — retrying with ${retrySlippagePct}% slippage`
+      if (!useWeth) {
+        // Native ETH path only — simulate to catch honeypots before committing gas
+        try {
+          await routerRead.exactInputSingle.staticCall(
+            {
+              tokenIn: BASE_CONTRACTS.WETH,
+              tokenOut: tokenAddress,
+              fee,
+              recipient: this.walletAddress,
+              amountIn: amountInWei,
+              amountOutMinimum,
+              sqrtPriceLimitX96: 0,
+            },
+            { value: amountInWei, from: this.walletAddress }
           );
+          logger.debug({ tokenAddress, fee }, "Pre-flight simulation passed (ETH path)");
+        } catch (simErr: any) {
+          const simMsg: string =
+            simErr.shortMessage ||
+            simErr.reason ||
+            simErr.revert?.args?.[0] ||
+            simErr.message ||
+            "swap simulation failed";
 
-          try {
-            await routerRead.exactInputSingle.staticCall(
-              {
-                tokenIn: BASE_CONTRACTS.WETH,
-                tokenOut: tokenAddress,
-                fee,
-                recipient: this.walletAddress,
-                amountIn: amountInWei,
-                amountOutMinimum,
-                sqrtPriceLimitX96: 0,
-              },
-              { value: useWeth ? 0n : amountInWei, from: this.walletAddress }
+          const isSlippageRevert =
+            simMsg.includes("Too little received") ||
+            simMsg.includes("STF") ||
+            simMsg.includes("slippage");
+
+          // On the ETH path, TransferHelper = token's transfer() is broken = real honeypot/FoT
+          // (NOT an approval error — ETH path never needs wallet approval)
+          const isContractRevert =
+            simMsg.includes("missing revert data") ||
+            simMsg.includes("execution reverted") ||
+            simMsg.includes("reverted") ||
+            simMsg.includes("TRANSFER_FROM_FAILED") ||
+            simMsg.includes("TransferHelper");
+
+          const isInfraError =
+            simMsg.includes("rate limit") ||
+            simMsg.includes("over rate limit") ||
+            simMsg.includes("could not coalesce") ||
+            simMsg.includes("timeout") ||
+            simMsg.includes("network");
+
+          if (isSlippageRevert) {
+            const retrySlippagePct = Math.min(slippagePct * 2, 20);
+            amountOutMinimum =
+              (expectedOut * BigInt(Math.floor((100 - retrySlippagePct) * 100))) / 10000n;
+
+            logger.warn(
+              { tokenAddress, fee, simMsg, retrySlippagePct },
+              `Slippage simulation fail — retrying with ${retrySlippagePct}% slippage`
             );
-            logger.info({ tokenAddress, retrySlippagePct }, "Slippage retry simulation passed — continuing buy");
-          } catch (retryErr: any) {
-            const retryMsg =
-              retryErr.shortMessage ||
-              retryErr.reason ||
-              retryErr.revert?.args?.[0] ||
-              retryErr.message ||
-              "retry simulation failed";
-            logger.warn({ tokenAddress, fee, retryMsg }, "Slippage retry simulation also failed — skipping buy");
-            return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: `Simulation: ${retryMsg}` };
+
+            try {
+              await routerRead.exactInputSingle.staticCall(
+                {
+                  tokenIn: BASE_CONTRACTS.WETH,
+                  tokenOut: tokenAddress,
+                  fee,
+                  recipient: this.walletAddress,
+                  amountIn: amountInWei,
+                  amountOutMinimum,
+                  sqrtPriceLimitX96: 0,
+                },
+                { value: amountInWei, from: this.walletAddress }
+              );
+              logger.info({ tokenAddress, retrySlippagePct }, "Slippage retry simulation passed — continuing buy");
+            } catch (retryErr: any) {
+              const retryMsg =
+                retryErr.shortMessage ||
+                retryErr.reason ||
+                retryErr.revert?.args?.[0] ||
+                retryErr.message ||
+                "retry simulation failed";
+              logger.warn({ tokenAddress, fee, retryMsg }, "Slippage retry simulation also failed — skipping buy");
+              return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: `Simulation: ${retryMsg}` };
+            }
+          } else if (isContractRevert) {
+            logger.warn({ tokenAddress, fee, simMsg }, "Token contract revert in ETH-path simulation — likely honeypot/FoT, skipping buy");
+            return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: `Honeypot/FoT: ${simMsg}` };
+          } else if (isInfraError) {
+            logger.warn({ tokenAddress, fee, simMsg }, "Simulation infra error (rate limit/timeout) — proceeding with real tx");
+          } else {
+            logger.warn({ tokenAddress, fee, simMsg }, "Simulation unknown error — proceeding with real tx anyway");
           }
-        } else if (isContractRevert) {
-          // Token contract reverted — likely honeypot or fee-on-transfer. Skip.
-          logger.warn({ tokenAddress, fee, simMsg }, "Token contract revert in simulation — likely honeypot/FoT, skipping buy");
-          return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: `Honeypot/FoT: ${simMsg}` };
-        } else if (isInfraError) {
-          // RPC rate limit or network issue — ignore simulation, proceed with real tx
-          logger.warn({ tokenAddress, fee, simMsg }, "Simulation infra error (rate limit/timeout) — proceeding with real tx");
-        } else {
-          // Approval not set or unknown error — proceed, real tx handles approval
-          logger.warn({ tokenAddress, fee, simMsg }, "Simulation unknown error — proceeding with real tx anyway");
         }
+      } else {
+        // WETH path — skip simulation entirely.
+        // ensureWethApproval() in the WRITE phase handles approval before the swap.
+        logger.debug({ tokenAddress, fee }, "Skipping pre-flight simulation for WETH path (approval pending)");
       }
 
       let tx: any;

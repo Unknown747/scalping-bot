@@ -158,7 +158,7 @@ export const DEFAULT_CONFIG: ScalpingConfigData = {
   maxFeePerGasGwei: 0.5,
 
   // ── Safety Filters ───────────────────────────────────────────────────────────
-  minSafetyScore: 65,           // stricter than default — filter obvious honeypots/rugs
+  minSafetyScore: 50,           // 50 = allows new listings (LP not locked -15, ownership not renounced -15 = 70 base). Honeypot & sell tax are hard-blocked separately.
   maxSellTaxPercent: 8,         // reject if sell tax > 8%
 
   // ── Scan Config ──────────────────────────────────────────────────────────────
@@ -241,7 +241,7 @@ export const RISK_PRESETS: Record<string, Partial<ScalpingConfigData>> = {
     maxTradeAmountEth: 0.0002,
     maxConcurrentPositions: 1,    // only 1 open at a time
     minMomentumPercent: 20,       // wait for very strong momentum
-    minSafetyScore: 75,
+    minSafetyScore: 60,
     stopLossPercent: 6,           // -6% hard stop — room for normal volatility without premature exit
     tp1Percent: 6,                // lower TP1 — easier to hit
     tp1SellPercent: 70,           // sell 70% at TP1 — very conservative, take profits fast
