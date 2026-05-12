@@ -32,13 +32,21 @@ func NewMultiRPCClient(primaries, backups []string) *MultiRPCClient {
                 httpClient: &http.Client{Timeout: 10 * time.Second},
         }
 
-        all := append(primaries, backups...)
-        for _, ep := range all {
+        for _, ep := range m.allEndpoints() {
                 m.healthy[ep] = true
         }
 
         go m.healthChecker()
         return m
+}
+
+// allEndpoints returns a fresh slice of primaries followed by backups,
+// avoiding the Go slice-aliasing bug from append(m.primaries, m.backups...).
+func (m *MultiRPCClient) allEndpoints() []string {
+        all := make([]string, 0, len(m.primaries)+len(m.backups))
+        all = append(all, m.primaries...)
+        all = append(all, m.backups...)
+        return all
 }
 
 func (m *MultiRPCClient) checkEndpoint(endpoint string) (bool, time.Duration) {
@@ -62,7 +70,7 @@ func (m *MultiRPCClient) healthChecker() {
 }
 
 func (m *MultiRPCClient) checkAll() {
-        all := append(m.primaries, m.backups...)
+        all := m.allEndpoints()
         var wg sync.WaitGroup
         for _, ep := range all {
                 wg.Add(1)
@@ -82,7 +90,7 @@ func (m *MultiRPCClient) GetActiveEndpoint() (string, error) {
         m.mu.RLock()
         defer m.mu.RUnlock()
 
-        all := append(m.primaries, m.backups...)
+        all := m.allEndpoints()
         for _, ep := range all {
                 if m.healthy[ep] {
                         return ep, nil
@@ -98,7 +106,7 @@ func (m *MultiRPCClient) GetAllStatuses() []EndpointStatus {
         m.mu.RLock()
         defer m.mu.RUnlock()
 
-        all := append(m.primaries, m.backups...)
+        all := m.allEndpoints()
         statuses := make([]EndpointStatus, 0, len(all))
         for _, ep := range all {
                 statuses = append(statuses, EndpointStatus{

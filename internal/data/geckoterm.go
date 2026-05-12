@@ -50,6 +50,9 @@ func (g *GeckoClient) GetTopPools(ctx context.Context, network string) ([]TokenD
                 return nil, fmt.Errorf("gecko request failed: %w", err)
         }
         defer resp.Body.Close()
+        if resp.StatusCode != 200 {
+                return nil, fmt.Errorf("geckoterminal pools API: HTTP %d", resp.StatusCode)
+        }
 
         var raw struct {
                 Data []struct {
@@ -128,6 +131,9 @@ func (g *GeckoClient) GetTokenPrice(ctx context.Context, network, address string
                 return 0, fmt.Errorf("price fetch failed: %w", err)
         }
         defer resp.Body.Close()
+        if resp.StatusCode != 200 {
+                return 0, fmt.Errorf("geckoterminal price API: HTTP %d", resp.StatusCode)
+        }
 
         var raw struct {
                 Data struct {

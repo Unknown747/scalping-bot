@@ -79,6 +79,11 @@ type BotState struct {
         CircuitUntil    time.Time
 }
 
+// walletHTTPClient is a shared client for all eth_call / eth_getBalance RPC
+// calls made by rpcCall(). Reusing it avoids creating a new TCP connection on
+// every wallet-balance poll (every 10 s from the frontend).
+var walletHTTPClient = &http.Client{Timeout: 5 * time.Second}
+
 var (
         cfg        *config.Config
         rpcClient  *rpcpkg.MultiRPCClient
@@ -154,6 +159,10 @@ func main() {
         mux.Handle("/api/history", authMiddleware(http.HandlerFunc(handleHistory)))
         mux.Handle("/api/history/export", authMiddleware(http.HandlerFunc(handleHistoryExport)))
         mux.Handle("/api/wallet", authMiddleware(http.HandlerFunc(handleWallet)))
+
+        if os.Getenv("BOT_PASSWORD") == "" {
+                log.Printf("⚠️  WARNING: BOT_PASSWORD secret not set — login uses default password. Set BOT_PASSWORD in Secrets for security!")
+        }
 
         log.Printf("🚀 MemeScalper AI Pro v%s starting on port %s", cfg.Bot.Version, port)
         log.Printf("📡 Network: %s | Chain ID: %d", cfg.Bot.Network, cfg.Bot.ChainID)
@@ -262,8 +271,7 @@ func rpcCall(endpoint, payload string) (string, error) {
                 return "", err
         }
         req.Header.Set("Content-Type", "application/json")
-        client := &http.Client{Timeout: 5 * time.Second}
-        resp, err := client.Do(req)
+        resp, err := walletHTTPClient.Do(req)
         if err != nil {
                 return "", err
         }
@@ -318,12 +326,16 @@ func handleWallet(w http.ResponseWriter, r *http.Request) {
                 return
         }
 
-        // Pad address to 32 bytes for eth_call data
+        // Pad address to 32 bytes (64 hex chars) for eth_call ABI encoding.
+        // fmt.Sprintf("%064s") pads with spaces — must zero-pad manually.
         addr := walletAddr
         if len(addr) >= 2 && addr[:2] == "0x" {
                 addr = addr[2:]
         }
-        padded := fmt.Sprintf("%064s", addr)
+        for len(addr) < 64 {
+                addr = "0" + addr
+        }
+        padded := addr
 
         const wethAddr = "0x4200000000000000000000000000000000000006"
 
@@ -664,8 +676,13 @@ func runBot() {
                                 continue
                         }
 
-                        // Dynamic price impact based on actual position size vs liquidity
-                        priceImpactPct := (cfg.Trading.PositionSizeUSD / token.LiquidityUSD) * 100
+                        // Dynamic price impact — use worst-case Kelly size (max multiplier)
+                        // so MEV check reflects the largest position we could actually open.
+                        maxKellyUSD := cfg.Trading.PositionSizeUSD
+                        if cfg.Kelly.Enabled && cfg.Kelly.MaxMultiplier > 1.0 {
+                                maxKellyUSD = cfg.Trading.PositionSizeUSD * cfg.Kelly.MaxMultiplier
+                        }
+                        priceImpactPct := (maxKellyUSD / token.LiquidityUSD) * 100
                         risk := mevShield.Assess(priceImpactPct, token.LiquidityUSD, float64(token.TxCount5m)/5.0)
                         if risk.ShouldSkip {
                                 broadcast("log", map[string]interface{}{
@@ -865,6 +882,29 @@ func executeTrade(token data.TokenData, decision *ai.TradingDecision, simMode bo
 
         // Kelly Criterion dynamic position sizing
         kr := computeKellySize()
+
+        // AI confidence weighting: high conviction boosts size, low conviction cuts it.
+        // Applied after Kelly so it respects the min/max multiplier bounds.
+        base := cfg.Trading.PositionSizeUSD
+        minMult := cfg.Kelly.MinMultiplier
+        if minMult <= 0 {
+                minMult = 0.25
+        }
+        maxMult := cfg.Kelly.MaxMultiplier
+        if maxMult <= 0 {
+                maxMult = 3.0
+        }
+        switch {
+        case decision.Confidence >= 85:
+                boosted := math.Min(maxMult, kr.Multiplier*1.15)
+                kr.Multiplier = math.Round(boosted*100) / 100
+                kr.Mode = kr.Mode + "_hi_conf"
+        case decision.Confidence < 75:
+                cut := math.Max(minMult, kr.Multiplier*0.85)
+                kr.Multiplier = math.Round(cut*100) / 100
+                kr.Mode = kr.Mode + "_lo_conf"
+        }
+        kr.SizeUSD = math.Round(base*kr.Multiplier*1e6) / 1e6
         posSize := kr.SizeUSD
 
         // Persist Kelly state so the dashboard stat card stays current.
@@ -1138,11 +1178,21 @@ func closePositionResult(pos *position.Position, pnl float64, reason string) {
         broadcast("history_add", record)
 
         // ── Advanced metrics ─────────────────────────────────────────────────
+        // Step 1: append return data and snapshot under returnsMu only.
+        // returnsMu must NEVER be nested inside botState.mu to prevent lock-order
+        // inversions and potential deadlocks.
         returnsMu.Lock()
         pnlReturns = append(pnlReturns, record.PnLPct)
         totalHeldSecs += record.HeldSecs
+        pnlSnap := make([]float64, len(pnlReturns))
+        copy(pnlSnap, pnlReturns)
+        heldSnap := totalHeldSecs
         returnsMu.Unlock()
 
+        // Step 2: compute Sharpe with no locks held (pure math, no shared writes).
+        sharpe := calcSharpe(pnlSnap)
+
+        // Step 3: update all botState metrics under a single botState.mu lock.
         botState.mu.Lock()
         if botState.Stats.TotalTrades == 1 || record.PnLPct > botState.Stats.BestTradePct {
                 botState.Stats.BestTradePct = record.PnLPct
@@ -1151,7 +1201,7 @@ func closePositionResult(pos *position.Position, pnl float64, reason string) {
                 botState.Stats.WorstTradePct = record.PnLPct
         }
         if botState.Stats.TotalTrades > 0 {
-                botState.Stats.AvgHoldSecs = totalHeldSecs / botState.Stats.TotalTrades
+                botState.Stats.AvgHoldSecs = heldSnap / botState.Stats.TotalTrades
         }
         equity := botState.Stats.TotalProfitUSD
         if equity > equityPeak {
@@ -1163,9 +1213,7 @@ func closePositionResult(pos *position.Position, pnl float64, reason string) {
                         botState.Stats.MaxDrawdownPct = dd
                 }
         }
-        returnsMu.Lock()
-        botState.Stats.SharpeRatio = calcSharpe(pnlReturns)
-        returnsMu.Unlock()
+        botState.Stats.SharpeRatio = sharpe
         botState.mu.Unlock()
 
         tgBot.NotifyTrade(pos.Symbol, "CLOSE("+reason+")", pnl, 0, pos.SimMode)
@@ -1237,6 +1285,17 @@ func handleHistoryExport(w http.ResponseWriter, r *http.Request) {
 func broadcastLoop() {
         ticker := time.NewTicker(2 * time.Second)
         for range ticker.C {
+                // Keep the Kelly stat card fresh between trades by computing the
+                // current Kelly size on every broadcast cycle (not only when a trade fires).
+                kr := computeKellySize()
+                botState.mu.Lock()
+                botState.Stats.KellyMultiplier = kr.Multiplier
+                if botState.Stats.KellyMode == "" {
+                        // Only set mode if executeTrade hasn't already written a conf-tagged value.
+                        botState.Stats.KellyMode = kr.Mode
+                }
+                botState.mu.Unlock()
+
                 botState.mu.RLock()
                 stats := botState.Stats
                 running := botState.Running

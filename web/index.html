@@ -829,13 +829,17 @@ function updateStats(s) {
   }
   // Kelly Criterion sizing card
   const km   = s.kellyMultiplier || 1.0;
-  const kmode = (s.kellyMode || 'warmup').toLowerCase().replace(/_/g, '-');
+  const rawMode = s.kellyMode || 'warmup';
+  // Strip confidence suffix (_hi_conf / _lo_conf) before mapping to a CSS class
+  // so we reuse existing colour rules (kelly-adaptive, kelly-warmup, etc.).
+  const baseMode  = rawMode.replace(/_(hi|lo)_conf$/, '').toLowerCase().replace(/_/g, '-');
+  const confSuffix = rawMode.endsWith('_hi_conf') ? ' ↑conf' : rawMode.endsWith('_lo_conf') ? ' ↓conf' : '';
   setText('kellyMult', km.toFixed(2) + '×');
   setClass('kellyMult', 'stat-value sm ' + (km >= 1.5 ? 'profit' : km <= 0.5 ? 'loss' : 'neutral'));
   const tag = document.getElementById('kellyModeTag');
   if (tag) {
-    tag.textContent = (s.kellyMode || 'warmup').replace(/_/g, ' ');
-    tag.className = 'kelly-mode-tag kelly-' + kmode;
+    tag.textContent = baseMode.replace(/-/g, ' ') + confSuffix;
+    tag.className = 'kelly-mode-tag kelly-' + baseMode;
   }
 }
 

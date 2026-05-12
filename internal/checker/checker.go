@@ -43,7 +43,8 @@ func RunAll(rpcEndpoints []string) *CheckReport {
 
         for _, fn := range checks {
                 r := fn()
-                if r.Status != "ok" && r.Status != "missing" {
+                // "warning" (e.g. zero WETH balance) is informational, not a failure.
+                if r.Status != "ok" && r.Status != "missing" && r.Status != "warning" {
                         report.AllOK = false
                 }
                 report.Results = append(report.Results, r)

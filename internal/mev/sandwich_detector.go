@@ -67,6 +67,10 @@ func (s *SandwichDetector) Assess(priceImpactPct, liquidityUSD, volumeSpike floa
 }
 
 func (s *SandwichDetector) RandomDelay() {
+        if s.delayMax <= s.delayMin {
+                time.Sleep(time.Duration(s.delayMin) * time.Millisecond)
+                return
+        }
         delay := s.delayMin + rand.Intn(s.delayMax-s.delayMin+1)
         time.Sleep(time.Duration(delay) * time.Millisecond)
 }
