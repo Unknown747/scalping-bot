@@ -420,9 +420,11 @@ export class SwapExecutor {
       const router = new ethers.Contract(BASE_CONTRACTS.UNISWAP_V3_ROUTER, routerAbi, writeWallet);
 
       // ── Pre-flight simulation (read RPC, no gas) ─────────────────────────
-      // Catches "could not coalesce error" / "missing revert data" before we
-      // send a real transaction. Uses the read provider so no MEV endpoint
-      // is consumed and no gas is spent.
+      // Only blocks the buy for SLIPPAGE errors ("Too little received" / STF).
+      // Non-slippage errors (e.g. approval not set yet) are ignored — the real
+      // tx will handle approval via ensureWethApproval.
+      // We pass `from: walletAddress` so the simulator uses the wallet's actual
+      // on-chain allowance state (avoids false failures on WETH path).
       const routerRead = new ethers.Contract(BASE_CONTRACTS.UNISWAP_V3_ROUTER, routerAbi, readProvider);
       try {
         await routerRead.exactInputSingle.staticCall(
@@ -435,8 +437,9 @@ export class SwapExecutor {
             amountOutMinimum,
             sqrtPriceLimitX96: 0,
           },
-          { value: useWeth ? 0n : amountInWei }
+          { value: useWeth ? 0n : amountInWei, from: this.walletAddress }
         );
+        logger.debug({ tokenAddress, fee }, "Pre-flight simulation passed");
       } catch (simErr: any) {
         const simMsg: string =
           simErr.shortMessage ||
@@ -445,16 +448,15 @@ export class SwapExecutor {
           simErr.message ||
           "swap simulation failed";
 
-        // If slippage caused the fail ("Too little received" / "STF"), retry once
-        // with a higher slippage (up to 2× configured, max 20%)
         const isSlippageRevert =
           simMsg.includes("Too little received") ||
           simMsg.includes("STF") ||
           simMsg.includes("slippage");
 
         if (isSlippageRevert) {
+          // Retry once with 2× slippage (up to 20%)
           const retrySlippagePct = Math.min(slippagePct * 2, 20);
-          const retryAmountOutMinimum =
+          amountOutMinimum =
             (expectedOut * BigInt(Math.floor((100 - retrySlippagePct) * 100))) / 10000n;
 
           logger.warn(
@@ -470,13 +472,11 @@ export class SwapExecutor {
                 fee,
                 recipient: this.walletAddress,
                 amountIn: amountInWei,
-                amountOutMinimum: retryAmountOutMinimum,
+                amountOutMinimum,
                 sqrtPriceLimitX96: 0,
               },
-              { value: useWeth ? 0n : amountInWei }
+              { value: useWeth ? 0n : amountInWei, from: this.walletAddress }
             );
-            // Retry succeeded — update amountOutMinimum for the real tx
-            (amountOutMinimum as any) = retryAmountOutMinimum;
             logger.info({ tokenAddress, retrySlippagePct }, "Slippage retry simulation passed — continuing buy");
           } catch (retryErr: any) {
             const retryMsg =
@@ -489,8 +489,9 @@ export class SwapExecutor {
             return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: `Simulation: ${retryMsg}` };
           }
         } else {
-          logger.warn({ tokenAddress, fee, simMsg }, "Swap simulation failed — skipping buy");
-          return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: `Simulation: ${simMsg}` };
+          // Non-slippage error (e.g. approval not set, or RPC issue) — proceed anyway.
+          // The real tx will handle WETH approval via ensureWethApproval below.
+          logger.warn({ tokenAddress, fee, simMsg }, "Simulation non-slippage error — proceeding with real tx anyway");
         }
       }
 
