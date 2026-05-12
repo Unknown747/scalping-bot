@@ -17,6 +17,7 @@ type Position struct {
         MaxHoldMins       int
         SimMode           bool
         TrailingActivated bool
+        AIConfidence      float64
 }
 
 type Tracker struct {

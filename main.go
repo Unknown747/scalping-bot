@@ -5,7 +5,8 @@ import (
         "encoding/json"
         "fmt"
         "log"
-        "math/rand"
+        "math"
+	"math/rand"
         "net/http"
         "os"
         "strings"
@@ -38,6 +39,11 @@ type BotStats struct {
         TotalProfitUSD  float64 `json:"totalProfitUSD"`
         DailyPnL        float64 `json:"dailyPnL"`
         ActivePositions int     `json:"activePositions"`
+        MaxDrawdownPct  float64 `json:"maxDrawdownPct"`
+        SharpeRatio     float64 `json:"sharpeRatio"`
+        BestTradePct    float64 `json:"bestTradePct"`
+        WorstTradePct   float64 `json:"worstTradePct"`
+        AvgHoldSecs     int     `json:"avgHoldSecs"`
 }
 
 type TradeRecord struct {
@@ -78,9 +84,13 @@ var (
         tgBot      *notify.TelegramBot
         sessions   *auth.Manager
         posTracker   *position.Tracker
-        tradeHistory []TradeRecord
-        historyMu    sync.Mutex
-        botState     = &BotState{}
+        tradeHistory  []TradeRecord
+        historyMu     sync.Mutex
+        pnlReturns    []float64
+        totalHeldSecs int
+        equityPeak    float64
+        returnsMu     sync.Mutex
+        botState      = &BotState{}
         clients    = make(map[*websocket.Conn]bool)
         clientsMu  sync.Mutex
 )
@@ -137,6 +147,7 @@ func main() {
         mux.Handle("/api/check", authMiddleware(http.HandlerFunc(handleCheck)))
         mux.Handle("/api/test/telegram", authMiddleware(http.HandlerFunc(handleTestTelegram)))
         mux.Handle("/api/history", authMiddleware(http.HandlerFunc(handleHistory)))
+        mux.Handle("/api/history/export", authMiddleware(http.HandlerFunc(handleHistoryExport)))
 
         log.Printf("🚀 MemeScalper AI Pro v%s starting on port %s", cfg.Bot.Version, port)
         log.Printf("📡 Network: %s | Chain ID: %d", cfg.Bot.Network, cfg.Bot.ChainID)
@@ -696,6 +707,7 @@ func executeTrade(token data.TokenData, decision *ai.TradingDecision, simMode bo
                 SLPrice:      slPrice,
                 MaxHoldMins:  maxHold,
                 SimMode:      simMode,
+                AIConfidence: decision.Confidence,
         }
 
         posTracker.Open(pos)
@@ -905,6 +917,37 @@ func closePositionResult(pos *position.Position, pnl float64, reason string) {
         historyMu.Unlock()
         broadcast("history_add", record)
 
+        // ── Advanced metrics ─────────────────────────────────────────────────
+        returnsMu.Lock()
+        pnlReturns = append(pnlReturns, record.PnLPct)
+        totalHeldSecs += record.HeldSecs
+        returnsMu.Unlock()
+
+        botState.mu.Lock()
+        if botState.Stats.TotalTrades == 1 || record.PnLPct > botState.Stats.BestTradePct {
+                botState.Stats.BestTradePct = record.PnLPct
+        }
+        if botState.Stats.TotalTrades == 1 || record.PnLPct < botState.Stats.WorstTradePct {
+                botState.Stats.WorstTradePct = record.PnLPct
+        }
+        if botState.Stats.TotalTrades > 0 {
+                botState.Stats.AvgHoldSecs = totalHeldSecs / botState.Stats.TotalTrades
+        }
+        equity := botState.Stats.TotalProfitUSD
+        if equity > equityPeak {
+                equityPeak = equity
+        }
+        if equityPeak > 0 {
+                dd := (equityPeak - equity) / equityPeak * 100.0
+                if dd > botState.Stats.MaxDrawdownPct {
+                        botState.Stats.MaxDrawdownPct = dd
+                }
+        }
+        returnsMu.Lock()
+        botState.Stats.SharpeRatio = calcSharpe(pnlReturns)
+        returnsMu.Unlock()
+        botState.mu.Unlock()
+
         tgBot.NotifyTrade(pos.Symbol, "CLOSE("+reason+")", pnl, 0, pos.SimMode)
 
         if cfg.Risk.CircuitBreaker.Enabled && !win && consecutiveLoss >= cfg.Risk.CircuitBreaker.ConsecutiveLossesThreshold {
@@ -918,6 +961,54 @@ func closePositionResult(pos *position.Position, pnl float64, reason string) {
                 })
                 tgBot.NotifyCircuitBreaker(consecutiveLoss, cfg.Risk.CircuitBreaker.PauseMinutes)
         }
+}
+
+// ── Sharpe ratio helper ───────────────────────────────────────────────────────
+
+func calcSharpe(returns []float64) float64 {
+	n := len(returns)
+	if n < 2 {
+		return 0
+	}
+	var sum float64
+	for _, r := range returns {
+		sum += r
+	}
+	mean := sum / float64(n)
+	var variance float64
+	for _, r := range returns {
+		d := r - mean
+		variance += d * d
+	}
+	std := math.Sqrt(variance / float64(n-1))
+	if std == 0 {
+		return 0
+	}
+	return (mean / std) * math.Sqrt(float64(n))
+}
+
+// ── CSV export ────────────────────────────────────────────────────────────────
+
+func handleHistoryExport(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", "attachment; filename=trades.csv")
+	historyMu.Lock()
+	h := make([]TradeRecord, len(tradeHistory))
+	copy(h, tradeHistory)
+	historyMu.Unlock()
+	fmt.Fprint(w, "Time,Symbol,EntryPrice,ExitPrice,SizeUSD,PnL_USD,PnL_Pct,Reason,HeldSecs,Mode\n")
+	for _, rec := range h {
+		mode := "LIVE"
+		if rec.SimMode {
+			mode = "SIM"
+		}
+		fmt.Fprintf(w, "%s,%s,%.8f,%.8f,%.4f,%.4f,%.2f,%s,%d,%s\n",
+			rec.ClosedAt, rec.Symbol,
+			rec.EntryPrice, rec.ExitPrice,
+			rec.SizeUSD, rec.PnL, rec.PnLPct,
+			rec.Reason, rec.HeldSecs, mode,
+		)
+	}
 }
 
 // ── Broadcast helpers ────────────────────────────────────────────────────────

@@ -33,11 +33,12 @@ body{font-family:'Segoe UI',monospace;background:#0a0a0f;color:#00ffcc;min-heigh
 .tab-pane.active{display:block;}
 @keyframes fadeIn{from{opacity:.4}to{opacity:1}}
 /* ── Stats grid ── */
-.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:20px;}
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:20px;}
 .stat-card{background:#13131f;border-radius:10px;padding:14px;border:1px solid #1e1e35;transition:all .2s;}
 .stat-card:hover{border-color:#00ffcc33;box-shadow:0 0 12px #00ffcc0f;}
 .stat-label{font-size:10px;color:#555;letter-spacing:1px;text-transform:uppercase;}
 .stat-value{font-size:24px;font-weight:bold;margin-top:6px;}
+.stat-value.sm{font-size:18px;}
 .profit{color:#00ff88;} .loss{color:#ff3366;} .neutral{color:#00ffcc;} .dim{color:#888;}
 /* ── Panel ── */
 .panel{background:#13131f;border-radius:10px;padding:18px;margin-bottom:16px;border:1px solid #1e1e35;}
@@ -68,6 +69,8 @@ input:focus,select:focus{outline:none;border-color:#00ffcc55;}
 .btn-gray:hover{color:#00ffcc;}
 .btn-blue{background:linear-gradient(135deg,#4285f4,#1a5cc8);color:#fff;}
 .btn-blue:hover{box-shadow:0 3px 14px #4285f444;}
+.btn-csv{background:linear-gradient(135deg,#00cc66,#008844);color:#fff;}
+.btn-csv:hover{box-shadow:0 3px 14px #00cc6644;}
 /* ── AI Panel ── */
 .ai-signals{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:12px;}
 .ai-card{background:#0a0a0f;border-radius:9px;padding:14px;text-align:center;border:1px solid #1a1a2e;}
@@ -88,6 +91,7 @@ tbody tr{border-bottom:1px solid #0f0f1a;transition:background .12s;}
 tbody tr:hover{background:#1a1a2e55;}
 tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
 .trail-badge{display:inline-block;background:#00ffcc22;color:#00ffcc;border-radius:4px;padding:1px 6px;font-size:10px;}
+.conf-bar{display:inline-block;height:6px;border-radius:3px;background:#00ffcc55;vertical-align:middle;margin-right:4px;}
 .reason-tp{color:#00ff88;font-weight:bold;}
 .reason-sl{color:#ff3366;font-weight:bold;}
 .reason-timeout{color:#ffaa00;font-weight:bold;}
@@ -95,6 +99,8 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
 .empty-state{text-align:center;padding:40px 20px;color:#333;font-size:13px;}
 .empty-state .icon{font-size:32px;margin-bottom:8px;}
 .sim-tag{display:inline-block;background:#ffaa0022;color:#ffaa00;border-radius:3px;padding:1px 5px;font-size:9px;margin-left:4px;}
+/* ── Sparkline ── */
+#pnlSparkline{width:100%;height:56px;margin-top:4px;}
 /* ── RPC ── */
 .rpc-grid{display:flex;flex-wrap:wrap;gap:8px;}
 .rpc-item{display:flex;align-items:center;gap:5px;font-size:11px;color:#666;}
@@ -113,6 +119,9 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
 .check-msg{font-size:10px;color:#666;margin-top:2px;}
 .check-lat{font-size:10px;color:#444;margin-top:2px;}
 .check-placeholder{color:#333;font-size:12px;text-align:center;padding:20px;}
+/* ── Notification ── */
+#notifBtn{padding:6px 12px;border-radius:6px;border:1px solid #333;background:#13131f;color:#555;font-size:11px;cursor:pointer;}
+#notifBtn.on{color:#00ffcc;border-color:#00ffcc44;}
 /* ── Responsive ── */
 @media(max-width:640px){
   .ai-signals{grid-template-columns:1fr;}
@@ -134,6 +143,7 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
     <span class="badge badge-bot stopped" id="botBadge">STOPPED</span>
     <span class="badge badge-sim" id="simBadge">SIM MODE</span>
     <span class="badge badge-tg" id="tgBadge">📱 TG</span>
+    <button id="notifBtn" title="Enable browser notifications">🔔 Notif Off</button>
     <a href="/logout" class="badge badge-logout">🔒 Logout</a>
   </div>
 </div>
@@ -149,7 +159,7 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
 <!-- ── TAB: Dashboard ── -->
 <div id="tab-dashboard" class="tab-pane active">
 
-  <!-- Stats -->
+  <!-- Stats row 1: core -->
   <div class="stats-grid">
     <div class="stat-card">
       <div class="stat-label">Total Trades</div>
@@ -178,6 +188,34 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
         <span class="dim" style="font-size:16px;"> / </span>
         <span class="loss" id="losses">0</span>
       </div>
+    </div>
+    <!-- Row 2: advanced -->
+    <div class="stat-card">
+      <div class="stat-label">Sharpe Ratio</div>
+      <div class="stat-value sm neutral" id="sharpeRatio">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Max Drawdown</div>
+      <div class="stat-value sm neutral" id="maxDrawdown">0.00%</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Best Trade</div>
+      <div class="stat-value sm neutral" id="bestTrade">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Worst Trade</div>
+      <div class="stat-value sm neutral" id="worstTrade">—</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Avg Hold Time</div>
+      <div class="stat-value sm neutral" id="avgHold">—</div>
+    </div>
+    <!-- PnL Sparkline card -->
+    <div class="stat-card" style="grid-column:span 2;">
+      <div class="stat-label">PnL Curve (last 20 trades)</div>
+      <svg id="pnlSparkline" viewBox="0 0 300 56" preserveAspectRatio="none">
+        <text x="150" y="36" text-anchor="middle" fill="#333" font-size="11">No trades yet</text>
+      </svg>
     </div>
   </div>
 
@@ -292,11 +330,12 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
             <th>SL $</th>
             <th>Held</th>
             <th>Trail</th>
+            <th>Conf</th>
             <th>Mode</th>
           </tr>
         </thead>
         <tbody id="posBody">
-          <tr><td colspan="10"><div class="empty-state"><div class="icon">📭</div>No open positions. Start the bot to begin trading.</div></td></tr>
+          <tr><td colspan="11"><div class="empty-state"><div class="icon">📭</div>No open positions. Start the bot to begin trading.</div></td></tr>
         </tbody>
       </table>
     </div>
@@ -308,7 +347,10 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
   <div class="panel">
     <div class="panel-hdr">
       <div class="panel-title" style="margin:0;">📋 Trade History</div>
-      <button class="btn btn-gray btn-sm" id="clearHistBtn">Clear</button>
+      <div style="display:flex;gap:8px;">
+        <a href="/api/history/export" class="btn btn-csv btn-sm" id="exportBtn" style="text-decoration:none;">📥 Export CSV</a>
+        <button class="btn btn-gray btn-sm" id="clearHistBtn">Clear</button>
+      </div>
     </div>
     <div class="tbl-wrap">
       <table id="histTable">
@@ -374,6 +416,58 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
 let ws, reconnectTimer;
 let historyData = [];
 let histCount = 0;
+let pnlHistory = [];
+let notifEnabled = false;
+
+// ── Notification permission ─────────────────────────────────────────────────
+function requestNotif() {
+  if (!('Notification' in window)) return;
+  Notification.requestPermission().then(p => {
+    notifEnabled = (p === 'granted');
+    const btn = document.getElementById('notifBtn');
+    btn.textContent = notifEnabled ? '🔔 Notif On' : '🔔 Notif Off';
+    btn.className = notifEnabled ? 'on' : '';
+  });
+}
+document.getElementById('notifBtn').onclick = requestNotif;
+// Auto-check existing permission
+if (Notification && Notification.permission === 'granted') {
+  notifEnabled = true;
+  const btn = document.getElementById('notifBtn');
+  btn.textContent = '🔔 Notif On';
+  btn.className = 'on';
+}
+
+function pushNotif(title, body, type) {
+  if (!notifEnabled || document.visibilityState === 'visible') return;
+  const icons = { TP: '✅', SL: '❌', TIMEOUT: '⏱', BOT_STOPPED: '🛑' };
+  try {
+    new Notification('⚡ ' + title, { body, icon: '/favicon.ico' });
+  } catch(_) {}
+}
+
+// ── PnL Sparkline ───────────────────────────────────────────────────────────
+function drawSparkline(points) {
+  const svg = document.getElementById('pnlSparkline');
+  if (!points || points.length < 2) {
+    svg.innerHTML = '<text x="150" y="36" text-anchor="middle" fill="#333" font-size="11">No trades yet</text>';
+    return;
+  }
+  const last = points.slice(-20);
+  const W = 300, H = 56, pad = 4;
+  const min = Math.min(...last), max = Math.max(...last);
+  const range = max - min || 1;
+  const xs = last.map((_, i) => pad + (i / (last.length - 1)) * (W - pad * 2));
+  const ys = last.map(v => H - pad - ((v - min) / range) * (H - pad * 2));
+  const pts = xs.map((x, i) => x + ',' + ys[i]).join(' ');
+  const zero = H - pad - ((0 - min) / range) * (H - pad * 2);
+  const color = last[last.length - 1] >= 0 ? '#00ff88' : '#ff3366';
+  svg.innerHTML = `
+    <line x1="${pad}" y1="${zero.toFixed(1)}" x2="${W - pad}" y2="${zero.toFixed(1)}" stroke="#222" stroke-width="1"/>
+    <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>
+    ${last.map((v, i) => `<circle cx="${xs[i].toFixed(1)}" cy="${ys[i].toFixed(1)}" r="2" fill="${v >= 0 ? '#00ff88' : '#ff3366'}"/>`).join('')}
+  `;
+}
 
 // ── Tab switching ──────────────────────────────────────────────────────────
 function switchTab(name) {
@@ -428,7 +522,18 @@ function handleMsg(msg) {
       renderPositions(d);
       break;
     case 'history_add':
-      if (d) prependHistoryRow(d);
+      if (d) {
+        prependHistoryRow(d);
+        pnlHistory.push(d.pnlPct || 0);
+        drawSparkline(pnlHistory);
+        const icon = d.reason === 'TP' ? '✅' : d.reason === 'SL' ? '❌' : '⏱';
+        const sign = d.pnl >= 0 ? '+' : '';
+        pushNotif(
+          `${icon} ${d.symbol} — ${d.reason}`,
+          `PnL: ${sign}$${Math.abs(d.pnl||0).toFixed(4)} (${sign}${(d.pnlPct||0).toFixed(2)}%)`,
+          d.reason
+        );
+      }
       break;
     case 'check_result':
       renderCheckResults(d);
@@ -455,6 +560,20 @@ function updateStats(s) {
   setClass('dailyPnl',    'stat-value ' + pnlClass(daily));
   setClass('winRate',     'stat-value ' + (wr >= 55 ? 'profit' : wr >= 35 ? 'neutral' : 'loss'));
   setText('posCount',  s.activePositions || 0);
+  // Advanced stats
+  const sharpe = s.sharpeRatio || 0;
+  setText('sharpeRatio', sharpe === 0 ? '—' : sharpe.toFixed(2));
+  setClass('sharpeRatio', 'stat-value sm ' + (sharpe > 1 ? 'profit' : sharpe > 0 ? 'neutral' : sharpe < 0 ? 'loss' : 'dim'));
+  const dd = s.maxDrawdownPct || 0;
+  setText('maxDrawdown', dd.toFixed(2) + '%');
+  setClass('maxDrawdown', 'stat-value sm ' + (dd > 10 ? 'loss' : dd > 5 ? 'neutral' : 'profit'));
+  if (s.totalTrades > 0) {
+    setText('bestTrade',  '+' + (s.bestTradePct  || 0).toFixed(2) + '%');
+    setText('worstTrade', (s.worstTradePct || 0).toFixed(2) + '%');
+    setClass('bestTrade',  'stat-value sm profit');
+    setClass('worstTrade', 'stat-value sm loss');
+    setText('avgHold', formatHeld(s.avgHoldSecs || 0));
+  }
 }
 
 function updateBotBadge(running, simMode) {
@@ -501,7 +620,7 @@ function renderPositions(positions) {
   const body  = document.getElementById('posBody');
   const count = document.getElementById('posCount');
   if (!positions || positions.length === 0) {
-    body.innerHTML = '<tr><td colspan="10"><div class="empty-state"><div class="icon">📭</div>No open positions.</div></td></tr>';
+    body.innerHTML = '<tr><td colspan="11"><div class="empty-state"><div class="icon">📭</div>No open positions.</div></td></tr>';
     count.textContent = '0';
     count.className = 'tab-count';
     return;
@@ -515,6 +634,8 @@ function renderPositions(positions) {
     const cls    = pnlPct >= 0 ? 'profit' : 'loss';
     const trail  = p.trailingActivated ? '<span class="trail-badge">🎯 Trail</span>' : '—';
     const mode   = p.simMode ? '<span class="sim-tag">SIM</span>' : '<span style="color:#444;font-size:9px;">LIVE</span>';
+    const conf   = (p.aiConfidence || 0);
+    const confBar = `<span class="conf-bar" style="width:${conf.toFixed(0)}px;max-width:60px;"></span>${conf.toFixed(0)}%`;
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td style="font-weight:bold;color:#fff;">${esc(p.symbol)}</td>
@@ -526,6 +647,7 @@ function renderPositions(positions) {
       <td style="color:#ff336688;">$${fmt(p.slPrice)}</td>
       <td style="color:#888;">${formatHeld(p.heldSecs||0)}</td>
       <td>${trail}</td>
+      <td style="color:#00ffcc88;font-size:11px;">${confBar}</td>
       <td>${mode}</td>`;
     body.appendChild(tr);
   });
@@ -536,14 +658,18 @@ function loadHistory(records) {
   if (!records || records.length === 0) return;
   const body = document.getElementById('histBody');
   body.innerHTML = '';
-  records.forEach(r => body.appendChild(buildHistoryRow(r)));
+  records.forEach(r => {
+    body.appendChild(buildHistoryRow(r));
+    pnlHistory.push(r.pnlPct || 0);
+  });
+  pnlHistory.reverse();
+  drawSparkline(pnlHistory);
   histCount = records.length;
   setText('histCount', histCount);
 }
 
 function prependHistoryRow(record) {
   const body = document.getElementById('histBody');
-  // Remove empty state if present
   if (body.querySelector('.empty-state')) body.innerHTML = '';
   body.insertBefore(buildHistoryRow(record), body.firstChild);
   histCount++;
@@ -674,15 +800,19 @@ document.getElementById('withdrawBtn').onclick  = () => send('withdraw');
 document.getElementById('resetStatsBtn').onclick = () => {
   send('reset_stats');
   historyData = [];
-  histCount = 0;
+  pnlHistory  = [];
+  histCount   = 0;
   setText('histCount', '0');
+  drawSparkline([]);
   document.getElementById('histBody').innerHTML =
     '<tr><td colspan="9"><div class="empty-state"><div class="icon">🕐</div>No trades closed yet.</div></td></tr>';
 };
 document.getElementById('clearHistBtn').onclick = () => {
   historyData = [];
-  histCount = 0;
+  pnlHistory  = [];
+  histCount   = 0;
   setText('histCount', '0');
+  drawSparkline([]);
   document.getElementById('histBody').innerHTML =
     '<tr><td colspan="9"><div class="empty-state"><div class="icon">🕐</div>History cleared.</div></td></tr>';
 };
