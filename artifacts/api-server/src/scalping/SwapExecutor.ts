@@ -374,19 +374,60 @@ export class SwapExecutor {
 
       const amountInWei = ethers.parseEther(amountEth.toFixed(18));
 
-      // All reads via BASE_RPC_URL
-      const [feeTierResult, wethBalance] = await Promise.all([
+      // ── Phase 1: Query ALL 4 DEXes in parallel ──────────────────────────
+      const aeroAbi = [
+        "function getAmountsOut(uint256 amountIn, (address from, address to, bool stable, address factory)[] routes) view returns (uint256[] amounts)",
+        "function swapExactETHForTokens(uint256 amountOutMin, (address from, address to, bool stable, address factory)[] routes, address to, uint256 deadline) payable returns (uint256[] amounts)",
+      ];
+      const v2Abi = [
+        "function getAmountsOut(uint256 amountIn, address[] path) view returns (uint256[] amounts)",
+        "function swapExactETHForTokens(uint256 amountOutMin, address[] path, address to, uint256 deadline) payable returns (uint256[] amounts)",
+      ];
+      const aeroRoutes = [{ from: BASE_CONTRACTS.WETH, to: tokenAddress, stable: false, factory: BASE_CONTRACTS.AERODROME_V2_FACTORY }];
+      const v2Path = [BASE_CONTRACTS.WETH, tokenAddress];
+
+      const safeV2Quote = async (fn: () => Promise<bigint>, name: string): Promise<{ name: string; quote: bigint }> => {
+        try { const q = await fn(); return { name, quote: q > 0n ? q : 0n }; }
+        catch { return { name, quote: 0n }; }
+      };
+
+      const aeroContract = new ethers.Contract(BASE_CONTRACTS.AERODROME_V2_ROUTER, aeroAbi, readProvider);
+      const bsContract   = new ethers.Contract(BASE_CONTRACTS.BASESWAP_ROUTER, v2Abi, readProvider);
+      const psContract   = new ethers.Contract(BASE_CONTRACTS.PANCAKESWAP_V2_ROUTER, v2Abi, readProvider);
+
+      const [feeTierResult, wethBalance, aeroQuote, bsQuote, psQuote] = await Promise.all([
         this.getBestFeeTier(ethers, readProvider, tokenAddress, amountInWei),
         this.getWethBalance(ethers, readProvider),
+        safeV2Quote(async () => { const a = await aeroContract.getAmountsOut(amountInWei, aeroRoutes); return a[1] ?? 0n; }, "Aerodrome V2"),
+        safeV2Quote(async () => { const a = await bsContract.getAmountsOut(amountInWei, v2Path); return a[1] ?? 0n; }, "BaseSwap V2"),
+        safeV2Quote(async () => { const a = await psContract.getAmountsOut(amountInWei, v2Path); return a[1] ?? 0n; }, "PancakeSwap V2"),
       ]);
 
-      const { fee, expectedOut } = feeTierResult;
+      const { fee, expectedOut: v3Quote } = feeTierResult;
 
-      // ── Pre-flight: no Uniswap V3 pool — query ALL V2 DEXes in parallel, pick best ──
-      if (expectedOut === 0n) {
-        logger.info({ tokenAddress, dexId: dexId ?? "unknown" }, "No Uniswap V3 pool — querying all V2 DEXes in parallel");
-        return this.buyTokenBestV2(ethers, tokenAddress, amountEth, slippagePct);
+      // ── Compare all 4 DEX quotes ─────────────────────────────────────────
+      const allQuotes = [
+        { name: "Uniswap V3", quote: v3Quote },
+        aeroQuote, bsQuote, psQuote,
+      ].filter(q => q.quote > 0n);
+
+      if (allQuotes.length === 0) {
+        return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: "No liquidity on any DEX (Uniswap V3, Aerodrome V2, BaseSwap V2, PancakeSwap V2)" };
       }
+
+      const bestDEX = allQuotes.reduce((a, b) => b.quote > a.quote ? b : a);
+      logger.info(
+        { tokenAddress, quotes: allQuotes.map(q => `${q.name}:${q.quote.toString()}`).join(" | "), winner: bestDEX.name },
+        `[Multi-DEX] Best quote → ${bestDEX.name}`
+      );
+
+      // ── If a V2 DEX has the best quote, route there (skip V3 execution) ──
+      if (bestDEX.name !== "Uniswap V3") {
+        return this.buyTokenBestV2(ethers, tokenAddress, amountEth, slippagePct, bestDEX);
+      }
+
+      // ── V3 wins — continue below with existing V3 execution path ─────────
+      const expectedOut = v3Quote;
 
       let amountOutMinimum =
         (expectedOut * BigInt(Math.floor((100 - slippagePct) * 100))) / 10000n;
@@ -779,18 +820,18 @@ export class SwapExecutor {
   // ─── MULTI-DEX V2 BUY: AERODROME + BASESWAP + PANCAKESWAP (PARALEL) ────────
 
   /**
-   * Query all V2 DEXes in parallel, pick the best quote, then execute on winner.
-   * DEXes: Aerodrome V2, BaseSwap V2, PancakeSwap V2.
-   * Called when token has no Uniswap V3 pool.
+   * Execute buy on the best V2 DEX.
+   * If preComputedBest is provided (from buyToken's parallel query), skips re-querying.
+   * Otherwise queries all V2 DEXes in parallel and picks best.
    */
   private async buyTokenBestV2(
     ethers: any,
     tokenAddress: string,
     amountEth: number,
-    slippagePct: number
+    slippagePct: number,
+    preComputedBest?: { name: string; quote: bigint }
   ): Promise<SwapResult> {
     const amountInWei = ethers.parseEther(amountEth.toFixed(18));
-    const { provider: readProvider } = await getReadProvider();
 
     // ── ABIs ──────────────────────────────────────────────────────────────
     const aeroAbi = [
@@ -810,38 +851,46 @@ export class SwapExecutor {
     }];
     const v2Path = [BASE_CONTRACTS.WETH, tokenAddress];
 
-    // ── Quote all DEXes in parallel ───────────────────────────────────────
-    const aeroContract = new ethers.Contract(BASE_CONTRACTS.AERODROME_V2_ROUTER, aeroAbi, readProvider);
-    const bsContract   = new ethers.Contract(BASE_CONTRACTS.BASESWAP_ROUTER, v2Abi, readProvider);
-    const psContract   = new ethers.Contract(BASE_CONTRACTS.PANCAKESWAP_V2_ROUTER, v2Abi, readProvider);
+    let best: { name: string; quote: bigint };
 
-    const safeQuote = async (fn: () => Promise<bigint>, name: string): Promise<{ name: string; quote: bigint }> => {
-      try {
-        const q = await fn();
-        logger.info({ tokenAddress, dex: name, quote: q.toString() }, `[Multi-DEX] Quote from ${name}`);
-        return { name, quote: q };
-      } catch {
-        logger.warn({ tokenAddress, dex: name }, `[Multi-DEX] No pool / quote failed on ${name}`);
-        return { name, quote: 0n };
-      }
-    };
+    if (preComputedBest) {
+      // Quote already determined in buyToken() — use directly, no re-query needed
+      best = preComputedBest;
+      logger.info({ tokenAddress, winner: best.name, quote: best.quote.toString() }, "[Multi-DEX] Using pre-computed best V2 quote");
+    } else {
+      // Standalone call (e.g. from TWAP) — query all V2 DEXes in parallel
+      const { provider: readProvider } = await getReadProvider();
+      const aeroContract = new ethers.Contract(BASE_CONTRACTS.AERODROME_V2_ROUTER, aeroAbi, readProvider);
+      const bsContract   = new ethers.Contract(BASE_CONTRACTS.BASESWAP_ROUTER, v2Abi, readProvider);
+      const psContract   = new ethers.Contract(BASE_CONTRACTS.PANCAKESWAP_V2_ROUTER, v2Abi, readProvider);
 
-    const [aeroResult, bsResult, psResult] = await Promise.all([
-      safeQuote(async () => { const a = await aeroContract.getAmountsOut(amountInWei, aeroRoutes); return a[1] ?? 0n; }, "Aerodrome V2"),
-      safeQuote(async () => { const a = await bsContract.getAmountsOut(amountInWei, v2Path); return a[1] ?? 0n; }, "BaseSwap V2"),
-      safeQuote(async () => { const a = await psContract.getAmountsOut(amountInWei, v2Path); return a[1] ?? 0n; }, "PancakeSwap V2"),
-    ]);
-
-    // ── Pick best DEX ─────────────────────────────────────────────────────
-    const candidates = [aeroResult, bsResult, psResult].filter(r => r.quote > 0n);
-    if (candidates.length === 0) {
-      return {
-        success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n,
-        error: "No liquidity on any DEX (Uniswap V3, Aerodrome V2, BaseSwap V2, PancakeSwap V2)",
+      const safeQuote = async (fn: () => Promise<bigint>, name: string): Promise<{ name: string; quote: bigint }> => {
+        try {
+          const q = await fn();
+          logger.info({ tokenAddress, dex: name, quote: q.toString() }, `[Multi-DEX] Quote from ${name}`);
+          return { name, quote: q > 0n ? q : 0n };
+        } catch {
+          logger.warn({ tokenAddress, dex: name }, `[Multi-DEX] No pool / quote failed on ${name}`);
+          return { name, quote: 0n };
+        }
       };
-    }
 
-    const best = candidates.reduce((a, b) => (b.quote > a.quote ? b : a));
+      const [aeroResult, bsResult, psResult] = await Promise.all([
+        safeQuote(async () => { const a = await aeroContract.getAmountsOut(amountInWei, aeroRoutes); return a[1] ?? 0n; }, "Aerodrome V2"),
+        safeQuote(async () => { const a = await bsContract.getAmountsOut(amountInWei, v2Path); return a[1] ?? 0n; }, "BaseSwap V2"),
+        safeQuote(async () => { const a = await psContract.getAmountsOut(amountInWei, v2Path); return a[1] ?? 0n; }, "PancakeSwap V2"),
+      ]);
+
+      const candidates = [aeroResult, bsResult, psResult].filter(r => r.quote > 0n);
+      if (candidates.length === 0) {
+        return {
+          success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n,
+          error: "No liquidity on any DEX (Uniswap V3, Aerodrome V2, BaseSwap V2, PancakeSwap V2)",
+        };
+      }
+      best = candidates.reduce((a, b) => (b.quote > a.quote ? b : a));
+      logger.info({ tokenAddress, winner: best.name, quote: best.quote.toString() }, "[Multi-DEX] Best V2 quote selected");
+    }
     logger.info({ tokenAddress, winner: best.name, quote: best.quote.toString() }, "[Multi-DEX] Best V2 quote selected");
 
     const amountOutMin = (best.quote * BigInt(Math.floor((100 - slippagePct) * 100))) / 10000n;
