@@ -60,7 +60,7 @@ export class TelegramNotifier {
     txHash?: string | null;
   }): Promise<void> {
     const isProfit = params.profitPercent > 0;
-    const emoji = isProfit ? "🔴" : "💔";
+    const emoji = isProfit ? "🟢" : "🔴";
     const sign = isProfit ? "+" : "";
     const reasonMap: Record<string, string> = {
       tp1: "TP1",

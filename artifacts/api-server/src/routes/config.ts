@@ -18,6 +18,11 @@ const NUMERIC_FIELDS = new Set([
   "cooldownAfterCloseSeconds", "maxBuysPerFiveMinutes",
   "peakProfitDropPercent", "maxDeployerTokens24h",
   "compoundThresholdEth", "maxPositionSizeMultiplier",
+  "aiFilterMinConfidence",
+  "newListingMaxAgeMinutes", "newListingMaxHoldMinutes", "newListingMinBuySellRatio",
+  "volumeSpikeMinMultiplier",
+  "trailingStopMinProfitToActivate", "trailingStopLockMinProfitPercent",
+  "tokenBlacklistMinutes",
 ]);
 
 router.get("/config", (req, res) => {
