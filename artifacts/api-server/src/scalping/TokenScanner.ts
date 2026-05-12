@@ -21,12 +21,20 @@ export interface TokenData {
   pairAddress: string;
   txns5m: { buys: number; sells: number };
   source?: "dexscreener" | "geckoterminal";
+  volumeSpikeDetected?: boolean;
+  volumeSpikeMultiplier?: number;
 }
 
 const DEXSCREENER_URL = "https://api.dexscreener.com";
 
 const tokenCache = new Map<string, { data: TokenData[]; timestamp: number }>();
 const CACHE_TTL_MS = 10000; // 10 seconds
+
+// ── Volume Spike Tracker ──────────────────────────────────────────────────────
+// Stores the last seen volume5mUsd per token address across scan cycles.
+// Entries expire after 10 minutes to avoid stale comparisons.
+const volumeHistory = new Map<string, { volume: number; updatedAt: number }>();
+const VOLUME_HISTORY_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 // Known active memecoins/tokens on Base — used as seed for finding active pairs
 const BASE_SEED_ADDRESSES = [
@@ -96,11 +104,27 @@ export class TokenScanner {
     if (seedTokens.status === "fulfilled") addUnique(seedTokens.value);
     if (geckoTokens.status === "fulfilled") addUnique(geckoTokens.value);
 
-    // Sort by momentum (highest 5m price change first)
-    results.sort((a, b) => b.priceChange5m - a.priceChange5m);
+    // Detect volume spikes and mark tokens before sorting
+    if (this.config.enableVolumeSpikeDetector) {
+      this.detectVolumeSpikes(results);
+    }
 
+    // Sort: spike tokens first (highest multiplier first), then by momentum
+    results.sort((a, b) => {
+      const aSpike = a.volumeSpikeDetected ? (a.volumeSpikeMultiplier ?? 1) : 0;
+      const bSpike = b.volumeSpikeDetected ? (b.volumeSpikeMultiplier ?? 1) : 0;
+      if (aSpike !== bSpike) return bSpike - aSpike;
+      return b.priceChange5m - a.priceChange5m;
+    });
+
+    const spikeCount = results.filter((t) => t.volumeSpikeDetected).length;
     logger.info(
-      { total: results.length, dexscreener: results.filter(t => t.source !== "geckoterminal").length, geckoterminal: results.filter(t => t.source === "geckoterminal").length },
+      {
+        total: results.length,
+        dexscreener: results.filter(t => t.source !== "geckoterminal").length,
+        geckoterminal: results.filter(t => t.source === "geckoterminal").length,
+        volumeSpikes: spikeCount,
+      },
       "Combined token scan complete"
     );
 
@@ -311,6 +335,48 @@ export class TokenScanner {
       },
       source: "dexscreener",
     };
+  }
+
+  /**
+   * Compares each token's current volume5mUsd against its last recorded value.
+   * Tokens that jump >= volumeSpikeMinMultiplier are flagged with volumeSpikeDetected=true
+   * and sorted to the front of the queue so the bot evaluates them first.
+   * History entries older than 10 minutes are purged to avoid stale comparisons.
+   */
+  private detectVolumeSpikes(tokens: TokenData[]): void {
+    const now = Date.now();
+
+    // Purge stale history entries
+    for (const [addr, entry] of volumeHistory) {
+      if (now - entry.updatedAt > VOLUME_HISTORY_TTL_MS) {
+        volumeHistory.delete(addr);
+      }
+    }
+
+    for (const token of tokens) {
+      const key = token.address.toLowerCase();
+      const prev = volumeHistory.get(key);
+
+      if (prev && prev.volume > 0 && token.volume5mUsd > 0) {
+        const multiplier = token.volume5mUsd / prev.volume;
+        if (multiplier >= this.config.volumeSpikeMinMultiplier) {
+          token.volumeSpikeDetected = true;
+          token.volumeSpikeMultiplier = multiplier;
+          logger.info(
+            {
+              symbol: token.symbol,
+              prevVolume: prev.volume.toFixed(0),
+              currentVolume: token.volume5mUsd.toFixed(0),
+              multiplier: multiplier.toFixed(1),
+            },
+            `Volume spike detected: ${token.symbol} volume jumped ${multiplier.toFixed(1)}x`
+          );
+        }
+      }
+
+      // Always update history with latest volume
+      volumeHistory.set(key, { volume: token.volume5mUsd, updatedAt: now });
+    }
   }
 
   filterTokens(tokens: TokenData[]): TokenData[] {

@@ -635,9 +635,12 @@ export class ScalpingBot {
       return;
     }
 
+    const spikeLabel = token.volumeSpikeDetected
+      ? ` [VOLUME SPIKE ${token.volumeSpikeMultiplier?.toFixed(1)}x]`
+      : "";
     this.log(
       "info",
-      `Evaluating ${token.symbol} — MemeScore: ${memeScore.score}/100 | 5m: ${token.priceChange5m.toFixed(1)}% | liq: $${token.liquidityUsd.toFixed(0)}`,
+      `Evaluating ${token.symbol}${spikeLabel} — MemeScore: ${memeScore.score}/100 | 5m: ${token.priceChange5m.toFixed(1)}% | liq: $${token.liquidityUsd.toFixed(0)}`,
       token.symbol
     );
 

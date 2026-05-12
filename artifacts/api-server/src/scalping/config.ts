@@ -93,6 +93,10 @@ export interface ScalpingConfigData {
   newListingMaxAgeMinutes: number;   // tokens < this = new listing treatment
   newListingMinBuySellRatio: number; // must have strong buy pressure
   newListingMaxHoldMinutes: number;  // shorter hold for new listings
+
+  // Volume Spike Detector
+  enableVolumeSpikeDetector: boolean;
+  volumeSpikeMinMultiplier: number;  // minimum multiplier to flag as spike (e.g. 3 = 3x volume jump)
 }
 
 /**
@@ -223,6 +227,10 @@ export const DEFAULT_CONFIG: ScalpingConfigData = {
   newListingMaxAgeMinutes: 10,    // tokens < 10 min = full new listing treatment
   newListingMinBuySellRatio: 2.0, // require 2x more buyers than sellers (strong conviction)
   newListingMaxHoldMinutes: 5,    // max 5 min for brand-new listings (extreme caution)
+
+  // ── Volume Spike Detector ─────────────────────────────────────────────────────
+  enableVolumeSpikeDetector: true,  // ON — detect sudden 3x+ volume jumps and prioritize entry
+  volumeSpikeMinMultiplier: 3,      // 3x volume vs previous scan = spike signal
 };
 
 // ─── Risk Presets — all calibrated for micro $1 trade sizes ──────────────────
