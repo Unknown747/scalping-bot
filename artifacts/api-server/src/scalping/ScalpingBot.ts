@@ -235,6 +235,25 @@ export class ScalpingBot {
     if (this.running) return;
     this.running = true;
     this.startedAt = new Date();
+
+    // ── Startup validation: warn loudly if live-mode secrets are missing ──
+    if (this.config.mode === "live") {
+      const missingKeys: string[] = [];
+      if (!process.env["PRIVATE_KEY"])    missingKeys.push("PRIVATE_KEY");
+      if (!process.env["WALLET_ADDRESS"]) missingKeys.push("WALLET_ADDRESS");
+      if (missingKeys.length > 0) {
+        const msg = `⛔ LIVE MODE: environment variable(s) not set → ${missingKeys.join(", ")}. Semua swap akan GAGAL sampai variabel ini diset di file .env lalu restart bot.`;
+        logger.error({ missingKeys }, msg);
+        this.log("warn", msg, null);
+        this.emit("config-warning", { missingKeys, message: msg });
+      } else {
+        const addr = process.env["WALLET_ADDRESS"]!;
+        const maskedAddr = addr.slice(0, 6) + "…" + addr.slice(-4);
+        logger.info({ wallet: maskedAddr }, "Live mode: wallet configured ✓");
+        this.log("info", `Live mode aktif — wallet: ${maskedAddr}`, null);
+      }
+    }
+
     this.log("info", "Scalping bot started", null);
     this.emit("bot-status", this.getStatus());
 

@@ -380,7 +380,9 @@ export class SwapExecutor {
   ): Promise<SwapResult> {
     if (this.isPaperMode) return this.simulateBuy(tokenAddress, amountEth);
     if (!this.privateKey || !this.walletAddress) {
-      return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: "No private key configured" };
+      const missing = [!this.privateKey && "PRIVATE_KEY", !this.walletAddress && "WALLET_ADDRESS"].filter(Boolean).join(", ");
+      logger.error({ missing }, `⛔ Swap GAGAL: env var tidak diset → ${missing}. Tambahkan ke artifacts/api-server/.env lalu restart bot.`);
+      return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: `Env var tidak diset: ${missing}. Tambahkan ke file .env di VPS lalu restart.` };
     }
 
     try {
@@ -748,7 +750,9 @@ export class SwapExecutor {
   async sellToken(tokenAddress: string, amountTokens: bigint, amountEth: number, dexId?: string | null): Promise<SwapResult> {
     if (this.isPaperMode) return this.simulateSell(tokenAddress, amountEth);
     if (!this.privateKey || !this.walletAddress) {
-      return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: "No private key configured" };
+      const missing = [!this.privateKey && "PRIVATE_KEY", !this.walletAddress && "WALLET_ADDRESS"].filter(Boolean).join(", ");
+      logger.error({ missing }, `⛔ Sell GAGAL: env var tidak diset → ${missing}. Tambahkan ke artifacts/api-server/.env lalu restart bot.`);
+      return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: `Env var tidak diset: ${missing}. Tambahkan ke file .env di VPS lalu restart.` };
     }
 
     try {

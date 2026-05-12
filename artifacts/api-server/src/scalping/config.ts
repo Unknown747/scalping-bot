@@ -158,7 +158,7 @@ export const DEFAULT_CONFIG: ScalpingConfigData = {
   maxFeePerGasGwei: 0.5,
 
   // ── Safety Filters ───────────────────────────────────────────────────────────
-  minSafetyScore: 50,           // 50 = allows new listings (LP not locked -15, ownership not renounced -15 = 70 base). Honeypot & sell tax are hard-blocked separately.
+  minSafetyScore: 40,           // 40 = lebih permisif untuk token baru Base. LP tidak terkunci (-15) + ownership belum renounced (-15) = 70 base. Tapi proxy (-10) + top holder (-10) bisa turunkan ke ~40-50. Honeypot & sell tax tetap hard-blocked.
   maxSellTaxPercent: 8,         // reject if sell tax > 8%
 
   // ── Scan Config ──────────────────────────────────────────────────────────────
@@ -219,7 +219,7 @@ export const DEFAULT_CONFIG: ScalpingConfigData = {
 
   // ── AI Filter ────────────────────────────────────────────────────────────────
   enableAIFilter: !!(process.env["AI_INTEGRATIONS_GEMINI_API_KEY"] || process.env["GROQ_API_KEY"] || process.env["HUGGINGFACE_API_KEY"]),
-  aiFilterMinConfidence: 60,
+  aiFilterMinConfidence: 50,    // diturunkan dari 60 → 50 agar AI tidak terlalu ketat memblokir entry
   aiPrimaryProvider: "gemini",
 
   // ── New Listing Mode ─────────────────────────────────────────────────────────
@@ -241,7 +241,7 @@ export const RISK_PRESETS: Record<string, Partial<ScalpingConfigData>> = {
     maxTradeAmountEth: 0.0002,
     maxConcurrentPositions: 1,    // only 1 open at a time
     minMomentumPercent: 20,       // wait for very strong momentum
-    minSafetyScore: 60,
+    minSafetyScore: 50,
     stopLossPercent: 6,           // -6% hard stop — room for normal volatility without premature exit
     tp1Percent: 6,                // lower TP1 — easier to hit
     tp1SellPercent: 70,           // sell 70% at TP1 — very conservative, take profits fast
@@ -271,7 +271,7 @@ export const RISK_PRESETS: Record<string, Partial<ScalpingConfigData>> = {
     maxTradeAmountEth: 0.0004,
     maxConcurrentPositions: 2,
     minMomentumPercent: 12,
-    minSafetyScore: 65,
+    minSafetyScore: 50,
     stopLossPercent: 7,           // -7% hard stop — matches default, avoids noise exits
     tp1Percent: 8,
     tp1SellPercent: 60,
@@ -301,7 +301,7 @@ export const RISK_PRESETS: Record<string, Partial<ScalpingConfigData>> = {
     maxTradeAmountEth: 0.0006,
     maxConcurrentPositions: 2,
     minMomentumPercent: 10,
-    minSafetyScore: 60,
+    minSafetyScore: 40,
     stopLossPercent: 8,           // -8% hard stop — wider for aggressive plays, avoids shakeouts
     tp1Percent: 8,
     tp1SellPercent: 50,           // keep more riding for bigger moves

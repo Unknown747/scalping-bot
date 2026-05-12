@@ -43,7 +43,7 @@ Respond ONLY with valid JSON:
   "reasons": ["reason1", "reason2", "reason3"]
 }
 Rules:
-- "buy" only if confidence >= 65 AND buy pressure strong AND liquidity healthy
+- "buy" if confidence >= 50 AND buy pressure shows more buyers than sellers AND liquidity > $5k
 - "skip" if any red flag (honeypot risk, weak volume, sell pressure, age > 30min)
 - NEW LISTING BONUS: age < 10min with strong momentum = +15 confidence
 - 2-4 concise reasons max`;
