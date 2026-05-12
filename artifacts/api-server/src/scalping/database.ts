@@ -133,8 +133,17 @@ function initSchema(db: DatabaseSync): void {
   // Migration: add mode column to existing trades tables that don't have it yet
   try {
     db.exec(`ALTER TABLE trades ADD COLUMN mode TEXT NOT NULL DEFAULT 'live'`);
+    // Fix: trades with no real txHash are paper trades (live trades always have a txHash)
+    db.exec(`UPDATE trades SET mode = 'paper' WHERE tx_hash IS NULL OR tx_hash = ''`);
   } catch {
     // Column already exists — ignore
+  }
+
+  // Safety fix: re-run the paper correction in case column already existed but trades were mislabeled
+  try {
+    db.exec(`UPDATE trades SET mode = 'paper' WHERE (tx_hash IS NULL OR tx_hash = '') AND mode = 'live'`);
+  } catch {
+    // ignore
   }
 }
 
