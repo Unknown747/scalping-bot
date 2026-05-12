@@ -8,10 +8,28 @@ type ScalpingStrategiesHelper struct {
 }
 
 func (c *Config) ScalpingStrategies() ScalpingStrategiesHelper {
+	tp := c.Scalping.Momentum.TakeProfitPercent
+	sl := c.Scalping.Momentum.StopLossPercent
+	gtp := c.Scalping.Grid.TakeProfitPercent
+	gsl := c.Scalping.Grid.StopLossPercent
+
+	if tp == 0 {
+		tp = 1.5
+	}
+	if sl == 0 {
+		sl = 0.8
+	}
+	if gtp == 0 {
+		gtp = 1.2
+	}
+	if gsl == 0 {
+		gsl = 0.6
+	}
+
 	return ScalpingStrategiesHelper{
-		MomentumTP: 2.0,
-		MomentumSL: 1.0,
-		GridTP:     1.5,
-		GridSL:     0.8,
+		MomentumTP: tp,
+		MomentumSL: sl,
+		GridTP:     gtp,
+		GridSL:     gsl,
 	}
 }

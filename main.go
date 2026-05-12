@@ -8,6 +8,7 @@ import (
         "math/rand"
         "net/http"
         "os"
+        "strings"
         "sync"
         "time"
 
@@ -21,6 +22,7 @@ import (
         "meme-scalper-ai/internal/data"
         "meme-scalper-ai/internal/mev"
         "meme-scalper-ai/internal/notify"
+        "meme-scalper-ai/internal/position"
         rpcpkg "meme-scalper-ai/internal/rpc"
 )
 
@@ -62,6 +64,7 @@ var (
         dexData    *data.DexScreenerClient
         tgBot      *notify.TelegramBot
         sessions   *auth.Manager
+        posTracker *position.Tracker
         botState   = &BotState{}
         clients    = make(map[*websocket.Conn]bool)
         clientsMu  sync.Mutex
@@ -99,6 +102,7 @@ func main() {
         dexData = data.NewDexScreenerClient()
         tgBot = notify.NewTelegramBot()
         sessions = auth.NewManager()
+        posTracker = position.NewTracker()
 
         port := os.Getenv("PORT")
         if port == "" {
@@ -107,11 +111,9 @@ func main() {
 
         mux := http.NewServeMux()
 
-        // Public routes — no auth required
         mux.HandleFunc("/login", serveLogin)
         mux.HandleFunc("/api/login", handleLogin)
 
-        // Protected routes — wrapped with authMiddleware
         mux.Handle("/", authMiddleware(http.HandlerFunc(serveUI)))
         mux.Handle("/logout", authMiddleware(http.HandlerFunc(handleLogout)))
         mux.Handle("/ws", authMiddleware(http.HandlerFunc(handleWebSocket)))
@@ -131,6 +133,7 @@ func main() {
         }
 
         go broadcastLoop()
+        go monitorPositions()
 
         if err := http.ListenAndServe(":"+port, mux); err != nil {
                 log.Fatalf("Server failed: %v", err)
@@ -142,7 +145,6 @@ func main() {
 func authMiddleware(next http.Handler) http.Handler {
         return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
                 if !sessions.IsAuthenticated(r) {
-                        // For API / WS requests return 401 JSON; for page requests redirect
                         if isAPIorWS(r) {
                                 w.Header().Set("Content-Type", "application/json")
                                 w.WriteHeader(http.StatusUnauthorized)
@@ -164,7 +166,6 @@ func isAPIorWS(r *http.Request) bool {
 // ── Auth handlers ────────────────────────────────────────────────────────────
 
 func serveLogin(w http.ResponseWriter, r *http.Request) {
-        // If already logged in, redirect to dashboard
         if sessions.IsAuthenticated(r) {
                 http.Redirect(w, r, "/", http.StatusFound)
                 return
@@ -393,7 +394,7 @@ func handleCommand(action string, params map[string]interface{}) {
         }
 }
 
-// ── Bot logic ────────────────────────────────────────────────────────────────
+// ── Bot loop ─────────────────────────────────────────────────────────────────
 
 func runBot() {
         log.Println("Bot loop started")
@@ -412,9 +413,22 @@ func runBot() {
                 circuitBroken := botState.CircuitBroken
                 circuitUntil := botState.CircuitUntil
                 simMode = botState.SimMode
+                dailyPnl := botState.Stats.DailyPnL
                 botState.mu.RUnlock()
 
                 if !running {
+                        break
+                }
+
+                // Daily loss limit check
+                if cfg.Risk.MaxDailyLossUSD > 0 && dailyPnl <= -cfg.Risk.MaxDailyLossUSD {
+                        broadcast("log", map[string]interface{}{
+                                "message": fmt.Sprintf("🛑 Daily loss limit hit ($%.2f). Stopping bot.", cfg.Risk.MaxDailyLossUSD),
+                                "type":    "error",
+                        })
+                        botState.mu.Lock()
+                        botState.Running = false
+                        botState.mu.Unlock()
                         break
                 }
 
@@ -462,6 +476,25 @@ func runBot() {
                                 break
                         }
 
+                        // Skip if this token was already traded this session
+                        if posTracker.AlreadyTraded(token.Address) {
+                                continue
+                        }
+
+                        // Skip if position already open for this token
+                        if posTracker.HasOpen(token.Address) {
+                                continue
+                        }
+
+                        // Max concurrent positions
+                        if posTracker.OpenCount() >= cfg.Trading.MaxConcurrentPos {
+                                broadcast("log", map[string]interface{}{
+                                        "message": fmt.Sprintf("⏸ Max positions (%d) open, waiting for exits...", cfg.Trading.MaxConcurrentPos),
+                                        "type":    "info",
+                                })
+                                break
+                        }
+
                         if !passesFilters(token) {
                                 continue
                         }
@@ -470,11 +503,13 @@ func runBot() {
                         decision := aiOrch.GetTradingDecision(token.Address, marketMap)
                         broadcastAIUpdate(decision, token.Address)
 
-                        if decision.Action == "HOLD" || decision.Confidence < cfg.AIConfig.MinConfidenceThreshold {
+                        if decision.Action != "BUY" || decision.Confidence < cfg.AIConfig.MinConfidenceThreshold {
                                 continue
                         }
 
-                        risk := mevShield.Assess(0.5, token.LiquidityUSD, float64(token.TxCount5m)/5.0)
+                        // Dynamic price impact based on actual position size vs liquidity
+                        priceImpactPct := (cfg.Trading.PositionSizeUSD / token.LiquidityUSD) * 100
+                        risk := mevShield.Assess(priceImpactPct, token.LiquidityUSD, float64(token.TxCount5m)/5.0)
                         if risk.ShouldSkip {
                                 broadcast("log", map[string]interface{}{
                                         "message": fmt.Sprintf("🛡️ MEV risk [%s]: %s — skipping %s", risk.RiskLevel, risk.Reason, token.Symbol),
@@ -502,21 +537,26 @@ func runBot() {
         log.Println("Bot loop stopped")
 }
 
+// ── Token generation & filtering ─────────────────────────────────────────────
+
 func generateSimTokens() []data.TokenData {
         syms := []string{"DEGEN", "BRETT", "TOSHI", "MOCHI", "BENJI", "FROG", "PEPE", "MEME"}
         out := make([]data.TokenData, 3)
         for i := range out {
                 sym := syms[rand.Intn(len(syms))]
+                buys := 15 + rand.Intn(40)
+                sells := 5 + rand.Intn(15)
                 out[i] = data.TokenData{
                         Address:       fmt.Sprintf("0xSIM%04d", rand.Intn(9999)),
                         Symbol:        sym,
                         PriceUSD:      0.0001 + rand.Float64()*0.009,
                         Volume24h:     15000 + rand.Float64()*50000,
                         LiquidityUSD:  8000 + rand.Float64()*30000,
-                        PriceChange5m: -3 + rand.Float64()*8,
-                        TxCount5m:     10 + rand.Intn(80),
-                        Buys5m:        5 + rand.Intn(40),
-                        Sells5m:       5 + rand.Intn(30),
+                        PriceChange5m: 1.5 + rand.Float64()*4,
+                        TxCount5m:     buys + sells,
+                        Buys5m:        buys,
+                        Sells5m:       sells,
+                        AgeSeconds:    300 + rand.Intn(3000),
                 }
         }
         return out
@@ -524,6 +564,7 @@ func generateSimTokens() []data.TokenData {
 
 func passesFilters(token data.TokenData) bool {
         f := cfg.Monitoring.TokenFilters
+
         if token.LiquidityUSD < f.MinLiquidityUSD {
                 return false
         }
@@ -536,79 +577,262 @@ func passesFilters(token data.TokenData) bool {
         if token.TxCount5m < f.MinTxCount5m {
                 return false
         }
+
+        // Age filter
+        if token.AgeSeconds > 0 {
+                if f.MinAgeSecs > 0 && token.AgeSeconds < f.MinAgeSecs {
+                        return false
+                }
+                if f.MaxAgeSecs > 0 && token.AgeSeconds > f.MaxAgeSecs {
+                        return false
+                }
+        }
+
+        // Buy/sell ratio filter — key momentum signal
+        if f.MinBuySellRatio > 0 {
+                if token.Buys5m == 0 && token.Sells5m == 0 {
+                        return false
+                }
+                var ratio float64
+                if token.Sells5m == 0 {
+                        ratio = 10.0
+                } else {
+                        ratio = float64(token.Buys5m) / float64(token.Sells5m)
+                }
+                if ratio < f.MinBuySellRatio {
+                        return false
+                }
+                if f.MaxBuySellRatio > 0 && ratio > f.MaxBuySellRatio {
+                        // Too skewed = possible pump manipulation
+                        return false
+                }
+        }
+
+        // Dev filter
+        if cfg.DevFilter.Enabled {
+                // Strict minimum age — avoid very fresh launches by serial devs
+                if cfg.DevFilter.MinTokenAgeSecs > 0 && token.AgeSeconds > 0 && token.AgeSeconds < cfg.DevFilter.MinTokenAgeSecs {
+                        broadcast("log", map[string]interface{}{
+                                "message": fmt.Sprintf("🚫 Dev filter: %s too new (%ds) — possible serial launch, skipping", token.Symbol, token.AgeSeconds),
+                                "type":    "warning",
+                        })
+                        return false
+                }
+                // Blacklisted token addresses
+                for _, blocked := range cfg.DevFilter.BlacklistedAddresses {
+                        if strings.EqualFold(token.Address, blocked) {
+                                broadcast("log", map[string]interface{}{
+                                        "message": fmt.Sprintf("🚫 Dev filter: %s is blacklisted, skipping", token.Symbol),
+                                        "type":    "warning",
+                                })
+                                return false
+                        }
+                }
+        }
+
         return true
 }
 
+// ── Trade execution ───────────────────────────────────────────────────────────
+
 func executeTrade(token data.TokenData, decision *ai.TradingDecision, simMode bool) {
+        strat := cfg.ScalpingStrategies()
         posSize := cfg.Trading.PositionSizeUSD
+
+        tpPrice := token.PriceUSD * (1 + strat.MomentumTP/100.0)
+        slPrice := token.PriceUSD * (1 - strat.MomentumSL/100.0)
+
+        maxHold := cfg.Scalping.MaxHoldingMinutes
+        if maxHold <= 0 {
+                maxHold = 8
+        }
+
         simTag := ""
         if simMode {
                 simTag = " [SIM]"
         }
 
         broadcast("log", map[string]interface{}{
-                "message": fmt.Sprintf("📊%s %s on %s | Conf: %.0f%% | $%.2f",
-                        simTag, decision.Action, token.Symbol, decision.Confidence, posSize),
-                "type": "info",
+                "message": fmt.Sprintf("📈%s OPEN %s | Entry: $%.6f | TP: +%.1f%% | SL: -%.1f%% | Size: $%.2f | Conf: %.0f%%",
+                        simTag, token.Symbol, token.PriceUSD,
+                        strat.MomentumTP, strat.MomentumSL,
+                        posSize, decision.Confidence),
+                "type": "success",
         })
 
-        time.Sleep(time.Duration(50+rand.Intn(150)) * time.Millisecond)
-
-        win := rand.Float64() > 0.45
-        pnl := 0.0
-        strat := cfg.ScalpingStrategies()
-        if win {
-                pnl = posSize * (strat.MomentumTP / 100.0)
-        } else {
-                pnl = -posSize * (strat.MomentumSL / 100.0)
+        pos := &position.Position{
+                TokenAddress: token.Address,
+                Symbol:       token.Symbol,
+                EntryPrice:   token.PriceUSD,
+                CurrentPrice: token.PriceUSD,
+                SizeUSD:      posSize,
+                EntryTime:    time.Now(),
+                TPPrice:      tpPrice,
+                SLPrice:      slPrice,
+                MaxHoldMins:  maxHold,
+                SimMode:      simMode,
         }
 
+        posTracker.Open(pos)
+
+        botState.mu.Lock()
+        botState.Stats.ActivePositions = posTracker.OpenCount()
+        botState.mu.Unlock()
+
+        tgBot.NotifyTrade(token.Symbol, "BUY", 0, decision.Confidence, simMode)
+}
+
+// ── Position monitor (fast loop) ─────────────────────────────────────────────
+
+func monitorPositions() {
+        ticker := time.NewTicker(5 * time.Second)
+        for range ticker.C {
+                positions := posTracker.GetAllOpen()
+                if len(positions) == 0 {
+                        continue
+                }
+
+                botState.mu.RLock()
+                running := botState.Running
+                simMode := botState.SimMode
+                botState.mu.RUnlock()
+
+                for _, pos := range positions {
+                        held := time.Since(pos.EntryTime)
+                        maxHold := time.Duration(pos.MaxHoldMins) * time.Minute
+
+                        var currentPrice float64
+
+                        if pos.SimMode {
+                                // Realistic random walk: slight negative drift for meme coins
+                                tick := (rand.Float64() - 0.52) * 0.015
+                                prev := pos.CurrentPrice
+                                if prev <= 0 {
+                                        prev = pos.EntryPrice
+                                }
+                                currentPrice = prev * (1 + tick)
+                                posTracker.UpdateCurrentPrice(pos.TokenAddress, currentPrice)
+                        } else {
+                                // Fetch live price from GeckoTerminal
+                                ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+                                price, err := geckoData.GetTokenPrice(ctx, "base", pos.TokenAddress)
+                                cancel()
+                                if err != nil {
+                                        // Can't get price this tick, keep watching
+                                        continue
+                                }
+                                posTracker.UpdateCurrentPrice(pos.TokenAddress, price)
+                                currentPrice = price
+                        }
+
+                        if currentPrice <= 0 {
+                                continue
+                        }
+
+                        pnlPct := ((currentPrice - pos.EntryPrice) / pos.EntryPrice) * 100
+
+                        // Determine exit condition
+                        reason := ""
+                        switch {
+                        case currentPrice >= pos.TPPrice:
+                                reason = "TP"
+                        case currentPrice <= pos.SLPrice:
+                                reason = "SL"
+                        case held >= maxHold:
+                                reason = "TIMEOUT"
+                        case !running:
+                                reason = "BOT_STOPPED"
+                        }
+
+                        if reason != "" {
+                                if _, ok := posTracker.Close(pos.TokenAddress); ok {
+                                        pnl := pos.SizeUSD * (pnlPct / 100.0)
+                                        closePositionResult(pos, pnl, reason)
+                                }
+                        } else {
+                                // Live position update to dashboard
+                                broadcast("log", map[string]interface{}{
+                                        "message": fmt.Sprintf("👁 %s | Held: %s | $%.6f | PnL: %+.2f%% | TP: $%.6f | SL: $%.6f",
+                                                pos.Symbol,
+                                                held.Round(time.Second),
+                                                currentPrice,
+                                                pnlPct,
+                                                pos.TPPrice,
+                                                pos.SLPrice,
+                                        ),
+                                        "type": "info",
+                                })
+                        }
+                }
+
+                // Sync active positions count
+                botState.mu.Lock()
+                botState.Stats.ActivePositions = posTracker.OpenCount()
+                botState.mu.Unlock()
+
+                // Clean up stale traded entries older than 24h
+                posTracker.CleanupTraded(24 * time.Hour)
+
+                _ = simMode
+        }
+}
+
+func closePositionResult(pos *position.Position, pnl float64, reason string) {
+        simTag := ""
+        if pos.SimMode {
+                simTag = " [SIM]"
+        }
+
+        logType := "success"
+        emoji := "✅"
+        if pnl < 0 {
+                logType = "error"
+                emoji = "❌"
+        } else if reason == "TIMEOUT" || reason == "BOT_STOPPED" {
+                logType = "warning"
+                emoji = "⏱"
+        }
+
+        broadcast("log", map[string]interface{}{
+                "message": fmt.Sprintf("%s%s [%s] %s | PnL: %+.4f USD",
+                        emoji, simTag, reason, pos.Symbol, pnl),
+                "type": logType,
+        })
+
+        win := pnl > 0
         botState.mu.Lock()
         botState.Stats.TotalTrades++
         if win {
                 botState.Stats.WinningTrades++
-                botState.Stats.TotalProfitUSD += pnl
-                botState.Stats.DailyPnL += pnl
                 botState.ConsecutiveLoss = 0
-                botState.mu.Unlock()
-                broadcast("log", map[string]interface{}{
-                        "message": fmt.Sprintf("✅%s TP HIT: %s +$%.4f", simTag, token.Symbol, pnl),
-                        "type":    "success",
-                })
         } else {
                 botState.Stats.LosingTrades++
-                botState.Stats.TotalProfitUSD += pnl
-                botState.Stats.DailyPnL += pnl
                 botState.ConsecutiveLoss++
-                consecutiveLoss := botState.ConsecutiveLoss
-                botState.mu.Unlock()
-                broadcast("log", map[string]interface{}{
-                        "message": fmt.Sprintf("❌%s SL HIT: %s -$%.4f", simTag, token.Symbol, -pnl),
-                        "type":    "error",
-                })
-
-                if cfg.Risk.CircuitBreaker.Enabled && consecutiveLoss >= cfg.Risk.CircuitBreaker.ConsecutiveLossesThreshold {
-                        botState.mu.Lock()
-                        botState.CircuitBroken = true
-                        botState.CircuitUntil = time.Now().Add(time.Duration(cfg.Risk.CircuitBreaker.PauseMinutes) * time.Minute)
-                        botState.mu.Unlock()
-                        broadcast("log", map[string]interface{}{
-                                "message": fmt.Sprintf("⚡ Circuit breaker triggered! Pausing %d minutes", cfg.Risk.CircuitBreaker.PauseMinutes),
-                                "type":    "error",
-                        })
-                        tgBot.NotifyCircuitBreaker(consecutiveLoss, cfg.Risk.CircuitBreaker.PauseMinutes)
-                }
         }
-
-        tgBot.NotifyTrade(token.Symbol, decision.Action, pnl, decision.Confidence, simMode)
-
-        botState.mu.Lock()
+        botState.Stats.TotalProfitUSD += pnl
+        botState.Stats.DailyPnL += pnl
         total := botState.Stats.TotalTrades
         wins := botState.Stats.WinningTrades
         if total > 0 {
                 botState.Stats.WinRate = float64(wins) / float64(total) * 100.0
         }
+        consecutiveLoss := botState.ConsecutiveLoss
+        botState.Stats.ActivePositions = posTracker.OpenCount()
         botState.mu.Unlock()
+
+        tgBot.NotifyTrade(pos.Symbol, "CLOSE("+reason+")", pnl, 0, pos.SimMode)
+
+        if cfg.Risk.CircuitBreaker.Enabled && !win && consecutiveLoss >= cfg.Risk.CircuitBreaker.ConsecutiveLossesThreshold {
+                botState.mu.Lock()
+                botState.CircuitBroken = true
+                botState.CircuitUntil = time.Now().Add(time.Duration(cfg.Risk.CircuitBreaker.PauseMinutes) * time.Minute)
+                botState.mu.Unlock()
+                broadcast("log", map[string]interface{}{
+                        "message": fmt.Sprintf("⚡ Circuit breaker triggered! Pausing %d minutes", cfg.Risk.CircuitBreaker.PauseMinutes),
+                        "type":    "error",
+                })
+                tgBot.NotifyCircuitBreaker(consecutiveLoss, cfg.Risk.CircuitBreaker.PauseMinutes)
+        }
 }
 
 // ── Broadcast helpers ────────────────────────────────────────────────────────

@@ -33,7 +33,7 @@
 
   "trading": {
     "position_size_usd": 1.0,
-    "max_concurrent_positions": 5,
+    "max_concurrent_positions": 3,
     "max_daily_trades": 50,
     "slippage_tolerance_percent": 0.5,
     "max_gas_price_gwei": 0.1,
@@ -138,22 +138,17 @@
       "volume_spike_threshold": 2.5,
       "price_change_threshold_percent": 1.5,
       "lookback_candles": 5,
-      "take_profit_percent": 2.0,
-      "stop_loss_percent": 1.0
-    },
-    "grid": {
-      "levels": 3,
-      "grid_spacing_percent": 1.0,
       "take_profit_percent": 1.5,
       "stop_loss_percent": 0.8
     },
-    "trailing_stop": {
-      "enabled": true,
-      "activation_percent": 0.5,
-      "trailing_distance_percent": 0.3
+    "grid": {
+      "levels": 3,
+      "grid_spacing_percent": 0.8,
+      "take_profit_percent": 1.2,
+      "stop_loss_percent": 0.6
     },
-    "cooldown_seconds": 30,
-    "max_holding_minutes": 15
+    "cooldown_seconds": 15,
+    "max_holding_minutes": 8
   },
 
   "monitoring": {
@@ -163,13 +158,15 @@
     "websocket_reconnect_delay_seconds": 5,
     "token_filters": {
       "min_liquidity_usd": 5000,
-      "min_age_seconds": 60,
+      "min_age_seconds": 300,
       "max_age_seconds": 3600,
       "min_volume_24h_usd": 10000,
       "max_price_usd": 0.01,
       "exclude_honeypot": true,
       "exclude_mintable": true,
-      "min_tx_count_5m": 10
+      "min_tx_count_5m": 10,
+      "min_buy_sell_ratio": 1.2,
+      "max_buy_sell_ratio": 8.0
     },
     "pairs_to_watch": [],
     "blacklisted_tokens": [],
@@ -183,12 +180,14 @@
       "enabled": true,
       "consecutive_losses_threshold": 5,
       "pause_minutes": 30
-    },
-    "position_sizing": {
-      "type": "fixed",
-      "max_position_usd": 1.0,
-      "scale_on_win": false
     }
+  },
+
+  "dev_filter": {
+    "enabled": true,
+    "min_token_age_seconds": 300,
+    "max_serial_launch_count": 3,
+    "blacklisted_addresses": []
   },
 
   "notifications": {

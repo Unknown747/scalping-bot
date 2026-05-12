@@ -44,16 +44,17 @@ func (d *DexScreenerClient) GetLatestTokens(ctx context.Context, chainID string)
 				Address string `json:"address"`
 				Symbol  string `json:"symbol"`
 			} `json:"baseToken"`
-			PriceUsd  string `json:"priceUsd"`
-			Volume    struct {
+			PriceUsd      string  `json:"priceUsd"`
+			PairCreatedAt int64   `json:"pairCreatedAt"`
+			Volume        struct {
 				H24 float64 `json:"h24"`
 			} `json:"volume"`
 			Liquidity struct {
 				Usd float64 `json:"usd"`
 			} `json:"liquidity"`
 			PriceChange struct {
-				M5  float64 `json:"m5"`
-				H1  float64 `json:"h1"`
+				M5 float64 `json:"m5"`
+				H1 float64 `json:"h1"`
 			} `json:"priceChange"`
 			Txns struct {
 				M5 struct {
@@ -71,6 +72,13 @@ func (d *DexScreenerClient) GetLatestTokens(ctx context.Context, chainID string)
 	tokens := make([]TokenData, 0, len(raw.Pairs))
 	for _, p := range raw.Pairs {
 		price, _ := strconv.ParseFloat(p.PriceUsd, 64)
+
+		ageSecs := 0
+		if p.PairCreatedAt > 0 {
+			created := time.UnixMilli(p.PairCreatedAt)
+			ageSecs = int(time.Since(created).Seconds())
+		}
+
 		tokens = append(tokens, TokenData{
 			Address:       p.BaseToken.Address,
 			Symbol:        p.BaseToken.Symbol,
@@ -82,6 +90,7 @@ func (d *DexScreenerClient) GetLatestTokens(ctx context.Context, chainID string)
 			TxCount5m:     p.Txns.M5.Buys + p.Txns.M5.Sells,
 			Buys5m:        p.Txns.M5.Buys,
 			Sells5m:       p.Txns.M5.Sells,
+			AgeSeconds:    ageSecs,
 		})
 	}
 	return tokens, nil
