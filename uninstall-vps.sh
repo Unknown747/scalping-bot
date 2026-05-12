@@ -1,7 +1,8 @@
 #!/bin/bash
 # ============================================================
 #  VPS Full Uninstall Script
-#  Menghapus: PM2, Node.js, pnpm, nginx config, app directory
+#  Menghapus: PM2, Node.js, pnpm, nginx config, app directory,
+#             snapd
 # ============================================================
 
 set -e
@@ -18,6 +19,7 @@ APP_NAME="${APP_NAME:-app}"
 NGINX_SITE="${NGINX_SITE:-$APP_NAME}"
 REMOVE_NODE="${REMOVE_NODE:-true}"
 REMOVE_NGINX="${REMOVE_NGINX:-false}"
+REMOVE_SNAP="${REMOVE_SNAP:-true}"
 
 print_step() { echo -e "\n${CYAN}${BOLD}==>${NC} $1"; }
 print_ok()   { echo -e "  ${GREEN}✔${NC} $1"; }
@@ -36,7 +38,8 @@ echo -e "App Directory : ${CYAN}$APP_DIR${NC}"
 echo -e "App Name      : ${CYAN}$APP_NAME${NC}"
 echo -e "Nginx Site    : ${CYAN}$NGINX_SITE${NC}"
 echo -e "Remove Node   : ${CYAN}$REMOVE_NODE${NC}"
-echo -e "Remove Nginx  : ${CYAN}$REMOVE_NGINX${NC}\n"
+echo -e "Remove Nginx  : ${CYAN}$REMOVE_NGINX${NC}"
+echo -e "Remove Snap   : ${CYAN}$REMOVE_SNAP${NC}\n"
 
 if ! confirm "Lanjutkan uninstall? Proses ini tidak bisa dibatalkan"; then
     echo -e "\n${YELLOW}Dibatalkan.${NC}"
@@ -161,7 +164,34 @@ if [ "$REMOVE_NGINX" = "true" ]; then
     fi
 fi
 
-# ── 8. Sisa log & temp files ────────────────────────────────
+# ── 8. Snapd ────────────────────────────────────────────────
+if [ "$REMOVE_SNAP" = "true" ]; then
+    print_step "Menghapus snapd..."
+
+    if command -v snap &>/dev/null; then
+        SNAP_LIST=$(snap list 2>/dev/null | tail -n +2 | awk '{print $1}' || true)
+        if [ -n "$SNAP_LIST" ]; then
+            echo "$SNAP_LIST" | while read -r pkg; do
+                snap remove --purge "$pkg" 2>/dev/null && print_ok "Snap package '$pkg' dihapus" || print_warn "Gagal hapus snap package: $pkg"
+            done
+        fi
+        systemctl stop snapd 2>/dev/null || true
+        systemctl disable snapd 2>/dev/null || true
+        apt-get remove --purge -y snapd 2>/dev/null && print_ok "snapd dihapus via apt" || print_warn "Gagal hapus snapd via apt"
+        apt-get autoremove -y 2>/dev/null || true
+        rm -rf /snap /var/snap /var/lib/snapd /var/cache/snapd ~/snap 2>/dev/null || true
+        cat > /etc/apt/preferences.d/nosnap.pref <<'EOF'
+Package: snapd
+Pin: release a=*
+Pin-Priority: -10
+EOF
+        print_ok "snapd di-blacklist agar tidak ter-install ulang otomatis"
+    else
+        print_warn "snapd tidak terinstall, skip"
+    fi
+fi
+
+# ── 9. Sisa log & temp files ────────────────────────────────
 print_step "Membersihkan log dan file sementara..."
 
 rm -rf "$HOME/.pm2/logs" "$HOME/.pm2/pids" 2>/dev/null || true
@@ -179,4 +209,5 @@ echo -e "  ${GREEN}✔${NC} Nginx site config: $NGINX_SITE"
 echo -e "  ${GREEN}✔${NC} PM2 & pnpm global packages"
 [ "$REMOVE_NODE" = "true" ] && echo -e "  ${GREEN}✔${NC} Node.js & npm"
 [ "$REMOVE_NGINX" = "true" ] && echo -e "  ${GREEN}✔${NC} Nginx"
+[ "$REMOVE_SNAP" = "true" ] && echo -e "  ${GREEN}✔${NC} Snapd (blacklisted agar tidak balik)"
 echo ""
