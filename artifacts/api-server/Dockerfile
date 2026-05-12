@@ -1,8 +1,10 @@
-FROM node:24-alpine
+FROM node:24-bookworm-slim
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
-# Build tools required for better-sqlite3 native compilation
-RUN apk add --no-cache python3 make g++ sqlite-dev
+# Build tools for better-sqlite3 native compilation (included in bookworm-slim)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 make g++ libsqlite3-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 

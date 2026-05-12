@@ -1,4 +1,4 @@
-FROM node:24-alpine AS build
+FROM node:24-bookworm-slim AS build
 RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /app
 
@@ -17,8 +17,8 @@ ENV PORT=80
 ENV BASE_PATH=/
 RUN pnpm run build
 
-FROM nginx:alpine AS runtime
-COPY --from=build /app/artifacts/scalping-dashboard/dist /usr/share/nginx/html
+FROM nginx:stable-alpine AS runtime
+COPY --from=build /app/artifacts/scalping-dashboard/dist/public /usr/share/nginx/html
 
 RUN printf 'server {\n\
   listen 80;\n\
@@ -29,7 +29,6 @@ RUN printf 'server {\n\
   gzip_types text/plain text/css application/json application/javascript text/xml application/xml text/javascript;\n\
   gzip_min_length 1024;\n\
 \n\
-  # WebSocket proxy for Socket.io — REQUIRED for real-time dashboard\n\
   location /socket.io/ {\n\
     proxy_pass http://api:8080/socket.io/;\n\
     proxy_http_version 1.1;\n\
@@ -40,7 +39,6 @@ RUN printf 'server {\n\
     proxy_read_timeout 86400;\n\
   }\n\
 \n\
-  # REST API proxy\n\
   location /api/ {\n\
     proxy_pass http://api:8080/api/;\n\
     proxy_set_header Host $host;\n\
@@ -49,7 +47,6 @@ RUN printf 'server {\n\
     proxy_set_header X-Forwarded-Proto $scheme;\n\
   }\n\
 \n\
-  # SPA routing\n\
   location / {\n\
     try_files $uri $uri/ /index.html;\n\
   }\n\
