@@ -1,0 +1,209 @@
+{
+  "bot": {
+    "name": "MemeScalper-AI-Pro",
+    "version": "2.0.0",
+    "network": "base",
+    "chain_id": 8453,
+    "log_level": "debug",
+    "environment": "production"
+  },
+
+  "rpc_config": {
+    "primary_endpoints": [
+      "https://mainnet.base.org",
+      "https://base.llamarpc.com",
+      "https://rpc.base.org"
+    ],
+    "backup_endpoints": [
+      "https://base.blockpi.network/v1/rpc/public",
+      "https://1rpc.io/base",
+      "https://base.drpc.org",
+      "https://base.meowrpc.com",
+      "https://base.publicnode.com"
+    ],
+    "websocket_endpoints": [
+      "wss://mainnet.base.org/ws",
+      "wss://base.drpc.org"
+    ],
+    "health_check_interval_seconds": 30,
+    "failover_enabled": true,
+    "max_retries_per_request": 3,
+    "request_timeout_seconds": 10
+  },
+
+  "trading": {
+    "position_size_usd": 1.0,
+    "max_concurrent_positions": 5,
+    "max_daily_trades": 50,
+    "slippage_tolerance_percent": 0.5,
+    "max_gas_price_gwei": 0.1,
+    "gas_price_multiplier": 1.1,
+    "auto_compound_profits": true,
+    "min_profit_to_compound_usd": 0.5
+  },
+
+  "dex_priority": [
+    "uniswap_v4",
+    "uniswap_v3",
+    "aerodrome_slipstream",
+    "aerodrome_vamm",
+    "baseswap",
+    "pancakeswap"
+  ],
+
+  "dex_contracts": {
+    "uniswap_v3": {
+      "factory": "0x33128a8fC17869897dcE68Ed026d694621f6FDfD",
+      "router": "0x2626664c2603336E57B271c5C0b26F421741e481",
+      "quoter": "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
+      "fee_tiers": [100, 500, 3000, 10000]
+    },
+    "uniswap_v4": {
+      "pool_manager": "0x000000000004444c5dc75cB358380D2e3dE7353d",
+      "universal_router": "0x66a9893cc07d91d95644aedd05d03f95e1dba8af",
+      "quoter": "0x52f0e24d1c21c8a0cb1e5a5dd6198556bd9e1203",
+      "hooks_supported": true
+    },
+    "aerodrome": {
+      "router": "0xcF77a3Ba9A5CA399B7c97c74d54e5b1Beb874E43",
+      "factory": "0x420DD381b31aEf6683db6B902084cB0FFECe40Da",
+      "slipstream_factory": "0x5e7BB104d84c7CB9B682AaC2F3d509f5F406809A"
+    },
+    "baseswap": {
+      "router": "0x327Df1E6de05895d1ab08613C08445cE32fE3A2c",
+      "factory": "0xfDa619b6d20975be80A10332cD39b9a4b0FAa8bb"
+    },
+    "pancakeswap": {
+      "router": "0x13f4EA83D0bd40E75C8222255bc855a974568Dd4",
+      "factory": "0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865",
+      "tick_spacing": 50
+    }
+  },
+
+  "ai_config": {
+    "enabled": true,
+    "update_interval_seconds": 3,
+    "min_confidence_threshold": 70,
+    "max_decision_time_ms": 500,
+    "gemini": {
+      "enabled": true,
+      "model": "gemini-1.5-flash",
+      "temperature": 0.3,
+      "max_tokens": 500,
+      "timeout_seconds": 10,
+      "priority": 1
+    },
+    "groq": {
+      "enabled": true,
+      "model": "llama-3.3-70b-versatile",
+      "temperature": 0.2,
+      "max_tokens": 400,
+      "timeout_seconds": 5,
+      "priority": 2
+    },
+    "huangfing": {
+      "enabled": true,
+      "base_url": "https://api.huangfing.ai/v1",
+      "model": "huangfing-pro",
+      "temperature": 0.35,
+      "max_tokens": 600,
+      "timeout_seconds": 8,
+      "priority": 3
+    },
+    "voting_mechanism": "weighted_majority",
+    "ai_weights": {
+      "gemini": 0.40,
+      "groq": 0.35,
+      "huangfing": 0.25
+    }
+  },
+
+  "mev_protection": {
+    "enabled": true,
+    "private_mempool": true,
+    "flashbots_relay": "https://relay.flashbots.net",
+    "backup_relay": "https://bloxroute.max-profit.blxrbdn.com",
+    "random_delay_ms": { "min": 100, "max": 500 },
+    "sandwich_detection": true,
+    "max_sandwich_risk_percent": 25,
+    "frontrun_detection": true,
+    "miner_tip_gwei": 0.01,
+    "use_mev_boost": true
+  },
+
+  "scalping_strategies": {
+    "primary": "momentum_scalp",
+    "secondary": "grid_scalp",
+    "momentum": {
+      "volume_spike_threshold": 2.5,
+      "price_change_threshold_percent": 1.5,
+      "lookback_candles": 5,
+      "take_profit_percent": 2.0,
+      "stop_loss_percent": 1.0
+    },
+    "grid": {
+      "levels": 3,
+      "grid_spacing_percent": 1.0,
+      "take_profit_percent": 1.5,
+      "stop_loss_percent": 0.8
+    },
+    "trailing_stop": {
+      "enabled": true,
+      "activation_percent": 0.5,
+      "trailing_distance_percent": 0.3
+    },
+    "cooldown_seconds": 30,
+    "max_holding_minutes": 15
+  },
+
+  "monitoring": {
+    "data_source": "geckoterminal",
+    "fallback_source": "dexscreener",
+    "poll_interval_seconds": 2,
+    "websocket_reconnect_delay_seconds": 5,
+    "token_filters": {
+      "min_liquidity_usd": 5000,
+      "min_age_seconds": 60,
+      "max_age_seconds": 3600,
+      "min_volume_24h_usd": 10000,
+      "max_price_usd": 0.01,
+      "exclude_honeypot": true,
+      "exclude_mintable": true,
+      "min_tx_count_5m": 10
+    },
+    "pairs_to_watch": [],
+    "blacklisted_tokens": [],
+    "whitelisted_tokens": []
+  },
+
+  "risk_management": {
+    "max_daily_loss_usd": 2.0,
+    "max_drawdown_percent": 20,
+    "circuit_breaker": {
+      "enabled": true,
+      "consecutive_losses_threshold": 5,
+      "pause_minutes": 30
+    },
+    "position_sizing": {
+      "type": "fixed",
+      "max_position_usd": 1.0,
+      "scale_on_win": false
+    }
+  },
+
+  "notifications": {
+    "enabled": true,
+    "telegram": {
+      "bot_token_env": "TELEGRAM_BOT_TOKEN",
+      "chat_id_env": "TELEGRAM_CHAT_ID"
+    },
+    "alerts": [
+      "trade_executed",
+      "take_profit_hit",
+      "stop_loss_hit",
+      "circuit_breaker_triggered",
+      "error_critical",
+      "ai_decision_change"
+    ]
+  }
+}
