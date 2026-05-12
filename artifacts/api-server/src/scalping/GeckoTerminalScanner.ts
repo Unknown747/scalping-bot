@@ -5,6 +5,24 @@ import type { TokenData } from "./TokenScanner.js";
 const GECKO_BASE_URL = "https://api.geckoterminal.com/api/v2";
 const NETWORK = "base";
 
+/**
+ * Normalize GeckoTerminal dex IDs (e.g. "uniswap-v3-base") to the format
+ * the bot's routing logic expects (matches DexScreener dexId values).
+ */
+function normalizeGeckoDexId(rawId: string | null | undefined): string | null {
+  if (!rawId) return null;
+  const id = rawId.toLowerCase();
+  if (id.includes("uniswap-v4"))          return "uniswap-v4";   // NOT supported yet — bot will try V3/V2 fallback
+  if (id.includes("uniswap-v3"))          return "uniswap";       // V3 — supported
+  if (id.includes("uniswap-v2"))          return "uniswap-v2";    // V2 — SwapExecutor will try Aerodrome/BaseSwap/PS
+  if (id.includes("aerodrome-slipstream")) return "aerodrome";    // Slipstream → use Aerodrome router
+  if (id.includes("aerodrome"))           return "aerodrome";
+  if (id.includes("pancakeswap"))         return "pancakeswap";
+  if (id.includes("baseswap"))            return "baseswap";
+  if (id.includes("sushiswap"))           return "sushiswap";
+  return rawId; // keep original if unknown
+}
+
 const geckoCache = new Map<string, { data: TokenData[]; timestamp: number }>();
 const CACHE_TTL_MS = 30000; // 30 seconds — GeckoTerminal rate limit friendly
 
@@ -64,6 +82,10 @@ function geckoPoolToTokenData(pool: any): TokenData | null {
 
     const dexUrl = `https://www.geckoterminal.com/${NETWORK}/pools/${attrs.address}`;
 
+    // Extract DEX ID from pool relationships (available when &include=dex is in the request)
+    const rawDexId = pool.relationships?.dex?.data?.id as string | null | undefined;
+    const dexId = normalizeGeckoDexId(rawDexId);
+
     return {
       address,
       symbol: attrs.name?.split(" / ")[0] || "UNKNOWN",
@@ -79,6 +101,7 @@ function geckoPoolToTokenData(pool: any): TokenData | null {
       ageMinutes,
       holderCount: null,
       dexUrl,
+      dexId,
       pairAddress: attrs.address || "",
       txns5m: { buys: buyTxns5m, sells: sellTxns5m },
     };
@@ -141,7 +164,7 @@ async function scanGeckoPools(category: string): Promise<TokenData[]> {
 
   try {
     const data = await rateLimitedGet(
-      `${GECKO_BASE_URL}/networks/${NETWORK}/${category}?page=1&include=base_token%2Cquote_token`,
+      `${GECKO_BASE_URL}/networks/${NETWORK}/${category}?page=1&include=base_token%2Cquote_token%2Cdex`,
       { Accept: "application/json;version=20230302" }
     );
 
