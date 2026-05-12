@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { getBot } from "../botInstance.js";
+import { getBot, getWatchdog } from "../botInstance.js";
 import { runSecurityAudit } from "../scalping/SecurityAudit.js";
 
 const router = Router();
@@ -78,6 +78,11 @@ router.post("/bot/manual-sell", async (req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message || "Manual sell failed" });
   }
+});
+
+router.get("/bot/watchdog", (req, res) => {
+  const watchdog = getWatchdog();
+  res.json(watchdog.getStats());
 });
 
 export default router;
