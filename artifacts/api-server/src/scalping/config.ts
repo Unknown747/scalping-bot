@@ -180,7 +180,7 @@ export const DEFAULT_CONFIG: ScalpingConfigData = {
   enableDynamicSlippage: true,  // ON — adjusts slippage per token liquidity dynamically
 
   // ── Multi-DEX Router ─────────────────────────────────────────────────────────
-  enableMultiDEX: true,         // ON — routes to best DEX for best price
+  enableMultiDEX: false,        // OFF — V2 routing not yet implemented in SwapExecutor; always uses Uniswap V3
 
   // ── Anti-FOMO & Rate Limiting ────────────────────────────────────────────────
   cooldownAfterCloseSeconds: 30, // 30s cooldown before next entry

@@ -22,6 +22,7 @@ import { PnlChart } from "../components/PnlChart";
 import { FullSettingsPanel } from "../components/FullSettingsPanel";
 import { AIDecisionLog } from "../components/AIDecisionLog";
 import { SecurityAuditCard } from "../components/SecurityAuditCard";
+import { WatchdogCard } from "../components/WatchdogCard";
 import { toast } from "sonner";
 
 type LogEntry = { id: number; level: string; message: string; tokenSymbol?: string | null; timestamp: string };
@@ -292,6 +293,7 @@ export function Dashboard() {
               isEmergencyStopping={emergencyStop.isPending}
             />
             <SecurityAuditCard />
+            <WatchdogCard />
             <FullSettingsPanel />
             <WalletCard wallet={wallet as any} />
           </div>
