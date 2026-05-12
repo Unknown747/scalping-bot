@@ -1,4 +1,4 @@
-modules = ["go-1.21", "web", "python-3.11"]
+modules = ["go-1.21", "web", "bash"]
 
 [deployment]
 router = "application"
@@ -70,7 +70,5 @@ channel = "stable-25_05"
 
 [userenv.shared]
 LOG_LEVEL = "debug"
-NODE_ENV = "production"
 MEV_PROTECTION_RPC = "https://mev-blocker.drpc.org"
 BOT_USERNAME = "admin"
-BOT_PASSWORD = "admin123"
