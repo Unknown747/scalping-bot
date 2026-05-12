@@ -1,4 +1,4 @@
-modules = ["nodejs-20", "bash", "web", "go-1.25"]
+modules = ["go-1.21", "web"]
 
 [deployment]
 router = "application"
@@ -72,3 +72,5 @@ channel = "stable-25_05"
 LOG_LEVEL = "debug"
 NODE_ENV = "production"
 MEV_PROTECTION_RPC = "https://mev-blocker.drpc.org"
+BOT_USERNAME = "admin"
+BOT_PASSWORD = "admin123"
