@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
+import { useQueryClient } from "@tanstack/react-query";
 
 type ModeStats = {
   mode: "live" | "paper";
@@ -147,6 +148,87 @@ function StatsSection({
   );
 }
 
+function ResetStatsButton({ currentMode }: { currentMode: string }) {
+  const [confirm, setConfirm] = useState<"live" | "paper" | "all" | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+
+  const doReset = async (mode: "live" | "paper" | "all") => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/stats/reset?mode=${mode}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (res.ok) {
+        setMsg(`Data ${mode.toUpperCase()} berhasil dihapus`);
+        queryClient.invalidateQueries();
+      } else {
+        setMsg("Gagal reset");
+      }
+    } catch {
+      setMsg("Error koneksi");
+    } finally {
+      setLoading(false);
+      setConfirm(null);
+      setTimeout(() => setMsg(null), 3000);
+    }
+  };
+
+  if (msg) {
+    return (
+      <span className="text-[10px] font-mono text-profit px-2 py-1 rounded border border-profit/30 bg-profit/10">
+        ✓ {msg}
+      </span>
+    );
+  }
+
+  if (confirm) {
+    return (
+      <div className="flex items-center gap-1.5">
+        <span className="text-[10px] font-mono text-loss">
+          Hapus data {confirm.toUpperCase()}?
+        </span>
+        <button
+          onClick={() => doReset(confirm)}
+          disabled={loading}
+          className="text-[10px] font-mono px-2 py-0.5 rounded bg-loss/20 text-loss border border-loss/40 hover:bg-loss/30 transition-colors disabled:opacity-50"
+        >
+          {loading ? "..." : "Ya, hapus"}
+        </button>
+        <button
+          onClick={() => setConfirm(null)}
+          className="text-[10px] font-mono px-2 py-0.5 rounded border border-border text-muted-foreground hover:bg-muted transition-colors"
+        >
+          Batal
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <span className="text-[9px] text-muted-foreground font-mono">Reset:</span>
+      {(["live", "paper", "all"] as const).map((m) => (
+        <button
+          key={m}
+          onClick={() => setConfirm(m)}
+          className={`text-[9px] font-mono px-1.5 py-0.5 rounded border transition-colors ${
+            m === "live"
+              ? "border-loss/40 text-loss/70 hover:bg-loss/10"
+              : m === "paper"
+              ? "border-warn/40 text-warn/70 hover:bg-warn/10"
+              : "border-border text-muted-foreground hover:bg-muted"
+          }`}
+        >
+          {m === "all" ? "SEMUA" : m.toUpperCase()}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 type Props = {
   stats?: Stats;
   botStatus?: BotStatus;
@@ -156,7 +238,6 @@ type Props = {
 export function StatsRow({ stats, botStatus, bothStats }: Props) {
   const [view, setView] = useState<"current" | "live" | "paper" | "both">("current");
 
-  // Determine which view label to use for the current tab
   const currentMode = bothStats?.currentMode ?? stats?.mode ?? "paper";
   const isPaperCurrent = currentMode === "paper";
 
@@ -164,7 +245,6 @@ export function StatsRow({ stats, botStatus, bothStats }: Props) {
   const capitalIdr = bothStats?.capitalIdr ?? stats?.capitalIdr ?? 0;
   const ethPriceUsd = bothStats?.ethPriceUsd ?? stats?.ethPriceUsd ?? 0;
 
-  // Build a ModeStats from the regular stats endpoint when bothStats not available
   const fallbackStats: ModeStats = {
     mode: (stats?.mode as "live" | "paper") ?? "paper",
     todayPnlEth: stats?.todayPnlEth ?? 0,
@@ -189,8 +269,7 @@ export function StatsRow({ stats, botStatus, bothStats }: Props) {
 
   return (
     <div className="space-y-2" data-testid="stats-row">
-      {/* Mode selector tabs */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 flex-wrap">
         <div className="text-[9px] uppercase tracking-widest text-muted-foreground font-mono">Tampilan Stats:</div>
         <div className="flex rounded overflow-hidden border border-border">
           {tabs.map((tab) => (
@@ -211,7 +290,6 @@ export function StatsRow({ stats, botStatus, bothStats }: Props) {
             </button>
           ))}
         </div>
-        {/* Active mode badge */}
         <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border ${
           isPaperCurrent
             ? "bg-warn/10 text-warn border-warn/30"
@@ -219,9 +297,12 @@ export function StatsRow({ stats, botStatus, bothStats }: Props) {
         }`}>
           Bot aktif: {currentMode.toUpperCase()}
         </span>
+
+        <div className="ml-auto">
+          <ResetStatsButton currentMode={currentMode} />
+        </div>
       </div>
 
-      {/* Stats display */}
       {view === "current" && (
         <StatsSection
           modeStats={currentStats}
@@ -251,7 +332,6 @@ export function StatsRow({ stats, botStatus, bothStats }: Props) {
       )}
       {view === "both" && (
         <div className="space-y-2">
-          {/* LIVE label */}
           <div className="flex items-center gap-2">
             <span className="text-[9px] font-mono font-bold text-loss border border-loss/30 bg-loss/10 px-1.5 py-0.5 rounded">
               LIVE — Mainnet
@@ -264,7 +344,6 @@ export function StatsRow({ stats, botStatus, bothStats }: Props) {
             capitalIdr={capitalIdr}
             ethPriceUsd={ethPriceUsd}
           />
-          {/* PAPER label */}
           <div className="flex items-center gap-2 mt-1">
             <span className="text-[9px] font-mono font-bold text-warn border border-warn/30 bg-warn/10 px-1.5 py-0.5 rounded">
               PAPER — Simulasi

@@ -15,7 +15,6 @@ router.get("/stats", async (req, res) => {
 /**
  * GET /api/stats/both
  * Returns stats for LIVE and PAPER modes simultaneously.
- * Useful for showing both modes side-by-side in the dashboard.
  */
 router.get("/stats/both", async (req, res) => {
   try {
@@ -62,6 +61,38 @@ router.get("/stats/both", async (req, res) => {
   } catch (err) {
     req.log.error({ err }, "Stats/both error");
     res.status(500).json({ error: "Failed to fetch combined stats" });
+  }
+});
+
+/**
+ * DELETE /api/stats/reset?mode=live|paper|all
+ * Hapus semua trade (dan daily_stats) sesuai mode.
+ * Gunakan dengan hati-hati — data tidak bisa dikembalikan.
+ */
+router.delete("/stats/reset", (req, res) => {
+  try {
+    const mode = req.query["mode"] as string | undefined;
+    if (!mode || !["live", "paper", "all"].includes(mode)) {
+      res.status(400).json({ error: "mode harus live | paper | all" });
+      return;
+    }
+
+    const database = db.getDb();
+
+    if (mode === "all") {
+      database.exec("DELETE FROM trades");
+      database.exec("DELETE FROM daily_stats");
+      req.log.info({}, "Stats reset: ALL modes");
+      res.json({ ok: true, deleted: "all" });
+    } else {
+      database.prepare("DELETE FROM trades WHERE mode = ?").run(mode);
+      database.exec("DELETE FROM daily_stats");
+      req.log.info({ mode }, `Stats reset: ${mode}`);
+      res.json({ ok: true, deleted: mode });
+    }
+  } catch (err) {
+    req.log.error({ err }, "Stats reset error");
+    res.status(500).json({ error: "Gagal reset stats" });
   }
 });
 
