@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import path from "path";
 import { fileURLToPath } from "url";
 import { logger } from "../lib/logger.js";
@@ -6,22 +6,22 @@ import { logger } from "../lib/logger.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = process.env["SQLITE_PATH"] || path.join(__dirname, "../../scalping.db");
 
-let _db: Database.Database | null = null;
+let _db: DatabaseSync | null = null;
 
-export function getDb(): Database.Database {
+export function getDb(): DatabaseSync {
   if (!_db) {
-    _db = new Database(DB_PATH);
-    _db.pragma("journal_mode = WAL");
-    _db.pragma("foreign_keys = ON");
-    _db.pragma("cache_size = -8000");
-    _db.pragma("temp_store = MEMORY");
+    _db = new DatabaseSync(DB_PATH);
+    _db.exec("PRAGMA journal_mode = WAL");
+    _db.exec("PRAGMA foreign_keys = ON");
+    _db.exec("PRAGMA cache_size = -8000");
+    _db.exec("PRAGMA temp_store = MEMORY");
     initSchema(_db);
     logger.info({ path: DB_PATH }, "SQLite database initialized");
   }
   return _db;
 }
 
-function initSchema(db: Database.Database): void {
+function initSchema(db: DatabaseSync): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS trades (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -187,7 +187,7 @@ export function getTrades(
   const total = Number(countRow?.total || 0);
   const totalPages = Math.ceil(total / limit);
 
-  const trades = db.prepare(`
+  const trades = (db.prepare(`
     SELECT id, token_address as tokenAddress, token_symbol as tokenSymbol, token_name as tokenName,
            entry_price as entryPrice, exit_price as exitPrice, amount_eth as amountEth,
            profit_percent as profitPercent, profit_eth as profitEth,
@@ -196,7 +196,7 @@ export function getTrades(
            mev_protected as mevProtected, mode
     FROM trades ${whereClause}
     ORDER BY exit_time DESC LIMIT ? OFFSET ?
-  `).all(limit, offset) as any[];
+  `).all(limit, offset) as any[]);
 
   for (const t of trades) {
     t.mevProtected = t.mevProtected === 1;
@@ -348,7 +348,7 @@ export function getLogs(limit = 100, page = 1, level?: string): any[] {
   `).all(limit, offset) as any[];
 }
 
-// Daily stats
+// Today + all-time stats (used by /api/stats and /api/stats/both)
 export function getTodayStats(mode?: "live" | "paper"): { pnlEth: number; totalTrades: number; winningTrades: number; losingTrades: number } {
   const db = getDb();
   const modeClause = mode ? `AND mode = '${mode}'` : "";
@@ -391,6 +391,6 @@ export function getAllTimeStats(mode?: "live" | "paper"): { totalPnlEth: number;
 
 export function cleanOldLogs(keepDays = 7): void {
   const db = getDb();
-  db.prepare("DELETE FROM bot_logs WHERE timestamp < datetime('now', ?)").run(`-${keepDays} days`);
-  db.prepare("DELETE FROM scanned_tokens WHERE scanned_at < datetime('now', ?)").run("-1 days");
+  db.exec(`DELETE FROM bot_logs WHERE timestamp < datetime('now', '-${keepDays} days')`);
+  db.exec(`DELETE FROM scanned_tokens WHERE scanned_at < datetime('now', '-1 days')`);
 }

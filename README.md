@@ -128,16 +128,7 @@ npm install -g pm2
 
 ---
 
-### Langkah 3 — Install Build Tools untuk better-sqlite3
-
-```bash
-# Dependency native compile
-sudo apt install -y python3 make g++ libsqlite3-dev
-```
-
----
-
-### Langkah 4 — Clone dan Install
+### Langkah 3 — Clone dan Install
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/base-scalper.git
