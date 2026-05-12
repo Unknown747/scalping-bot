@@ -419,6 +419,35 @@ export class SwapExecutor {
       ];
       const router = new ethers.Contract(BASE_CONTRACTS.UNISWAP_V3_ROUTER, routerAbi, writeWallet);
 
+      // ── Pre-flight simulation (read RPC, no gas) ─────────────────────────
+      // Catches "could not coalesce error" / "missing revert data" before we
+      // send a real transaction. Uses the read provider so no MEV endpoint
+      // is consumed and no gas is spent.
+      const routerRead = new ethers.Contract(BASE_CONTRACTS.UNISWAP_V3_ROUTER, routerAbi, readProvider);
+      try {
+        await routerRead.exactInputSingle.staticCall(
+          {
+            tokenIn: BASE_CONTRACTS.WETH,
+            tokenOut: tokenAddress,
+            fee,
+            recipient: this.walletAddress,
+            amountIn: amountInWei,
+            amountOutMinimum,
+            sqrtPriceLimitX96: 0,
+          },
+          { value: useWeth ? 0n : amountInWei }
+        );
+      } catch (simErr: any) {
+        const simMsg =
+          simErr.shortMessage ||
+          simErr.reason ||
+          simErr.revert?.args?.[0] ||
+          simErr.message ||
+          "swap simulation failed";
+        logger.warn({ tokenAddress, fee, simMsg }, "Swap simulation failed — skipping buy");
+        return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: `Simulation: ${simMsg}` };
+      }
+
       let tx: any;
 
       if (useWeth) {
