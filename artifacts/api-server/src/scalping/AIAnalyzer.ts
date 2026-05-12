@@ -88,7 +88,7 @@ async function analyzeWithGemini(data: AIAnalysisInput): Promise<AIAnalysisResul
   const ai = new GoogleGenAI({ apiKey, httpOptions: { baseUrl } });
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
+    model: "gemini-2.0-flash",
     contents: [{ role: "user", parts: [{ text: SYSTEM_PROMPT + "\n\n" + buildPrompt(data) }] }],
     config: { maxOutputTokens: 300, responseMimeType: "application/json" },
   });
@@ -101,7 +101,7 @@ async function analyzeWithGemini(data: AIAnalysisInput): Promise<AIAnalysisResul
     decision: parsed.decision === "buy" ? "buy" : "skip",
     confidence: Math.min(100, Math.max(0, Number(parsed.confidence) || 0)),
     reasons: Array.isArray(parsed.reasons) ? parsed.reasons.slice(0, 4) : [],
-    model: "gemini-2.5-flash",
+    model: "gemini-2.0-flash",
     provider: "Gemini",
     latencyMs: Date.now() - start,
   };
@@ -202,7 +202,7 @@ interface ProviderEntry {
 const ALL_PROVIDERS: ProviderEntry[] = [
   {
     name: "Gemini",
-    label: "Google Gemini 2.5 Flash",
+    label: "Google Gemini 2.0 Flash",
     envKey: "AI_INTEGRATIONS_GEMINI_API_KEY",
     fn: analyzeWithGemini,
   },

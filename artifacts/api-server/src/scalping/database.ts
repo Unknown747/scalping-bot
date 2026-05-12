@@ -64,6 +64,7 @@ function initSchema(db: DatabaseSync): void {
       safety_score INTEGER NOT NULL DEFAULT 0,
       liquidity_usd REAL NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'open',
+      dex_id TEXT,
       created_at TEXT DEFAULT (datetime('now'))
     );
 
@@ -144,6 +145,13 @@ function initSchema(db: DatabaseSync): void {
     db.exec(`UPDATE trades SET mode = 'paper' WHERE (tx_hash IS NULL OR tx_hash = '') AND mode = 'live'`);
   } catch {
     // ignore
+  }
+
+  // Migration: add dex_id to positions table (for Aerodrome routing persistence across restarts)
+  try {
+    db.exec(`ALTER TABLE positions ADD COLUMN dex_id TEXT`);
+  } catch {
+    // Column already exists — ignore
   }
 }
 
@@ -243,11 +251,12 @@ export function upsertPosition(pos: {
   safetyScore: number;
   liquidityUsd: number;
   status: string;
+  dexId?: string | null;
 }): void {
   const db = getDb();
   db.prepare(`
-    INSERT INTO positions (token_address, token_symbol, token_name, entry_price, current_price, amount_eth, amount_tokens, profit_percent, profit_eth, entry_time, hold_seconds, tp1_hit, tp2_hit, trailing_stop_active, trailing_stop_price, safety_score, liquidity_usd, status)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO positions (token_address, token_symbol, token_name, entry_price, current_price, amount_eth, amount_tokens, profit_percent, profit_eth, entry_time, hold_seconds, tp1_hit, tp2_hit, trailing_stop_active, trailing_stop_price, safety_score, liquidity_usd, status, dex_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(token_address) DO UPDATE SET
       current_price = excluded.current_price,
       profit_percent = excluded.profit_percent,
@@ -265,7 +274,8 @@ export function upsertPosition(pos: {
     pos.entryTime, pos.holdSeconds,
     pos.tp1Hit ? 1 : 0, pos.tp2Hit ? 1 : 0,
     pos.trailingStopActive ? 1 : 0, pos.trailingStopPrice || null,
-    pos.safetyScore, pos.liquidityUsd, pos.status
+    pos.safetyScore, pos.liquidityUsd, pos.status,
+    pos.dexId || null
   );
 }
 
@@ -278,7 +288,7 @@ export function getPositions(): any[] {
            entry_time as entryTime, hold_seconds as holdSeconds,
            tp1_hit as tp1Hit, tp2_hit as tp2Hit,
            trailing_stop_active as trailingStopActive, safety_score as safetyScore,
-           liquidity_usd as liquidityUsd, status
+           liquidity_usd as liquidityUsd, status, dex_id as dexId
     FROM positions WHERE status IN ('open', 'closing')
     ORDER BY entry_time DESC
   `).all() as any[];

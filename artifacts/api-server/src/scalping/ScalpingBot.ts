@@ -258,8 +258,14 @@ export class ScalpingBot {
         liquidityUsd: p.liquidityUsd,
         status: p.status,
         peakProfitPercent: 0,
+        dexId: p.dexId ?? null,
       });
     }
+
+    // Periodic log cleanup — prevent bot_logs table from growing unbounded
+    setInterval(() => {
+      try { db.cleanOldLogs(7); } catch {}
+    }, 6 * 60 * 60 * 1000); // every 6 hours
 
     this.scanInterval = setInterval(
       () => this.runScanCycle().catch((e) => logger.error({ e }, "Scan cycle error")),
@@ -710,7 +716,8 @@ export class ScalpingBot {
         token.address,
         amountEth,
         bestRoute.routerAddress,
-        marketData
+        marketData,
+        token.dexId
       );
       if (twapResult.successfulSlices === 0) {
         this.log("error", `TWAP buy failed for ${token.symbol}: all slices failed`, token.symbol);
@@ -814,6 +821,7 @@ export class ScalpingBot {
       safetyScore: safety.score,
       liquidityUsd: token.liquidityUsd,
       status: "open",
+      dexId: token.dexId,
     });
 
     const logMsg = `Bought ${token.symbol} @ $${token.priceUsd.toFixed(8)} | ${amountEth} ETH | Safety: ${safety.score}/100 | Meme: ${memeScore.score}/100 | DEX: ${bestRoute.dex}`;
@@ -976,6 +984,7 @@ export class ScalpingBot {
       ageMinutes: best.pairCreatedAt ? (Date.now() - best.pairCreatedAt) / 60000 : 9999,
       holderCount: null,
       dexUrl: best.url || null,
+      dexId: best.dexId || null,
       pairAddress: best.pairAddress || "",
       txns5m: { buys: best.txns?.m5?.buys || 0, sells: best.txns?.m5?.sells || 0 },
     };
@@ -1043,6 +1052,7 @@ export class ScalpingBot {
       safetyScore: 99,
       liquidityUsd: token.liquidityUsd,
       status: "open",
+      dexId: token.dexId,
     });
 
     this.log("buy", `MANUAL BUY SUCCESS: ${token.symbol} @ $${token.priceUsd} | txHash: ${buyResult.txHash}`, token.symbol);

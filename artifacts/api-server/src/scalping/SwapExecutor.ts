@@ -299,18 +299,19 @@ export class SwapExecutor {
     tokenAddress: string,
     totalAmountEth: number,
     _routerAddress?: string,
-    marketData?: { volume5mUsd: number; liquidityUsd: number; priceChange5m: number }
+    marketData?: { volume5mUsd: number; liquidityUsd: number; priceChange5m: number },
+    dexId?: string | null
   ): Promise<TWAPResult> {
     const slices = this.config.twapSlices || 4;
     const intervalMs = this.config.twapIntervalMs || 10000;
     const sliceAmount = totalAmountEth / slices;
     const results: SwapResult[] = [];
 
-    logger.info({ tokenAddress, slices, sliceAmount, intervalMs }, "TWAP execution started");
+    logger.info({ tokenAddress, slices, sliceAmount, intervalMs, dexId }, "TWAP execution started");
 
     for (let i = 0; i < slices; i++) {
       try {
-        const result = await this.buyToken(tokenAddress, sliceAmount, undefined, marketData);
+        const result = await this.buyToken(tokenAddress, sliceAmount, dexId, marketData);
         results.push(result);
         if (result.success) {
           logger.info({ slice: `${i + 1}/${slices}`, amount: sliceAmount }, "TWAP slice OK");
@@ -380,16 +381,12 @@ export class SwapExecutor {
 
       const { fee, expectedOut } = feeTierResult;
 
-      // ── Pre-flight: no Uniswap V3 pool — try Aerodrome V2 as fallback ──
+      // ── Pre-flight: no Uniswap V3 pool — always try Aerodrome V2 as fallback ──
+      // This covers: tokens explicitly dexId="aerodrome", AND GeckoTerminal tokens
+      // without dexId that happen to trade on Aerodrome.
       if (expectedOut === 0n) {
-        const isAerodrome = dexId && (dexId === "aerodrome" || dexId.startsWith("aerodrome"));
-        if (isAerodrome) {
-          logger.info({ tokenAddress, dexId }, "No Uniswap V3 pool — routing to Aerodrome V2");
-          return this.buyTokenAerodrome(ethers, tokenAddress, amountEth, slippagePct);
-        }
-        const reason = `No Uniswap V3 liquidity found (dexId=${dexId ?? "unknown"}). Skipping buy.`;
-        logger.warn({ tokenAddress, amountEth, dexId }, reason);
-        return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: reason };
+        logger.info({ tokenAddress, dexId: dexId ?? "unknown" }, "No Uniswap V3 pool — trying Aerodrome V2 as fallback");
+        return this.buyTokenAerodrome(ethers, tokenAddress, amountEth, slippagePct);
       }
 
       let amountOutMinimum =
@@ -654,9 +651,17 @@ export class SwapExecutor {
       // ── Phase 1: READ (BASE_RPC_URL) ────────────────────────────────────
       const { provider: readProvider, ethers } = await getReadProvider();
 
-      // Route to Aerodrome if token was bought there
-      if (dexId && (dexId === "aerodrome" || dexId.startsWith("aerodrome"))) {
-        logger.info({ tokenAddress, dexId }, "Routing sell to Aerodrome V2");
+      // Route to Aerodrome if:
+      //   a) token was explicitly bought via Aerodrome (dexId set), OR
+      //   b) fee cache shows no V3 pool (fee=0) — covers GeckoTerminal tokens without dexId
+      const sellCacheKey = tokenAddress.toLowerCase();
+      const sellCached = feeTierCache.get(sellCacheKey);
+      const noV3Pool = sellCached && sellCached.fee === 0;
+      if (
+        (dexId && (dexId === "aerodrome" || dexId.startsWith("aerodrome"))) ||
+        noV3Pool
+      ) {
+        logger.info({ tokenAddress, dexId: dexId ?? "unknown", noV3Pool }, "Routing sell to Aerodrome V2");
         return this.sellTokenAerodrome(ethers, tokenAddress, amountTokens);
       }
 
@@ -909,18 +914,19 @@ export class SwapExecutor {
     logger.info({ txHash: tx.hash, tokenAddress, mevActive }, mevActive ? "Aerodrome sell via MEV RPC" : "Aerodrome sell via standard RPC");
     const receipt = await waitForReceipt(tx.hash);
 
-    // Aerodrome unwraps WETH → ETH internally; parse WETH Transfer event to router
-    // then look for ETH value. Simpler: check WETH transfer to wallet (some paths keep WETH)
-    // or just trust receipt status and read wallet balance delta.
-    // Use WETH Transfer event as best effort:
+    // Aerodrome V2 swapExactTokensForETH: Router calls WETH.withdraw(amount) → sends ETH to `to`.
+    // The WETH Withdrawal event is: Withdrawal(address indexed src, uint wad)
+    //   topics[0] = keccak256("Withdrawal(address,uint256)")
+    //   topics[1] = indexed src = Aerodrome router (who called withdraw)
+    //   data      = wad (ETH amount unwrapped)
     let amountOut = 0n;
-    const transferSig = ethers.id("Transfer(address,address,uint256)");
+    const withdrawalSig = ethers.id("Withdrawal(address,uint256)");
     for (const log of receipt.logs || []) {
       if (
         log.address.toLowerCase() === BASE_CONTRACTS.WETH.toLowerCase() &&
-        log.topics[0] === transferSig &&
-        log.topics[2] &&
-        ("0x" + log.topics[2].slice(26)).toLowerCase() === this.walletAddress!.toLowerCase()
+        log.topics[0] === withdrawalSig &&
+        log.topics[1] &&
+        ("0x" + log.topics[1].slice(26)).toLowerCase() === BASE_CONTRACTS.AERODROME_V2_ROUTER.toLowerCase()
       ) {
         amountOut = BigInt(log.data);
         break;
@@ -951,7 +957,7 @@ export class SwapExecutor {
     logger.info({ tokenAddress }, "Approving token for Aerodrome V2 router");
     const token = new ethers.Contract(tokenAddress, ERC20_ABI, writeWallet);
     const tx = await token.approve(BASE_CONTRACTS.AERODROME_V2_ROUTER, ethers.MaxUint256);
-    await tx.wait();
+    await waitForReceipt(tx.hash);
     logger.info({ tokenAddress }, "Aerodrome V2 token approval confirmed");
   }
 
