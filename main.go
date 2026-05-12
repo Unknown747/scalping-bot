@@ -40,6 +40,19 @@ type BotStats struct {
         ActivePositions int     `json:"activePositions"`
 }
 
+type TradeRecord struct {
+        Symbol     string  `json:"symbol"`
+        EntryPrice float64 `json:"entryPrice"`
+        ExitPrice  float64 `json:"exitPrice"`
+        SizeUSD    float64 `json:"sizeUSD"`
+        PnL        float64 `json:"pnl"`
+        PnLPct     float64 `json:"pnlPct"`
+        Reason     string  `json:"reason"`
+        HeldSecs   int     `json:"heldSecs"`
+        ClosedAt   string  `json:"closedAt"`
+        SimMode    bool    `json:"simMode"`
+}
+
 type WSMessage struct {
         Type string      `json:"type"`
         Data interface{} `json:"data"`
@@ -64,8 +77,10 @@ var (
         dexData    *data.DexScreenerClient
         tgBot      *notify.TelegramBot
         sessions   *auth.Manager
-        posTracker *position.Tracker
-        botState   = &BotState{}
+        posTracker   *position.Tracker
+        tradeHistory []TradeRecord
+        historyMu    sync.Mutex
+        botState     = &BotState{}
         clients    = make(map[*websocket.Conn]bool)
         clientsMu  sync.Mutex
 )
@@ -121,6 +136,7 @@ func main() {
         mux.Handle("/api/status", authMiddleware(http.HandlerFunc(handleStatus)))
         mux.Handle("/api/check", authMiddleware(http.HandlerFunc(handleCheck)))
         mux.Handle("/api/test/telegram", authMiddleware(http.HandlerFunc(handleTestTelegram)))
+        mux.Handle("/api/history", authMiddleware(http.HandlerFunc(handleHistory)))
 
         log.Printf("🚀 MemeScalper AI Pro v%s starting on port %s", cfg.Bot.Version, port)
         log.Printf("📡 Network: %s | Chain ID: %d", cfg.Bot.Network, cfg.Bot.ChainID)
@@ -280,6 +296,15 @@ func handleTestTelegram(w http.ResponseWriter, r *http.Request) {
         w.Header().Set("Content-Type", "application/json")
         result := tgBot.Test()
         json.NewEncoder(w).Encode(result)
+}
+
+func handleHistory(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Content-Type", "application/json")
+        historyMu.Lock()
+        h := make([]TradeRecord, len(tradeHistory))
+        copy(h, tradeHistory)
+        historyMu.Unlock()
+        json.NewEncoder(w).Encode(h)
 }
 
 // ── WebSocket ────────────────────────────────────────────────────────────────
@@ -694,7 +719,6 @@ func monitorPositions() {
 
                 botState.mu.RLock()
                 running := botState.Running
-                simMode := botState.SimMode
                 botState.mu.RUnlock()
 
                 for _, pos := range positions {
@@ -767,18 +791,14 @@ func monitorPositions() {
                                         closePositionResult(pos, pnl, reason)
                                 }
                         } else {
-                                // Live position update to dashboard
-                                broadcast("log", map[string]interface{}{
-                                        "message": fmt.Sprintf("👁 %s | Held: %s | $%.6f | PnL: %+.2f%% | TP: $%.6f | SL: $%.6f",
-                                                pos.Symbol,
-                                                held.Round(time.Second),
-                                                currentPrice,
-                                                pnlPct,
-                                                pos.TPPrice,
-                                                pos.SLPrice,
-                                        ),
-                                        "type": "info",
-                                })
+                                // Live position log (only every ~30s to reduce noise)
+                                if int(held.Seconds())%30 < 5 {
+                                        broadcast("log", map[string]interface{}{
+                                                "message": fmt.Sprintf("👁 %s | Held: %s | $%.6f | PnL: %+.2f%%",
+                                                        pos.Symbol, held.Round(time.Second), currentPrice, pnlPct),
+                                                "type": "info",
+                                        })
+                                }
                         }
                 }
 
@@ -787,10 +807,32 @@ func monitorPositions() {
                 botState.Stats.ActivePositions = posTracker.OpenCount()
                 botState.mu.Unlock()
 
+                // Broadcast structured positions to Positions tab
+                allOpen := posTracker.GetAllOpen()
+                posData := make([]map[string]interface{}, 0, len(allOpen))
+                for _, p := range allOpen {
+                        pp := 0.0
+                        if p.EntryPrice > 0 && p.CurrentPrice > 0 {
+                                pp = ((p.CurrentPrice - p.EntryPrice) / p.EntryPrice) * 100
+                        }
+                        posData = append(posData, map[string]interface{}{
+                                "symbol":            p.Symbol,
+                                "address":           p.TokenAddress,
+                                "entryPrice":        p.EntryPrice,
+                                "currentPrice":      p.CurrentPrice,
+                                "pnlPct":            pp,
+                                "pnl":               p.SizeUSD * (pp / 100.0),
+                                "tpPrice":           p.TPPrice,
+                                "slPrice":           p.SLPrice,
+                                "heldSecs":          int(time.Since(p.EntryTime).Seconds()),
+                                "trailingActivated": p.TrailingActivated,
+                                "simMode":           p.SimMode,
+                        })
+                }
+                broadcast("positions_update", posData)
+
                 // Clean up stale traded entries older than 24h
                 posTracker.CleanupTraded(24 * time.Hour)
-
-                _ = simMode
         }
 }
 
@@ -836,6 +878,32 @@ func closePositionResult(pos *position.Position, pnl float64, reason string) {
         consecutiveLoss := botState.ConsecutiveLoss
         botState.Stats.ActivePositions = posTracker.OpenCount()
         botState.mu.Unlock()
+
+        // Record trade to history
+        pnlPct := 0.0
+        if pos.SizeUSD > 0 {
+                pnlPct = (pnl / pos.SizeUSD) * 100.0
+        }
+        exitPrice := pos.EntryPrice * (1 + pnlPct/100.0)
+        record := TradeRecord{
+                Symbol:     pos.Symbol,
+                EntryPrice: pos.EntryPrice,
+                ExitPrice:  exitPrice,
+                SizeUSD:    pos.SizeUSD,
+                PnL:        pnl,
+                PnLPct:     pnlPct,
+                Reason:     reason,
+                HeldSecs:   int(time.Since(pos.EntryTime).Seconds()),
+                ClosedAt:   time.Now().Format("15:04:05"),
+                SimMode:    pos.SimMode,
+        }
+        historyMu.Lock()
+        tradeHistory = append([]TradeRecord{record}, tradeHistory...)
+        if len(tradeHistory) > 100 {
+                tradeHistory = tradeHistory[:100]
+        }
+        historyMu.Unlock()
+        broadcast("history_add", record)
 
         tgBot.NotifyTrade(pos.Symbol, "CLOSE("+reason+")", pnl, 0, pos.SimMode)
 
@@ -940,13 +1008,42 @@ func sendInitialState(conn *websocket.Conn) {
         simMode := botState.SimMode
         botState.mu.RUnlock()
 
+        historyMu.Lock()
+        h := make([]TradeRecord, len(tradeHistory))
+        copy(h, tradeHistory)
+        historyMu.Unlock()
+
+        allOpen := posTracker.GetAllOpen()
+        posData := make([]map[string]interface{}, 0, len(allOpen))
+        for _, p := range allOpen {
+                pp := 0.0
+                if p.EntryPrice > 0 && p.CurrentPrice > 0 {
+                        pp = ((p.CurrentPrice - p.EntryPrice) / p.EntryPrice) * 100
+                }
+                posData = append(posData, map[string]interface{}{
+                        "symbol":            p.Symbol,
+                        "address":           p.TokenAddress,
+                        "entryPrice":        p.EntryPrice,
+                        "currentPrice":      p.CurrentPrice,
+                        "pnlPct":            pp,
+                        "pnl":               p.SizeUSD * (pp / 100.0),
+                        "tpPrice":           p.TPPrice,
+                        "slPrice":           p.SLPrice,
+                        "heldSecs":          int(time.Since(p.EntryTime).Seconds()),
+                        "trailingActivated": p.TrailingActivated,
+                        "simMode":           p.SimMode,
+                })
+        }
+
         msg := WSMessage{
                 Type: "init",
                 Data: map[string]interface{}{
-                        "stats":    stats,
-                        "running":  running,
-                        "simMode":  simMode,
-                        "telegram": tgBot.IsEnabled(),
+                        "stats":     stats,
+                        "running":   running,
+                        "simMode":   simMode,
+                        "telegram":  tgBot.IsEnabled(),
+                        "history":   h,
+                        "positions": posData,
                         "log": map[string]interface{}{
                                 "message": fmt.Sprintf("🚀 Connected to %s v%s", cfg.Bot.Name, cfg.Bot.Version),
                                 "type":    "info",
