@@ -1,5 +1,6 @@
 import { logger } from "../lib/logger.js";
 import { BASE_CONTRACTS } from "./config.js";
+import { withRpcRetry } from "./RpcProvider.js";
 
 export interface DEXQuote {
   dex: string;
@@ -45,11 +46,9 @@ const QUOTER_V2_ABI = [
 ];
 
 export class DEXAggregator {
-  private rpcUrl: string;
   private enabled: boolean;
 
   constructor(enabled = false) {
-    this.rpcUrl = process.env["BASE_RPC_URL"] || "https://mainnet.base.org";
     this.enabled = enabled;
   }
 
@@ -72,31 +71,32 @@ export class DEXAggregator {
     }
 
     try {
-      const { ethers } = await import("ethers");
-      const provider = new ethers.JsonRpcProvider(this.rpcUrl);
-      const amountInWei = ethers.parseEther(amountInEth.toString());
+      // Use withRpcRetry so quotes rotate across all read RPCs on rate-limit
+      const quotes = await withRpcRetry(async (provider, ethers) => {
+        const amountInWei = ethers.parseEther(amountInEth.toString());
 
-      const quotes = await Promise.allSettled([
-        this.quoteUniswapV3(provider, tokenAddress, amountInWei, ethers),
-        this.quoteV2DEX(
-          provider,
-          DEX_ROUTERS.AERODROME.quoter,
-          DEX_ROUTERS.AERODROME.name,
-          DEX_ROUTERS.AERODROME.router,
-          tokenAddress,
-          amountInWei,
-          ethers
-        ),
-        this.quoteV2DEX(
-          provider,
-          DEX_ROUTERS.BASESWAP.quoter,
-          DEX_ROUTERS.BASESWAP.name,
-          DEX_ROUTERS.BASESWAP.router,
-          tokenAddress,
-          amountInWei,
-          ethers
-        ),
-      ]);
+        return Promise.allSettled([
+          this.quoteUniswapV3(provider, tokenAddress, amountInWei, ethers),
+          this.quoteV2DEX(
+            provider,
+            DEX_ROUTERS.AERODROME.quoter,
+            DEX_ROUTERS.AERODROME.name,
+            DEX_ROUTERS.AERODROME.router,
+            tokenAddress,
+            amountInWei,
+            ethers
+          ),
+          this.quoteV2DEX(
+            provider,
+            DEX_ROUTERS.BASESWAP.quoter,
+            DEX_ROUTERS.BASESWAP.name,
+            DEX_ROUTERS.BASESWAP.router,
+            tokenAddress,
+            amountInWei,
+            ethers
+          ),
+        ]);
+      });
 
       const validQuotes: DEXQuote[] = [];
       for (const result of quotes) {

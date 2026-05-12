@@ -1048,10 +1048,8 @@ export class ScalpingBot {
     }
 
     // No tracked position — sell directly using SwapExecutor with on-chain balance
-    const { ethers } = await import("ethers");
     const walletAddr = this.swapExecutor.getWalletAddress() || process.env["WALLET_ADDRESS"] || "";
-    const rpcUrl = process.env["RPC_URL"] || "https://mainnet.base.org";
-    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const { provider, ethers } = await import("./RpcProvider.js").then(m => m.getReadProvider());
     const erc20 = new ethers.Contract(tokenAddress, ["function balanceOf(address) view returns (uint256)", "function symbol() view returns (string)", "function name() view returns (string)"], provider);
     const balance: bigint = await erc20.balanceOf(walletAddr);
     if (balance === 0n) {
