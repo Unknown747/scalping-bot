@@ -15,6 +15,7 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "@google/genai",
+      "better-sqlite3",
       "esbuild",
       "protobufjs"
     ]
