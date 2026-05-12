@@ -7,10 +7,28 @@
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 body{font-family:'Segoe UI',monospace;background:#0a0a0f;color:#00ffcc;min-height:100vh;}
-.header{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid #00ffcc22;background:#0d0d18;}
+.header{display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-bottom:1px solid #00ffcc22;background:#0d0d18;gap:12px;flex-wrap:wrap;}
 .header-left h1{font-size:20px;letter-spacing:2px;color:#00ffcc;}
 .header-left .sub{font-size:10px;color:#444;margin-top:2px;letter-spacing:1px;}
 .badges{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+/* ── Wallet Widget ── */
+.wallet-widget{display:flex;align-items:center;gap:10px;background:#0a0a0f;border:1px solid #00ffcc22;border-radius:10px;padding:8px 14px;min-width:200px;position:relative;overflow:hidden;}
+.wallet-widget::before{content:'';position:absolute;inset:0;background:linear-gradient(135deg,#00ffcc08,transparent);pointer-events:none;}
+.wallet-icon{font-size:18px;flex-shrink:0;}
+.wallet-balances{display:flex;flex-direction:column;gap:2px;}
+.wallet-weth{display:flex;align-items:baseline;gap:5px;}
+.wallet-weth-val{font-size:16px;font-weight:bold;color:#00ffcc;font-family:monospace;letter-spacing:.5px;transition:color .3s;}
+.wallet-weth-label{font-size:10px;color:#00ffcc88;letter-spacing:1px;}
+.wallet-eth{display:flex;align-items:center;gap:4px;}
+.wallet-eth-val{font-size:11px;color:#888;font-family:monospace;}
+.wallet-eth-label{font-size:9px;color:#444;letter-spacing:.8px;}
+.wallet-eth-fee{font-size:9px;color:#333;margin-left:2px;}
+.wallet-dot{width:6px;height:6px;border-radius:50%;background:#00ffcc;flex-shrink:0;animation:walletPulse 2s ease-in-out infinite;}
+.wallet-dot.err{background:#ff3366;animation:none;}
+.wallet-dot.loading{background:#ffaa00;}
+@keyframes walletPulse{0%,100%{opacity:.3;transform:scale(1);}50%{opacity:1;transform:scale(1.3);}}
+.wallet-refresh{font-size:9px;color:#333;margin-top:1px;}
+@media(max-width:640px){.wallet-widget{min-width:unset;}.wallet-weth-val{font-size:14px;}}
 .badge{padding:5px 12px;border-radius:20px;font-size:12px;border:1px solid currentColor;white-space:nowrap;}
 .badge-bot{color:#888;border-color:#33333355;}
 .badge-bot.running{color:#00ff88;border-color:#00ff8855;background:#00ff8808;}
@@ -141,6 +159,24 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
     <h1>⚡ MEME SCALPER AI PRO</h1>
     <div class="sub">BASE NETWORK · MULTI-RPC · 3 AI PROVIDERS · MEV SHIELD</div>
   </div>
+
+  <div class="wallet-widget" id="walletWidget" title="Wallet balances — updates every 10s">
+    <span class="wallet-dot loading" id="walletDot"></span>
+    <span class="wallet-icon">💎</span>
+    <div class="wallet-balances">
+      <div class="wallet-weth">
+        <span class="wallet-weth-val" id="walletWETH">—</span>
+        <span class="wallet-weth-label">WETH</span>
+      </div>
+      <div class="wallet-eth">
+        <span class="wallet-eth-val" id="walletETH">—</span>
+        <span class="wallet-eth-label">ETH</span>
+        <span class="wallet-eth-fee">(fee)</span>
+      </div>
+      <div class="wallet-refresh" id="walletUpdated">fetching...</div>
+    </div>
+  </div>
+
   <div class="badges">
     <span class="ws-dot" id="wsDot">● Connecting</span>
     <span class="badge badge-bot stopped" id="botBadge">STOPPED</span>
@@ -986,6 +1022,63 @@ document.getElementById('clearHistBtn').onclick = () => {
 document.getElementById('runCheckBtn').onclick  = () => { document.getElementById('checkGrid').innerHTML = '<div class="check-placeholder">⏳ Running checks...</div>'; send('run_check'); };
 document.getElementById('tgTestBtn').onclick    = () => { document.getElementById('tgTestResult').style.display='none'; send('test_telegram'); };
 document.getElementById('clearLogBtn').onclick  = () => { document.getElementById('logPanel').innerHTML = '<div class="log-entry info">[--:--:--] Log cleared</div>'; };
+
+// ── Wallet balance polling ────────────────────────────────────────────────────
+function fmtBal(v, digits) {
+  if (v === null || v === undefined) return '—';
+  return parseFloat(v).toFixed(digits);
+}
+
+function updateWalletWidget(data) {
+  const dot  = document.getElementById('walletDot');
+  const weth = document.getElementById('walletWETH');
+  const eth  = document.getElementById('walletETH');
+  const upd  = document.getElementById('walletUpdated');
+
+  if (!data || !data.ok) {
+    dot.className = 'wallet-dot err';
+    weth.textContent = 'ERR';
+    weth.style.color = '#ff3366';
+    eth.textContent  = '—';
+    upd.textContent  = 'fetch failed';
+    return;
+  }
+
+  dot.className = 'wallet-dot';
+  weth.style.color = '';
+
+  const w = parseFloat(data.wethBalance) || 0;
+  const e = parseFloat(data.ethBalance)  || 0;
+
+  weth.textContent = fmtBal(w, 6);
+  eth.textContent  = fmtBal(e, 6);
+
+  if (w === 0) {
+    weth.style.color = '#ffaa00';
+  }
+  if (e < 0.001) {
+    eth.style.color = '#ff3366';
+  } else {
+    eth.style.color = '';
+  }
+
+  const now = new Date();
+  upd.textContent = 'updated ' + now.toLocaleTimeString();
+}
+
+async function fetchWalletBalance() {
+  try {
+    const res  = await fetch('/api/wallet');
+    const data = await res.json();
+    updateWalletWidget(data);
+  } catch (e) {
+    updateWalletWidget(null);
+  }
+}
+
+// Fetch immediately, then every 10 seconds
+fetchWalletBalance();
+setInterval(fetchWalletBalance, 10000);
 
 // Draw initial empty chart, then connect
 drawChart(false);

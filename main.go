@@ -150,6 +150,7 @@ func main() {
         mux.Handle("/api/test/telegram", authMiddleware(http.HandlerFunc(handleTestTelegram)))
         mux.Handle("/api/history", authMiddleware(http.HandlerFunc(handleHistory)))
         mux.Handle("/api/history/export", authMiddleware(http.HandlerFunc(handleHistoryExport)))
+        mux.Handle("/api/wallet", authMiddleware(http.HandlerFunc(handleWallet)))
 
         log.Printf("🚀 MemeScalper AI Pro v%s starting on port %s", cfg.Bot.Version, port)
         log.Printf("📡 Network: %s | Chain ID: %d", cfg.Bot.Network, cfg.Bot.ChainID)
@@ -248,6 +249,121 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
         }
         sessions.ClearCookie(w)
         http.Redirect(w, r, "/login", http.StatusFound)
+}
+
+// ── Wallet balance handler ────────────────────────────────────────────────────
+
+func rpcCall(endpoint, payload string) (string, error) {
+        req, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(payload))
+        if err != nil {
+                return "", err
+        }
+        req.Header.Set("Content-Type", "application/json")
+        client := &http.Client{Timeout: 5 * time.Second}
+        resp, err := client.Do(req)
+        if err != nil {
+                return "", err
+        }
+        defer resp.Body.Close()
+        var result struct {
+                Result string `json:"result"`
+        }
+        if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+                return "", err
+        }
+        return result.Result, nil
+}
+
+func hexToFloat(hexStr string, decimals int) float64 {
+        if len(hexStr) > 2 && hexStr[:2] == "0x" {
+                hexStr = hexStr[2:]
+        }
+        var val float64
+        for _, c := range hexStr {
+                digit := 0
+                switch {
+                case c >= '0' && c <= '9':
+                        digit = int(c - '0')
+                case c >= 'a' && c <= 'f':
+                        digit = int(c-'a') + 10
+                case c >= 'A' && c <= 'F':
+                        digit = int(c-'A') + 10
+                }
+                val = val*16 + float64(digit)
+        }
+        divisor := 1.0
+        for i := 0; i < decimals; i++ {
+                divisor *= 10
+        }
+        return val / divisor
+}
+
+func handleWallet(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Content-Type", "application/json")
+
+        walletAddr := os.Getenv("WALLET_ADDRESS")
+        if walletAddr == "" {
+                json.NewEncoder(w).Encode(map[string]interface{}{
+                        "ok": false, "error": "WALLET_ADDRESS not set",
+                })
+                return
+        }
+
+        endpoint, err := rpcClient.GetActiveEndpoint()
+        if err != nil {
+                json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "no RPC available"})
+                return
+        }
+
+        // Pad address to 32 bytes for eth_call data
+        addr := walletAddr
+        if len(addr) >= 2 && addr[:2] == "0x" {
+                addr = addr[2:]
+        }
+        padded := fmt.Sprintf("%064s", addr)
+
+        const wethAddr = "0x4200000000000000000000000000000000000006"
+
+        // Fetch ETH (native) and WETH balances concurrently
+        type balResult struct {
+                val float64
+                err error
+        }
+        ethCh := make(chan balResult, 1)
+        wethCh := make(chan balResult, 1)
+
+        go func() {
+                payload := fmt.Sprintf(`{"jsonrpc":"2.0","method":"eth_getBalance","params":["%s","latest"],"id":1}`, walletAddr)
+                hex, err := rpcCall(endpoint, payload)
+                if err != nil {
+                        ethCh <- balResult{0, err}
+                        return
+                }
+                ethCh <- balResult{hexToFloat(hex, 18), nil}
+        }()
+
+        go func() {
+                data := "0x70a08231" + padded
+                payload := fmt.Sprintf(`{"jsonrpc":"2.0","method":"eth_call","params":[{"to":"%s","data":"%s"},"latest"],"id":2}`, wethAddr, data)
+                hex, err := rpcCall(endpoint, payload)
+                if err != nil {
+                        wethCh <- balResult{0, err}
+                        return
+                }
+                wethCh <- balResult{hexToFloat(hex, 18), nil}
+        }()
+
+        ethResult := <-ethCh
+        wethResult := <-wethCh
+
+        json.NewEncoder(w).Encode(map[string]interface{}{
+                "ok":          true,
+                "address":     walletAddr,
+                "ethBalance":  ethResult.val,
+                "wethBalance": wethResult.val,
+                "wethAddress": wethAddr,
+                "network":     "base",
+        })
 }
 
 // ── Page / API handlers ──────────────────────────────────────────────────────
