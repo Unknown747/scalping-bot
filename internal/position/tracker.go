@@ -11,6 +11,8 @@ type Position struct {
         EntryPrice        float64
         CurrentPrice      float64
         SizeUSD           float64
+        WETHAmount        float64
+        WETHPriceEntry    float64
         EntryTime         time.Time
         TPPrice           float64
         SLPrice           float64

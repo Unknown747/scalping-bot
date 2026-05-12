@@ -6,7 +6,7 @@ import (
         "fmt"
         "log"
         "math"
-	"math/rand"
+        "math/rand"
         "net/http"
         "os"
         "strings"
@@ -47,16 +47,18 @@ type BotStats struct {
 }
 
 type TradeRecord struct {
-        Symbol     string  `json:"symbol"`
-        EntryPrice float64 `json:"entryPrice"`
-        ExitPrice  float64 `json:"exitPrice"`
-        SizeUSD    float64 `json:"sizeUSD"`
-        PnL        float64 `json:"pnl"`
-        PnLPct     float64 `json:"pnlPct"`
-        Reason     string  `json:"reason"`
-        HeldSecs   int     `json:"heldSecs"`
-        ClosedAt   string  `json:"closedAt"`
-        SimMode    bool    `json:"simMode"`
+        Symbol         string  `json:"symbol"`
+        EntryPrice     float64 `json:"entryPrice"`
+        ExitPrice      float64 `json:"exitPrice"`
+        SizeUSD        float64 `json:"sizeUSD"`
+        WETHAmount     float64 `json:"wethAmount"`
+        WETHPriceEntry float64 `json:"wethPriceEntry"`
+        PnL            float64 `json:"pnl"`
+        PnLPct         float64 `json:"pnlPct"`
+        Reason         string  `json:"reason"`
+        HeldSecs       int     `json:"heldSecs"`
+        ClosedAt       string  `json:"closedAt"`
+        SimMode        bool    `json:"simMode"`
 }
 
 type WSMessage struct {
@@ -671,6 +673,17 @@ func passesFilters(token data.TokenData) bool {
 
 // ── Trade execution ───────────────────────────────────────────────────────────
 
+func fetchWETHPrice() float64 {
+        ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+        defer cancel()
+        price, err := geckoData.GetWETHPrice(ctx)
+        if err != nil || price <= 0 {
+                // Fallback: try to derive from a known WETH price (conservative)
+                return 3000.0
+        }
+        return price
+}
+
 func executeTrade(token data.TokenData, decision *ai.TradingDecision, simMode bool) {
         strat := cfg.ScalpingStrategies()
         posSize := cfg.Trading.PositionSizeUSD
@@ -683,31 +696,41 @@ func executeTrade(token data.TokenData, decision *ai.TradingDecision, simMode bo
                 maxHold = 8
         }
 
+        // Compute WETH amount for this position (USD ÷ WETH price)
+        wethPrice := fetchWETHPrice()
+        wethAmount := 0.0
+        if wethPrice > 0 {
+                wethAmount = posSize / wethPrice
+        }
+
         simTag := ""
         if simMode {
                 simTag = " [SIM]"
         }
 
         broadcast("log", map[string]interface{}{
-                "message": fmt.Sprintf("📈%s OPEN %s | Entry: $%.6f | TP: +%.1f%% | SL: -%.1f%% | Size: $%.2f | Conf: %.0f%%",
+                "message": fmt.Sprintf("📈%s OPEN %s | WETH→TOKEN | Entry: $%.6f | Size: %.6f WETH ($%.2f) | TP: +%.1f%% | SL: -%.1f%% | Conf: %.0f%%",
                         simTag, token.Symbol, token.PriceUSD,
+                        wethAmount, posSize,
                         strat.MomentumTP, strat.MomentumSL,
-                        posSize, decision.Confidence),
+                        decision.Confidence),
                 "type": "success",
         })
 
         pos := &position.Position{
-                TokenAddress: token.Address,
-                Symbol:       token.Symbol,
-                EntryPrice:   token.PriceUSD,
-                CurrentPrice: token.PriceUSD,
-                SizeUSD:      posSize,
-                EntryTime:    time.Now(),
-                TPPrice:      tpPrice,
-                SLPrice:      slPrice,
-                MaxHoldMins:  maxHold,
-                SimMode:      simMode,
-                AIConfidence: decision.Confidence,
+                TokenAddress:   token.Address,
+                Symbol:         token.Symbol,
+                EntryPrice:     token.PriceUSD,
+                CurrentPrice:   token.PriceUSD,
+                SizeUSD:        posSize,
+                WETHAmount:     wethAmount,
+                WETHPriceEntry: wethPrice,
+                EntryTime:      time.Now(),
+                TPPrice:        tpPrice,
+                SLPrice:        slPrice,
+                MaxHoldMins:    maxHold,
+                SimMode:        simMode,
+                AIConfidence:   decision.Confidence,
         }
 
         posTracker.Open(pos)
@@ -839,6 +862,8 @@ func monitorPositions() {
                                 "heldSecs":          int(time.Since(p.EntryTime).Seconds()),
                                 "trailingActivated": p.TrailingActivated,
                                 "simMode":           p.SimMode,
+                                "wethAmount":        p.WETHAmount,
+                                "wethPriceEntry":    p.WETHPriceEntry,
                         })
                 }
                 broadcast("positions_update", posData)
@@ -864,9 +889,16 @@ func closePositionResult(pos *position.Position, pnl float64, reason string) {
                 emoji = "⏱"
         }
 
+        // Compute WETH returned (entry WETH + WETH PnL)
+        wethPnl := 0.0
+        if pos.WETHPriceEntry > 0 {
+                wethPnl = pnl / pos.WETHPriceEntry
+        }
+        wethReturned := pos.WETHAmount + wethPnl
+
         broadcast("log", map[string]interface{}{
-                "message": fmt.Sprintf("%s%s [%s] %s | PnL: %+.4f USD",
-                        emoji, simTag, reason, pos.Symbol, pnl),
+                "message": fmt.Sprintf("%s%s [%s] %s | PnL: %+.4f USD (%+.6f WETH) | Returned: %.6f WETH",
+                        emoji, simTag, reason, pos.Symbol, pnl, wethPnl, wethReturned),
                 "type": logType,
         })
 
@@ -898,16 +930,18 @@ func closePositionResult(pos *position.Position, pnl float64, reason string) {
         }
         exitPrice := pos.EntryPrice * (1 + pnlPct/100.0)
         record := TradeRecord{
-                Symbol:     pos.Symbol,
-                EntryPrice: pos.EntryPrice,
-                ExitPrice:  exitPrice,
-                SizeUSD:    pos.SizeUSD,
-                PnL:        pnl,
-                PnLPct:     pnlPct,
-                Reason:     reason,
-                HeldSecs:   int(time.Since(pos.EntryTime).Seconds()),
-                ClosedAt:   time.Now().Format("15:04:05"),
-                SimMode:    pos.SimMode,
+                Symbol:         pos.Symbol,
+                EntryPrice:     pos.EntryPrice,
+                ExitPrice:      exitPrice,
+                SizeUSD:        pos.SizeUSD,
+                WETHAmount:     pos.WETHAmount,
+                WETHPriceEntry: pos.WETHPriceEntry,
+                PnL:            pnl,
+                PnLPct:         pnlPct,
+                Reason:         reason,
+                HeldSecs:       int(time.Since(pos.EntryTime).Seconds()),
+                ClosedAt:       time.Now().Format("15:04:05"),
+                SimMode:        pos.SimMode,
         }
         historyMu.Lock()
         tradeHistory = append([]TradeRecord{record}, tradeHistory...)
@@ -966,49 +1000,50 @@ func closePositionResult(pos *position.Position, pnl float64, reason string) {
 // ── Sharpe ratio helper ───────────────────────────────────────────────────────
 
 func calcSharpe(returns []float64) float64 {
-	n := len(returns)
-	if n < 2 {
-		return 0
-	}
-	var sum float64
-	for _, r := range returns {
-		sum += r
-	}
-	mean := sum / float64(n)
-	var variance float64
-	for _, r := range returns {
-		d := r - mean
-		variance += d * d
-	}
-	std := math.Sqrt(variance / float64(n-1))
-	if std == 0 {
-		return 0
-	}
-	return (mean / std) * math.Sqrt(float64(n))
+        n := len(returns)
+        if n < 2 {
+                return 0
+        }
+        var sum float64
+        for _, r := range returns {
+                sum += r
+        }
+        mean := sum / float64(n)
+        var variance float64
+        for _, r := range returns {
+                d := r - mean
+                variance += d * d
+        }
+        std := math.Sqrt(variance / float64(n-1))
+        if std == 0 {
+                return 0
+        }
+        return (mean / std) * math.Sqrt(float64(n))
 }
 
 // ── CSV export ────────────────────────────────────────────────────────────────
 
 func handleHistoryExport(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", "attachment; filename=trades.csv")
-	historyMu.Lock()
-	h := make([]TradeRecord, len(tradeHistory))
-	copy(h, tradeHistory)
-	historyMu.Unlock()
-	fmt.Fprint(w, "Time,Symbol,EntryPrice,ExitPrice,SizeUSD,PnL_USD,PnL_Pct,Reason,HeldSecs,Mode\n")
-	for _, rec := range h {
-		mode := "LIVE"
-		if rec.SimMode {
-			mode = "SIM"
-		}
-		fmt.Fprintf(w, "%s,%s,%.8f,%.8f,%.4f,%.4f,%.2f,%s,%d,%s\n",
-			rec.ClosedAt, rec.Symbol,
-			rec.EntryPrice, rec.ExitPrice,
-			rec.SizeUSD, rec.PnL, rec.PnLPct,
-			rec.Reason, rec.HeldSecs, mode,
-		)
-	}
+        w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+        w.Header().Set("Content-Disposition", "attachment; filename=trades.csv")
+        historyMu.Lock()
+        h := make([]TradeRecord, len(tradeHistory))
+        copy(h, tradeHistory)
+        historyMu.Unlock()
+        fmt.Fprint(w, "Time,Symbol,EntryPrice,ExitPrice,SizeUSD,WETH_Amount,WETH_Price_Entry,PnL_USD,PnL_Pct,Reason,HeldSecs,Mode\n")
+        for _, rec := range h {
+                mode := "LIVE"
+                if rec.SimMode {
+                        mode = "SIM"
+                }
+                fmt.Fprintf(w, "%s,%s,%.8f,%.8f,%.4f,%.8f,%.2f,%.4f,%.2f,%s,%d,%s\n",
+                        rec.ClosedAt, rec.Symbol,
+                        rec.EntryPrice, rec.ExitPrice,
+                        rec.SizeUSD, rec.WETHAmount, rec.WETHPriceEntry,
+                        rec.PnL, rec.PnLPct,
+                        rec.Reason, rec.HeldSecs, mode,
+                )
+        }
 }
 
 // ── Broadcast helpers ────────────────────────────────────────────────────────
@@ -1123,6 +1158,8 @@ func sendInitialState(conn *websocket.Conn) {
                         "heldSecs":          int(time.Since(p.EntryTime).Seconds()),
                         "trailingActivated": p.TrailingActivated,
                         "simMode":           p.SimMode,
+                        "wethAmount":        p.WETHAmount,
+                        "wethPriceEntry":    p.WETHPriceEntry,
                 })
         }
 
