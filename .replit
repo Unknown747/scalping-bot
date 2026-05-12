@@ -1,4 +1,4 @@
-modules = ["nodejs-24", "python-3.11"]
+modules = ["nodejs-20", "bash", "web"]
 
 [deployment]
 router = "application"
@@ -49,7 +49,7 @@ args = "PORT=8081 BASE_PATH=/ pnpm --filter @workspace/scalping-dashboard run de
 waitForPort = 8081
 
 [agent]
-stack = "PNPM_WORKSPACE"
+stack = "BEST_EFFORT_FALLBACK"
 expertMode = true
 
 [postMerge]

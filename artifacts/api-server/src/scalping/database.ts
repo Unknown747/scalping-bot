@@ -1,4 +1,4 @@
-import { DatabaseSync } from "node:sqlite";
+import Database from "better-sqlite3";
 import path from "path";
 import { fileURLToPath } from "url";
 import { logger } from "../lib/logger.js";
@@ -6,22 +6,22 @@ import { logger } from "../lib/logger.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = process.env["SQLITE_PATH"] || path.join(__dirname, "../../scalping.db");
 
-let _db: DatabaseSync | null = null;
+let _db: Database.Database | null = null;
 
-export function getDb(): DatabaseSync {
+export function getDb(): Database.Database {
   if (!_db) {
-    _db = new DatabaseSync(DB_PATH);
-    _db.exec("PRAGMA journal_mode = WAL");
-    _db.exec("PRAGMA foreign_keys = ON");
-    _db.exec("PRAGMA cache_size = -8000");
-    _db.exec("PRAGMA temp_store = MEMORY");
+    _db = new Database(DB_PATH);
+    _db.pragma("journal_mode = WAL");
+    _db.pragma("foreign_keys = ON");
+    _db.pragma("cache_size = -8000");
+    _db.pragma("temp_store = MEMORY");
     initSchema(_db);
     logger.info({ path: DB_PATH }, "SQLite database initialized");
   }
   return _db;
 }
 
-function initSchema(db: DatabaseSync): void {
+function initSchema(db: Database.Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS trades (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
