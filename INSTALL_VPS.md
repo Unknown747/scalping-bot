@@ -166,30 +166,7 @@ BASE_PATH=/ PORT=80 pnpm --filter @workspace/scalping-dashboard run build
 
 ## Langkah 10 — Jalankan API dengan PM2
 
-Buat file config PM2:
-
-```bash
-nano ecosystem.config.cjs
-```
-
-Isi:
-```js
-module.exports = {
-  apps: [
-    {
-      name: "scalper-api",
-      script: "./artifacts/api-server/dist/index.mjs",
-      node_args: "--enable-source-maps",
-      env_file: "./artifacts/api-server/.env",
-      restart_delay: 3000,
-      max_restarts: 10,
-      watch: false,
-    },
-  ],
-};
-```
-
-Simpan, lalu jalankan:
+File config PM2 sudah ada di repo (`ecosystem.config.cjs`). Langsung jalankan:
 
 ```bash
 pm2 start ecosystem.config.cjs
