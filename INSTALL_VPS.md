@@ -64,7 +64,7 @@ apt install -y git curl python3 make g++ libsqlite3-dev nginx
 
 ---
 
-## Langkah 4 — Install Node.js 22
+## Langkah 4 — Install Node.js 24
 
 ```bash
 # Install NVM
@@ -73,13 +73,13 @@ curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
 # Reload terminal agar nvm bisa dipakai
 source ~/.bashrc
 
-# Install Node.js 22 LTS
-nvm install 22
-nvm use 22
-nvm alias default 22
+# Install Node.js 24 LTS
+nvm install 24
+nvm use 24
+nvm alias default 24
 
 # Verifikasi
-node --version    # harus v22.x.x
+node --version    # harus v24.x.x
 npm --version
 ```
 

@@ -137,7 +137,7 @@ ok "Sistem dan build tools siap"
 
 # ─── Node.js via nvm ──────────────────────────────────────────────────────────
 hr
-info "STEP 2/8 — Install Node.js 22 (NVM)"
+info "STEP 2/8 — Install Node.js 24 (NVM)"
 hr
 
 export NVM_DIR="/root/.nvm"
@@ -145,9 +145,9 @@ if [ ! -f "$NVM_DIR/nvm.sh" ]; then
   curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
 fi
 source "$NVM_DIR/nvm.sh"
-nvm install 22 --no-progress
-nvm use 22
-nvm alias default 22
+nvm install 24 --no-progress
+nvm use 24
+nvm alias default 24
 ok "Node.js $(node --version) siap"
 
 # ─── pnpm + PM2 ───────────────────────────────────────────────────────────────

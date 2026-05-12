@@ -485,8 +485,6 @@ export class ScalpingBot {
     const holdMinutes = holdSeconds / 60;
 
     // New listing positions get shorter max hold time
-    const isNewListingPos = this.config.enableNewListingMode &&
-      holdSeconds < this.config.newListingMaxHoldMinutes * 60 * 2; // consider position as "new listing" for first 2x the hold window
     const effectiveMaxHold = (this.config.enableNewListingMode && holdSeconds <= this.config.newListingMaxHoldMinutes * 60)
       ? this.config.newListingMaxHoldMinutes
       : this.config.maxHoldMinutes;
