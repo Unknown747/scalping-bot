@@ -15,6 +15,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"meme-scalper-ai/internal/ai"
+	"meme-scalper-ai/internal/auth"
 	"meme-scalper-ai/internal/checker"
 	"meme-scalper-ai/internal/config"
 	"meme-scalper-ai/internal/data"
@@ -54,16 +55,17 @@ type BotState struct {
 }
 
 var (
-	cfg       *config.Config
-	rpcClient *rpcpkg.MultiRPCClient
-	aiOrch    *ai.AIOrchestrator
-	mevShield *mev.SandwichDetector
-	geckoData *data.GeckoClient
-	dexData   *data.DexScreenerClient
-	tgBot     *notify.TelegramBot
-	botState  = &BotState{}
-	clients   = make(map[*websocket.Conn]bool)
-	clientsMu sync.Mutex
+	cfg        *config.Config
+	rpcClient  *rpcpkg.MultiRPCClient
+	aiOrch     *ai.AIOrchestrator
+	mevShield  *mev.SandwichDetector
+	geckoData  *data.GeckoClient
+	dexData    *data.DexScreenerClient
+	tgBot      *notify.TelegramBot
+	sessions   *auth.Manager
+	botState   = &BotState{}
+	clients    = make(map[*websocket.Conn]bool)
+	clientsMu  sync.Mutex
 )
 
 func main() {
@@ -97,22 +99,32 @@ func main() {
 	geckoData = data.NewGeckoClient()
 	dexData = data.NewDexScreenerClient()
 	tgBot = notify.NewTelegramBot()
+	sessions = auth.NewManager()
 
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "5000"
 	}
 
-	http.HandleFunc("/", serveUI)
-	http.HandleFunc("/ws", handleWebSocket)
-	http.HandleFunc("/api/stats", handleStats)
-	http.HandleFunc("/api/status", handleStatus)
-	http.HandleFunc("/api/check", handleCheck)
-	http.HandleFunc("/api/test/telegram", handleTestTelegram)
+	mux := http.NewServeMux()
+
+	// Public routes — no auth required
+	mux.HandleFunc("/login", serveLogin)
+	mux.HandleFunc("/api/login", handleLogin)
+
+	// Protected routes — wrapped with authMiddleware
+	mux.Handle("/", authMiddleware(http.HandlerFunc(serveUI)))
+	mux.Handle("/logout", authMiddleware(http.HandlerFunc(handleLogout)))
+	mux.Handle("/ws", authMiddleware(http.HandlerFunc(handleWebSocket)))
+	mux.Handle("/api/stats", authMiddleware(http.HandlerFunc(handleStats)))
+	mux.Handle("/api/status", authMiddleware(http.HandlerFunc(handleStatus)))
+	mux.Handle("/api/check", authMiddleware(http.HandlerFunc(handleCheck)))
+	mux.Handle("/api/test/telegram", authMiddleware(http.HandlerFunc(handleTestTelegram)))
 
 	log.Printf("🚀 MemeScalper AI Pro v%s starting on port %s", cfg.Bot.Version, port)
 	log.Printf("📡 Network: %s | Chain ID: %d", cfg.Bot.Network, cfg.Bot.ChainID)
-	log.Printf("🌐 Web UI: http://0.0.0.0:%s", port)
+	log.Printf("🔐 Login: http://0.0.0.0:%s/login", port)
+	log.Printf("🌐 Web UI: http://0.0.0.0:%s (protected)", port)
 	if tgBot.IsEnabled() {
 		log.Printf("📱 Telegram notifications: enabled")
 	} else {
@@ -121,10 +133,95 @@ func main() {
 
 	go broadcastLoop()
 
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
+	if err := http.ListenAndServe(":"+port, mux); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
 }
+
+// ── Auth middleware ──────────────────────────────────────────────────────────
+
+func authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !sessions.IsAuthenticated(r) {
+			// For API / WS requests return 401 JSON; for page requests redirect
+			if isAPIorWS(r) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusUnauthorized)
+				json.NewEncoder(w).Encode(map[string]string{"error": "unauthorized"})
+				return
+			}
+			http.Redirect(w, r, "/login", http.StatusFound)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func isAPIorWS(r *http.Request) bool {
+	p := r.URL.Path
+	return len(p) >= 4 && (p[:4] == "/api" || p[:3] == "/ws")
+}
+
+// ── Auth handlers ────────────────────────────────────────────────────────────
+
+func serveLogin(w http.ResponseWriter, r *http.Request) {
+	// If already logged in, redirect to dashboard
+	if sessions.IsAuthenticated(r) {
+		http.Redirect(w, r, "/", http.StatusFound)
+		return
+	}
+	http.ServeFile(w, r, "web/login.html")
+}
+
+func handleLogin(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	ip := auth.ClientIP(r)
+	if sessions.IsLockedOut(ip) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "too_many_attempts"})
+		return
+	}
+
+	var creds struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": false})
+		return
+	}
+
+	if !sessions.Validate(creds.Username, creds.Password) {
+		sessions.RecordFail(ip)
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "invalid_credentials"})
+		log.Printf("⚠️  Failed login attempt from %s (user: %q)", ip, creds.Username)
+		return
+	}
+
+	sessions.ResetAttempts(ip)
+	token := sessions.Create()
+	sessions.SetCookie(w, token)
+	log.Printf("✅ Login successful from %s", ip)
+	json.NewEncoder(w).Encode(map[string]interface{}{"ok": true})
+}
+
+func handleLogout(w http.ResponseWriter, r *http.Request) {
+	token := sessions.TokenFromRequest(r)
+	if token != "" {
+		sessions.Delete(token)
+	}
+	sessions.ClearCookie(w)
+	http.Redirect(w, r, "/login", http.StatusFound)
+}
+
+// ── Page / API handlers ──────────────────────────────────────────────────────
 
 func serveUI(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, "web/index.html")
@@ -185,6 +282,8 @@ func handleTestTelegram(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(result)
 }
 
+// ── WebSocket ────────────────────────────────────────────────────────────────
+
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -210,7 +309,6 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			break
 		}
-
 		var cmd struct {
 			Action string                 `json:"action"`
 			Config map[string]interface{} `json:"config"`
@@ -287,20 +385,16 @@ func handleCommand(action string, params map[string]interface{}) {
 			broadcast("log", map[string]interface{}{"message": "📱 Testing Telegram connection...", "type": "info"})
 			result := tgBot.Test()
 			if result.OK {
-				broadcast("log", map[string]interface{}{
-					"message": "✅ Telegram OK: " + result.Message,
-					"type":    "success",
-				})
+				broadcast("log", map[string]interface{}{"message": "✅ Telegram OK: " + result.Message, "type": "success"})
 			} else {
-				broadcast("log", map[string]interface{}{
-					"message": "❌ Telegram failed: " + result.Message,
-					"type":    "error",
-				})
+				broadcast("log", map[string]interface{}{"message": "❌ Telegram failed: " + result.Message, "type": "error"})
 			}
 			broadcast("telegram_test", result)
 		}()
 	}
 }
+
+// ── Bot logic ────────────────────────────────────────────────────────────────
 
 func runBot() {
 	log.Println("Bot loop started")
@@ -517,6 +611,8 @@ func executeTrade(token data.TokenData, decision *ai.TradingDecision, simMode bo
 	}
 	botState.mu.Unlock()
 }
+
+// ── Broadcast helpers ────────────────────────────────────────────────────────
 
 func broadcastLoop() {
 	ticker := time.NewTicker(2 * time.Second)

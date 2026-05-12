@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meme Scalper AI Pro — Login</title>
+    <style>
+        *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Segoe UI', monospace;
+            background: #0a0a0f;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        /* Animated background grid */
+        .bg {
+            position: fixed;
+            inset: 0;
+            background:
+                linear-gradient(135deg, #0a0a0f 0%, #0d1117 50%, #0a0f1a 100%);
+            z-index: 0;
+        }
+        .bg::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background-image:
+                linear-gradient(rgba(0,255,204,0.04) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0,255,204,0.04) 1px, transparent 1px);
+            background-size: 40px 40px;
+            animation: gridMove 20s linear infinite;
+        }
+        @keyframes gridMove {
+            0%   { transform: translate(0,0); }
+            100% { transform: translate(40px, 40px); }
+        }
+
+        /* Floating orbs */
+        .orb {
+            position: fixed;
+            border-radius: 50%;
+            filter: blur(80px);
+            opacity: 0.12;
+            z-index: 0;
+            animation: float 8s ease-in-out infinite;
+        }
+        .orb1 { width: 400px; height: 400px; background: #00ffcc; top: -100px; left: -100px; animation-delay: 0s; }
+        .orb2 { width: 300px; height: 300px; background: #4285f4; bottom: -80px; right: -80px; animation-delay: 3s; }
+        .orb3 { width: 200px; height: 200px; background: #ff3366; top: 50%; left: 50%; animation-delay: 6s; }
+        @keyframes float {
+            0%, 100% { transform: translateY(0px) scale(1); }
+            50%       { transform: translateY(-30px) scale(1.05); }
+        }
+
+        .card {
+            position: relative;
+            z-index: 10;
+            background: rgba(26, 26, 46, 0.85);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(0,255,204,0.2);
+            border-radius: 20px;
+            padding: 44px 40px;
+            width: 100%;
+            max-width: 420px;
+            box-shadow:
+                0 0 40px rgba(0,255,204,0.08),
+                0 20px 60px rgba(0,0,0,0.5);
+        }
+
+        .logo {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+        .logo-icon {
+            font-size: 36px;
+            display: block;
+            margin-bottom: 10px;
+            animation: pulse 2s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { text-shadow: 0 0 20px #00ffcc88; }
+            50%       { text-shadow: 0 0 40px #00ffcc, 0 0 80px #00ffcc44; }
+        }
+        .logo-title {
+            font-size: 22px;
+            font-weight: 700;
+            letter-spacing: 2px;
+            color: #00ffcc;
+        }
+        .logo-sub {
+            font-size: 11px;
+            color: #555;
+            letter-spacing: 1px;
+            margin-top: 4px;
+        }
+
+        .divider {
+            height: 1px;
+            background: linear-gradient(90deg, transparent, rgba(0,255,204,0.3), transparent);
+            margin: 0 0 28px;
+        }
+
+        .form-group {
+            margin-bottom: 18px;
+        }
+        .form-group label {
+            display: block;
+            font-size: 11px;
+            letter-spacing: 1px;
+            color: #888;
+            margin-bottom: 8px;
+        }
+        .input-wrap {
+            position: relative;
+        }
+        .input-icon {
+            position: absolute;
+            left: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 16px;
+            opacity: 0.5;
+        }
+        input[type=text],
+        input[type=password] {
+            width: 100%;
+            background: rgba(10,10,15,0.8);
+            border: 1px solid #2a2a4a;
+            color: #e0e0e0;
+            padding: 13px 14px 13px 42px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-family: monospace;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            outline: none;
+        }
+        input[type=text]:focus,
+        input[type=password]:focus {
+            border-color: #00ffcc;
+            box-shadow: 0 0 0 3px rgba(0,255,204,0.1);
+        }
+        .show-pass {
+            position: absolute;
+            right: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: #555;
+            cursor: pointer;
+            font-size: 16px;
+            padding: 4px;
+            transition: color 0.2s;
+        }
+        .show-pass:hover { color: #00ffcc; }
+
+        .btn-login {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #00ffcc 0%, #00aa88 100%);
+            color: #0a0a0f;
+            border: none;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            cursor: pointer;
+            margin-top: 8px;
+            transition: all 0.2s;
+            position: relative;
+            overflow: hidden;
+        }
+        .btn-login::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(135deg, rgba(255,255,255,0.15), transparent);
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        .btn-login:hover::after { opacity: 1; }
+        .btn-login:hover { box-shadow: 0 6px 24px rgba(0,255,204,0.4); transform: translateY(-1px); }
+        .btn-login:active { transform: translateY(0); }
+        .btn-login:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .alert {
+            display: none;
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            margin-bottom: 16px;
+            border: 1px solid;
+        }
+        .alert-error {
+            background: rgba(255,51,102,0.1);
+            border-color: rgba(255,51,102,0.3);
+            color: #ff6688;
+        }
+        .alert-locked {
+            background: rgba(255,170,0,0.1);
+            border-color: rgba(255,170,0,0.3);
+            color: #ffaa00;
+        }
+
+        .spinner {
+            display: none;
+            width: 18px;
+            height: 18px;
+            border: 2px solid rgba(10,10,15,0.3);
+            border-top-color: #0a0a0f;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+            margin: 0 auto;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .footer {
+            text-align: center;
+            margin-top: 24px;
+            font-size: 11px;
+            color: #333;
+        }
+        .footer span { color: #00ffcc55; }
+
+        .status-dots {
+            display: flex;
+            justify-content: center;
+            gap: 6px;
+            margin-bottom: 24px;
+        }
+        .dot {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: #00ffcc;
+            animation: blink 1.5s ease-in-out infinite;
+        }
+        .dot:nth-child(2) { animation-delay: 0.3s; }
+        .dot:nth-child(3) { animation-delay: 0.6s; }
+        @keyframes blink {
+            0%, 100% { opacity: 0.2; }
+            50%       { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+<div class="bg"></div>
+<div class="orb orb1"></div>
+<div class="orb orb2"></div>
+<div class="orb orb3"></div>
+
+<div class="card">
+    <div class="logo">
+        <span class="logo-icon">⚡</span>
+        <div class="logo-title">MEME SCALPER AI PRO</div>
+        <div class="logo-sub">BASE NETWORK · SECURE ACCESS</div>
+    </div>
+
+    <div class="status-dots">
+        <div class="dot"></div>
+        <div class="dot"></div>
+        <div class="dot"></div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="alert alert-error" id="alertError">
+        ❌ Username atau password salah. Coba lagi.
+    </div>
+    <div class="alert alert-locked" id="alertLocked">
+        🔒 Terlalu banyak percobaan. Coba lagi dalam 10 menit.
+    </div>
+
+    <form id="loginForm">
+        <div class="form-group">
+            <label>USERNAME</label>
+            <div class="input-wrap">
+                <span class="input-icon">👤</span>
+                <input type="text" id="username" name="username"
+                    placeholder="Masukkan username" autocomplete="username" required>
+            </div>
+        </div>
+        <div class="form-group">
+            <label>PASSWORD</label>
+            <div class="input-wrap">
+                <span class="input-icon">🔑</span>
+                <input type="password" id="password" name="password"
+                    placeholder="Masukkan password" autocomplete="current-password" required>
+                <button type="button" class="show-pass" id="togglePass" title="Tampilkan password">👁</button>
+            </div>
+        </div>
+        <button class="btn-login" type="submit" id="loginBtn">
+            <span id="btnText">🔐 MASUK</span>
+            <div class="spinner" id="spinner"></div>
+        </button>
+    </form>
+
+    <div class="footer">
+        Protected by <span>MemeScalper Auth</span> · Session 24 jam
+    </div>
+</div>
+
+<script>
+    const form = document.getElementById('loginForm');
+    const btn  = document.getElementById('loginBtn');
+    const btnText  = document.getElementById('btnText');
+    const spinner  = document.getElementById('spinner');
+    const alertErr = document.getElementById('alertError');
+    const alertLock= document.getElementById('alertLocked');
+
+    document.getElementById('togglePass').onclick = function() {
+        const inp = document.getElementById('password');
+        const isPass = inp.type === 'password';
+        inp.type = isPass ? 'text' : 'password';
+        this.textContent = isPass ? '🙈' : '👁';
+    };
+
+    form.onsubmit = async (e) => {
+        e.preventDefault();
+        alertErr.style.display = 'none';
+        alertLock.style.display = 'none';
+
+        const username = document.getElementById('username').value.trim();
+        const password = document.getElementById('password').value;
+        if (!username || !password) return;
+
+        btn.disabled = true;
+        btnText.style.display = 'none';
+        spinner.style.display = 'block';
+
+        try {
+            const res = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+            const data = await res.json();
+
+            if (res.ok && data.ok) {
+                btnText.textContent = '✅ Berhasil!';
+                btnText.style.display = 'block';
+                spinner.style.display = 'none';
+                setTimeout(() => { window.location.href = '/'; }, 600);
+            } else if (res.status === 429) {
+                alertLock.style.display = 'block';
+                resetBtn();
+            } else {
+                alertErr.style.display = 'block';
+                document.getElementById('password').value = '';
+                resetBtn();
+            }
+        } catch {
+            alertErr.textContent = '❌ Gagal terhubung ke server.';
+            alertErr.style.display = 'block';
+            resetBtn();
+        }
+    };
+
+    function resetBtn() {
+        btn.disabled = false;
+        btnText.textContent = '🔐 MASUK';
+        btnText.style.display = 'block';
+        spinner.style.display = 'none';
+    }
+
+    document.getElementById('username').focus();
+</script>
+</body>
+</html>
