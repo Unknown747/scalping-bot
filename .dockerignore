@@ -1,0 +1,54 @@
+# ─── Dependencies (akan di-install ulang di dalam container) ─────────────────
+**/node_modules/
+**/.pnpm-store/
+
+# ─── Build output (akan di-build ulang di dalam container) ───────────────────
+**/dist/
+**/.tsbuildinfo
+**/out-tsc/
+
+# ─── Database — tidak boleh masuk container ──────────────────────────────────
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.sqlite
+**/*.sqlite3
+
+# ─── Secrets ─────────────────────────────────────────────────────────────────
+**/.env
+!**/.env.example
+
+# ─── Git history ─────────────────────────────────────────────────────────────
+.git/
+.gitignore
+
+# ─── Replit internal ─────────────────────────────────────────────────────────
+.local/
+.cache/
+.agents/
+.replit
+.replitignore
+
+# ─── Mockup sandbox (tidak dibutuhkan di production) ─────────────────────────
+artifacts/mockup-sandbox/
+
+# ─── Log files ───────────────────────────────────────────────────────────────
+**/*.log
+**/npm-debug.log
+**/yarn-error.log
+
+# ─── OS / IDE ─────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ─── Test & coverage ─────────────────────────────────────────────────────────
+**/coverage/
+**/__tests__/
+**/*.test.ts
+**/*.spec.ts
+
+# ─── Docs (tidak dibutuhkan di runtime) ──────────────────────────────────────
+README.md
+INSTALL_VPS.md
