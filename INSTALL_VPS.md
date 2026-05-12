@@ -1,38 +1,25 @@
-# Tutorial Install BASE Scalper di VPS
+# Install BASE Scalper di VPS Ubuntu
 
-Panduan lengkap instalasi dari nol. Ada dua cara:
+Panduan instalasi untuk **Ubuntu 22.04 / 24.04 LTS** menggunakan **Node.js + PM2 + Nginx**.
 
-- **[Cara A — Docker](#cara-a--docker-rekomendasi)** ← paling mudah, tidak perlu paham Node.js
-- **[Cara B — Manual / PM2](#cara-b--manual--pm2)** ← lebih banyak kontrol, tanpa Docker
+> Sebelum mulai — jika VPS kamu sudah ada Docker dan mau dihapus bersih:
+> ```bash
+> bash scripts/docker-cleanup-vps.sh
+> ```
 
 ---
 
-## Persiapan Sebelum Mulai
-
-### Yang Kamu Butuhkan
+## Yang Kamu Butuhkan
 
 | Item | Keterangan |
 |---|---|
 | VPS | Ubuntu 22.04 atau 24.04 LTS |
 | RAM | Minimal 1 GB (rekomendasi 2 GB) |
-| Storage | Minimal 10 GB |
-| Domain/IP | IP publik VPS sudah cukup |
+| Storage | Minimal 5 GB |
 | RPC URL | Daftar gratis di [alchemy.com](https://alchemy.com) |
-| AI Key | Daftar gratis di [aistudio.google.com](https://aistudio.google.com/app/apikey) |
 | Wallet baru | Buat wallet **baru** khusus bot — jangan pakai wallet utama! |
 
-### Provider VPS yang Bagus
-
-| Provider | Harga mulai | Link |
-|---|---|---|
-| **Contabo** | $5/bln (4 GB RAM) | contabo.com |
-| **Hetzner** | €4/bln (2 GB RAM) | hetzner.com |
-| **DigitalOcean** | $6/bln (1 GB RAM) | digitalocean.com |
-| **Vultr** | $6/bln (1 GB RAM) | vultr.com |
-
-### Siapkan Data Ini Sebelum Mulai
-
-Kamu perlu data berikut saat mengisi file `.env`. Siapkan dulu sebelum mulai:
+### Siapkan data ini sebelum mulai
 
 ```
 ✅ PRIVATE_KEY wallet bot (bukan wallet utama!)
@@ -43,19 +30,15 @@ Kamu perlu data berikut saat mengisi file `.env`. Siapkan dulu sebelum mulai:
 
 ---
 
-## Cara A — Docker (Rekomendasi)
-
-### Langkah 1: Login ke VPS
+## Langkah 1 — Login ke VPS
 
 ```bash
 ssh root@IP_VPS_KAMU
-# atau jika pakai user biasa:
-ssh username@IP_VPS_KAMU
 ```
 
 ---
 
-### Langkah 2: Update Sistem
+## Langkah 2 — Update Sistem
 
 ```bash
 apt update && apt upgrade -y
@@ -63,32 +46,44 @@ apt update && apt upgrade -y
 
 ---
 
-### Langkah 3: Install Docker
+## Langkah 3 — Install Build Tools
 
 ```bash
-# Download dan jalankan installer Docker
-curl -fsSL https://get.docker.com | sh
-
-# Tambahkan user kamu ke grup docker (agar tidak perlu sudo tiap perintah)
-usermod -aG docker $USER
-
-# Aktifkan perubahan grup
-newgrp docker
-
-# Cek Docker berjalan dengan benar
-docker --version
-docker compose version
-```
-
-Output yang benar:
-```
-Docker version 27.x.x, build xxxxx
-Docker Compose version v2.x.x
+apt install -y git curl python3 make g++ libsqlite3-dev nginx
 ```
 
 ---
 
-### Langkah 4: Clone Repository
+## Langkah 4 — Install Node.js 22
+
+```bash
+# Install NVM
+curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
+
+# Reload terminal agar nvm bisa dipakai
+source ~/.bashrc
+
+# Install Node.js 22 LTS
+nvm install 22
+nvm use 22
+nvm alias default 22
+
+# Verifikasi
+node --version    # harus v22.x.x
+npm --version
+```
+
+---
+
+## Langkah 5 — Install pnpm dan PM2
+
+```bash
+npm install -g pnpm pm2
+```
+
+---
+
+## Langkah 6 — Clone Repository
 
 ```bash
 git clone https://github.com/YOUR_USERNAME/base-scalper.git
@@ -97,23 +92,33 @@ cd base-scalper
 
 ---
 
-### Langkah 5: Buat File `.env`
+## Langkah 7 — Install Dependencies
 
 ```bash
-# Salin template
-cp artifacts/api-server/.env.example artifacts/api-server/.env
+pnpm install
+```
 
-# Edit file
+Jika muncul error `better-sqlite3` atau error native module:
+```bash
+pnpm install --force
+```
+
+---
+
+## Langkah 8 — Buat File `.env`
+
+```bash
+cp artifacts/api-server/.env.example artifacts/api-server/.env
 nano artifacts/api-server/.env
 ```
 
-Di dalam nano, isi semua nilai:
+Isi semua nilai di bawah ini:
 
 ```env
 PORT=8080
 NODE_ENV=production
 
-# ─── Wajib diisi ──────────────────────────────────────────────────────────────
+# ─── Wajib ────────────────────────────────────────────────────────────────────
 
 # Generate dengan: openssl rand -hex 32
 SESSION_SECRET=TEMPEL_HASIL_OPENSSL_DISINI
@@ -125,10 +130,10 @@ DASHBOARD_PASSWORD=buat_password_kuat_kamu
 PRIVATE_KEY=0xPRIVATE_KEY_WALLET_BOT_KAMU
 WALLET_ADDRESS=0xALAMAT_WALLET_BOT_KAMU
 
-# RPC dari Alchemy (daftar gratis di alchemy.com)
+# RPC dari Alchemy
 BASE_RPC_URL=https://base-mainnet.g.alchemy.com/v2/YOUR_ALCHEMY_KEY
 
-# ─── MEV Protection (sudah ada default, bisa langsung dipakai) ────────────────
+# ─── MEV Protection (sudah ada default, langsung pakai) ───────────────────────
 MEV_PROTECTION_RPC=https://mev-blocker.drpc.org
 MEV_PROTECTION_RPC_BACKUP=https://rpc.flashbots.net/fast
 
@@ -142,220 +147,24 @@ AI_INTEGRATIONS_GEMINI_API_KEY=AIza_GEMINI_KEY_KAMU
 ```bash
 openssl rand -hex 32
 ```
-Copy hasilnya dan tempel ke SESSION_SECRET.
 
-**Cara simpan dan keluar dari nano:**
-```
-Ctrl+X  →  Y  →  Enter
-```
+**Simpan dan keluar dari nano:** `Ctrl+X` → `Y` → `Enter`
 
 ---
 
-### Langkah 6: Setup Firewall
+## Langkah 9 — Build
 
 ```bash
-# Aktifkan firewall
-ufw enable
-
-# Izinkan SSH (JANGAN dilewati atau kamu akan terkunci dari VPS!)
-ufw allow ssh
-
-# Izinkan akses dashboard (port 80)
-ufw allow 80/tcp
-
-# Cek status
-ufw status
-```
-
----
-
-### Langkah 7: Jalankan Bot
-
-```bash
-docker compose up -d --build
-```
-
-Proses build pertama memakan waktu **5–15 menit** (download dependency, compile kode).
-
-Pantau progressnya:
-```bash
-docker compose logs -f
-```
-
-Tekan `Ctrl+C` untuk berhenti memantau (bot tetap jalan di background).
-
----
-
-### Langkah 8: Verifikasi Bot Berjalan
-
-```bash
-# Cek status container
-docker compose ps
-```
-
-Output yang benar:
-```
-NAME                        STATUS           PORTS
-base-scalper-api-1          Up (healthy)     0.0.0.0:8080->8080/tcp
-base-scalper-dashboard-1    Up               0.0.0.0:80->80/tcp
-```
-
-```bash
-# Test API
-curl http://localhost:8080/api/healthz
-# Output: {"status":"ok","uptime":...}
-
-# Cek keamanan (semua harus "passed": true)
-curl http://localhost:8080/api/security-audit | python3 -m json.tool
-```
-
----
-
-### Langkah 9: Buka Dashboard
-
-Buka browser → masuk ke `http://IP_VPS_KAMU`
-
-Login dengan `DASHBOARD_PASSWORD` yang sudah kamu set.
-
----
-
-### Langkah 10: Mulai Trading
-
-1. Cek **Security Audit** di dashboard — semua harus ✅
-2. Cek **Settings → 🔑 Secrets** — `PRIVATE_KEY` dan `WALLET_ADDRESS` harus ✅
-3. Mulai dengan **Paper mode** untuk testing
-4. Jika sudah yakin → **Settings → Trading → Mode → LIVE** → **START BOT**
-
----
-
-### Perintah Docker Penting
-
-```bash
-# Lihat log bot secara live
-docker compose logs -f api
-
-# Restart bot (misalnya setelah ganti .env)
-docker compose restart api
-
-# Stop semua
-docker compose stop
-
-# Start ulang semua
-docker compose start
-
-# Update ke versi terbaru
-git pull
-docker compose up -d --build
-
-# Cek penggunaan RAM/CPU
-docker stats
-```
-
-### Backup Database
-
-Data trading disimpan di Docker volume `scalping_data`. Cara backup:
-
-```bash
-docker run --rm \
-  -v scalping_data:/data \
-  -v $(pwd):/backup \
-  alpine tar czf /backup/backup-$(date +%Y%m%d-%H%M).tar.gz /data
-
-# File backup akan muncul di folder base-scalper
-ls *.tar.gz
-```
-
----
-
-## Cara B — Manual / PM2
-
-### Langkah 1: Login ke VPS
-
-```bash
-ssh root@IP_VPS_KAMU
-```
-
----
-
-### Langkah 2: Update Sistem dan Install Tools
-
-```bash
-apt update && apt upgrade -y
-
-# Install tools untuk compile native modules (better-sqlite3 perlu ini)
-apt install -y git curl python3 make g++ libsqlite3-dev nginx
-```
-
----
-
-### Langkah 3: Install Node.js 22
-
-```bash
-# Install NVM (Node Version Manager)
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
-
-# Reload terminal
-source ~/.bashrc
-
-# Install Node.js 22 LTS
-nvm install 22
-nvm use 22
-nvm alias default 22
-
-# Verifikasi
-node --version    # harus v22.x.x
-```
-
----
-
-### Langkah 4: Install pnpm dan PM2
-
-```bash
-npm install -g pnpm pm2
-```
-
----
-
-### Langkah 5: Clone dan Install Dependencies
-
-```bash
-git clone https://github.com/YOUR_USERNAME/base-scalper.git
-cd base-scalper
-
-pnpm install
-```
-
-Jika ada error saat install (biasanya `better-sqlite3`):
-```bash
-pnpm install --force
-```
-
----
-
-### Langkah 6: Buat File `.env`
-
-```bash
-cp artifacts/api-server/.env.example artifacts/api-server/.env
-nano artifacts/api-server/.env
-```
-
-Isi sama seperti di Cara A Langkah 5.
-
----
-
-### Langkah 7: Build Semua Package
-
-```bash
-# Build API server
+# Build API
 pnpm --filter @workspace/api-server run build
 
-# Build dashboard (BASE_PATH=/ wajib untuk production)
+# Build dashboard (PORT dan BASE_PATH wajib diset)
 BASE_PATH=/ PORT=80 pnpm --filter @workspace/scalping-dashboard run build
 ```
 
 ---
 
-### Langkah 8: Jalankan API dengan PM2
+## Langkah 10 — Jalankan API dengan PM2
 
 Buat file config PM2:
 
@@ -363,7 +172,7 @@ Buat file config PM2:
 nano ecosystem.config.cjs
 ```
 
-Isi file:
+Isi:
 ```js
 module.exports = {
   apps: [
@@ -380,7 +189,7 @@ module.exports = {
 };
 ```
 
-Simpan (`Ctrl+X → Y → Enter`), lalu jalankan:
+Simpan, lalu jalankan:
 
 ```bash
 pm2 start ecosystem.config.cjs
@@ -391,36 +200,33 @@ pm2 logs scalper-api
 # Set auto-start saat VPS reboot
 pm2 save
 pm2 startup
-# ← Jalankan perintah yang muncul dari output pm2 startup
+# ← Copy-paste perintah yang muncul dari output pm2 startup, lalu jalankan
 ```
 
 ---
 
-### Langkah 9: Setup Nginx
+## Langkah 11 — Setup Nginx
 
 ```bash
 nano /etc/nginx/sites-available/scalper
 ```
 
-Isi:
+Isi (ganti `/root/base-scalper` jika folder project berbeda):
 ```nginx
 server {
     listen 80;
     server_name _;
 
-    # Ganti dengan path lengkap ke folder project kamu
     root /root/base-scalper/artifacts/scalping-dashboard/dist/public;
     index index.html;
 
     gzip on;
     gzip_types text/plain text/css application/json application/javascript;
 
-    # SPA — semua URL ke index.html
     location / {
         try_files $uri $uri/ /index.html;
     }
 
-    # Proxy API ke bot
     location /api/ {
         proxy_pass http://localhost:8080/api/;
         proxy_set_header Host $host;
@@ -429,7 +235,6 @@ server {
         proxy_read_timeout 30s;
     }
 
-    # WebSocket untuk real-time dashboard
     location /socket.io/ {
         proxy_pass http://localhost:8080/socket.io/;
         proxy_http_version 1.1;
@@ -441,27 +246,21 @@ server {
 }
 ```
 
-Aktifkan dan test:
-
+Aktifkan:
 ```bash
-# Aktifkan config
 ln -s /etc/nginx/sites-available/scalper /etc/nginx/sites-enabled/
-
-# Hapus config default (opsional)
 rm -f /etc/nginx/sites-enabled/default
 
-# Test config nginx
 nginx -t
-# Output: syntax is ok / test is successful
+# harus output: syntax is ok
 
-# Reload nginx
 systemctl reload nginx
 systemctl enable nginx
 ```
 
 ---
 
-### Langkah 10: Setup Firewall
+## Langkah 12 — Firewall
 
 ```bash
 ufw enable
@@ -472,7 +271,7 @@ ufw status
 
 ---
 
-### Langkah 11: Verifikasi dan Buka Dashboard
+## Langkah 13 — Verifikasi
 
 ```bash
 # Cek PM2
@@ -480,28 +279,39 @@ pm2 status
 
 # Test API
 curl http://localhost:8080/api/healthz
+# Output: {"status":"ok",...}
 
-# Cek keamanan
+# Cek keamanan (semua harus "passed": true)
 curl http://localhost:8080/api/security-audit | python3 -m json.tool
 ```
 
-Buka browser → `http://IP_VPS_KAMU` → login.
+Buka browser → `http://IP_VPS_KAMU` → login dengan `DASHBOARD_PASSWORD` yang sudah diset.
 
 ---
 
-### Perintah PM2 Penting
+## Langkah 14 — Mulai Trading
+
+1. Cek **Security Audit** di dashboard — semua harus ✅
+2. Cek **Settings → 🔑 Secrets** — `PRIVATE_KEY` dan `WALLET_ADDRESS` harus ✅
+3. Mulai dengan **Paper mode** untuk testing minimal 24 jam
+4. Jika sudah yakin → **Settings → Trading → Mode → LIVE** → **START BOT**
+
+---
+
+## Perintah Harian PM2
 
 ```bash
-pm2 status                         # Lihat semua process
+pm2 status                         # Lihat status semua process
 pm2 logs scalper-api               # Lihat log real-time
-pm2 logs scalper-api --lines 200   # Lihat 200 baris log terakhir
+pm2 logs scalper-api --lines 200   # 200 baris log terakhir
 pm2 restart scalper-api            # Restart bot
 pm2 stop scalper-api               # Stop bot
-pm2 start scalper-api              # Start bot
 pm2 monit                          # Monitor CPU & RAM live
 ```
 
-### Update ke Versi Terbaru (Manual)
+---
+
+## Update ke Versi Terbaru
 
 ```bash
 cd base-scalper
@@ -520,24 +330,27 @@ systemctl reload nginx
 ### Dashboard tidak bisa dibuka
 
 ```bash
-# Cek nginx jalan
+# Cek nginx
 systemctl status nginx
+nginx -t
 
-# Cek port 80 tidak diblokir
+# Cek port 80
 ufw status
-curl http://localhost:80
+curl http://localhost
 
-# Docker: cek container
-docker compose ps
-docker compose logs dashboard
+# Cek path dist sudah ada
+ls /root/base-scalper/artifacts/scalping-dashboard/dist/public/index.html
+```
+
+Jika `index.html` tidak ada → build ulang:
+```bash
+BASE_PATH=/ PORT=80 pnpm --filter @workspace/scalping-dashboard run build
 ```
 
 ### Bot jalan tapi tidak ada trade
 
 ```bash
-# Lihat log bot
-docker compose logs -f api        # Docker
-pm2 logs scalper-api              # Manual
+pm2 logs scalper-api
 
 # Test koneksi RPC
 curl -X POST YOUR_BASE_RPC_URL \
@@ -546,51 +359,36 @@ curl -X POST YOUR_BASE_RPC_URL \
 ```
 
 Jika RPC OK tapi tidak ada trade:
-- Buka dashboard → Settings → kurangi nilai `minSafetyScore` atau `min5mVolumeUsd`
-- Cek Bot Log di dashboard untuk pesan error
+- Buka dashboard → Settings → kurangi `minSafetyScore` atau `min5mVolumeUsd`
+- Lihat Bot Log di dashboard
 
-### Error saat build / install
+### Error saat install (better-sqlite3)
 
 ```bash
-# Masalah better-sqlite3
 apt install -y python3 make g++ libsqlite3-dev
 pnpm install --force
-
-# Masalah PORT/BASE_PATH (manual build)
-BASE_PATH=/ PORT=80 pnpm --filter @workspace/scalping-dashboard run build
 ```
 
-### Ganti PRIVATE_KEY atau settings lain
+### Ganti `.env` (PRIVATE_KEY, dll)
 
 ```bash
-# Edit .env
 nano artifacts/api-server/.env
-
-# Restart bot
-docker compose restart api     # Docker
-pm2 restart scalper-api        # Manual
-```
-
-### Security audit gagal
-
-```bash
-curl http://localhost:8080/api/security-audit | python3 -m json.tool
-# Baca pesan di setiap check yang "passed": false
-# Perbaiki sesuai petunjuk, lalu restart bot
+pm2 restart scalper-api
 ```
 
 ---
 
-## Checklist Final Sebelum Live Trading
+## Checklist Sebelum Live Trading
 
 ```
-[ ] VPS berjalan, bot bisa diakses via browser
+[ ] pm2 status → scalper-api online
+[ ] curl localhost:8080/api/healthz → {"status":"ok"}
+[ ] Dashboard bisa dibuka di browser
 [ ] Security Audit di dashboard: semua ✅
-[ ] Settings → 🔑 Secrets: PRIVATE_KEY dan WALLET_ADDRESS ✅
+[ ] Settings → Secrets: PRIVATE_KEY & WALLET_ADDRESS ✅
 [ ] Test Paper mode minimal 24 jam
-[ ] Wallet bot hanya punya dana yang rela hilang (bot baru, tetap ada risiko)
-[ ] Backup PRIVATE_KEY wallet bot di tempat aman (offline)
-[ ] Notifikasi Telegram sudah dikonfigurasi
+[ ] Dana wallet bot = dana yang rela hilang (bukan wallet utama!)
+[ ] PRIVATE_KEY sudah dibackup di tempat aman (offline)
 ```
 
 ---
@@ -601,7 +399,4 @@ curl http://localhost:8080/api/security-audit | python3 -m json.tool
 |---|---|
 | [alchemy.com](https://alchemy.com) | Daftar RPC Base Network (gratis) |
 | [aistudio.google.com](https://aistudio.google.com/app/apikey) | Gemini AI key (gratis) |
-| [openrouter.ai](https://openrouter.ai/keys) | OpenRouter key (fallback AI) |
-| [t.me/BotFather](https://t.me/BotFather) | Buat bot Telegram untuk notifikasi |
-| [docs.docker.com](https://docs.docker.com) | Dokumentasi Docker |
 | [pm2.keymetrics.io](https://pm2.keymetrics.io) | Dokumentasi PM2 |
