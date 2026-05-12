@@ -246,7 +246,7 @@ function checkAIProviders(): SecurityCheck {
     name: "AI_PROVIDERS",
     passed: true,
     severity: "info",
-    message: `${count}/3 AI provider aktif: ${names} — rotasi round-robin terkonfigurasi`,
+    message: `${count}/3 AI provider aktif: ${names} — parallel consensus aktif`,
   };
 }
 
