@@ -17,6 +17,7 @@ type Trade = {
   exitReason: string;
   txHash?: string | null;
   mevProtected: boolean;
+  mode?: string;
 };
 
 type PaginatedTrades = {
@@ -26,10 +27,16 @@ type PaginatedTrades = {
   totalPages: number;
 };
 
-const FILTER_LABELS: Record<string, string> = {
-  today: "Today",
-  week: "This Week",
-  all: "All Time",
+const TIME_FILTER_LABELS: Record<string, string> = {
+  today: "Hari Ini",
+  week: "Minggu Ini",
+  all: "Semua",
+};
+
+const MODE_FILTER_LABELS: Record<string, string> = {
+  all: "Live + Paper",
+  live: "Live",
+  paper: "Paper",
 };
 
 const REASON_LABELS: Record<string, string> = {
@@ -77,29 +84,53 @@ function MevBadge({ protected: isProtected }: { protected: boolean }) {
   );
 }
 
+function ModeBadge({ mode }: { mode?: string }) {
+  if (!mode) return null;
+  return mode === "live" ? (
+    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-loss/10 text-loss border border-loss/20">
+      LIVE
+    </span>
+  ) : (
+    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-warn/10 text-warn border border-warn/20">
+      SIM
+    </span>
+  );
+}
+
 export function TradeHistory() {
-  const [filter, setFilter] = useState<"today" | "week" | "all">("today");
+  const [timeFilter, setTimeFilter] = useState<"today" | "week" | "all">("today");
+  const [modeFilter, setModeFilter] = useState<"all" | "live" | "paper">("all");
 
   const { data: raw } = useGetTrades(
-    { filter, limit: 100 },
-    { query: { refetchInterval: 10000, queryKey: getGetTradesQueryKey({ filter, limit: 100 }) } }
+    { filter: timeFilter, limit: 200 },
+    { query: { refetchInterval: 10000, queryKey: getGetTradesQueryKey({ filter: timeFilter, limit: 200 }) } }
   );
 
   const paginated = raw as PaginatedTrades | undefined;
-  const trades: Trade[] = paginated?.trades ?? (Array.isArray(raw) ? (raw as Trade[]) : []);
+  const allTrades: Trade[] = paginated?.trades ?? (Array.isArray(raw) ? (raw as Trade[]) : []);
 
-  // MEV stats
+  // Client-side mode filter
+  const trades = modeFilter === "all"
+    ? allTrades
+    : allTrades.filter((t) => (t.mode ?? "live") === modeFilter);
+
+  // MEV stats (on filtered trades)
   const mevCount = trades.filter((t) => t.mevProtected).length;
   const mevPct = trades.length > 0 ? Math.round((mevCount / trades.length) * 100) : 0;
   const mevProfitEth = trades.filter((t) => t.mevProtected).reduce((s, t) => s + t.profitEth, 0);
   const stdProfitEth = trades.filter((t) => !t.mevProtected).reduce((s, t) => s + t.profitEth, 0);
 
+  // Mode breakdown
+  const liveCount = allTrades.filter((t) => (t.mode ?? "live") === "live").length;
+  const paperCount = allTrades.filter((t) => t.mode === "paper").length;
+
   const exportCsv = () => {
     if (!trades.length) return;
-    const headers = ["Time", "Token", "Entry", "Exit", "Profit%", "ProfitETH", "Hold", "Reason", "MEV"];
+    const headers = ["Time", "Token", "Mode", "Entry", "Exit", "Profit%", "ProfitETH", "Hold", "Reason", "MEV"];
     const rows = trades.map((t) => [
       new Date(t.exitTime).toLocaleString("id-ID"),
       t.tokenSymbol,
+      t.mode ?? "live",
       t.entryPrice.toFixed(8),
       t.exitPrice.toFixed(8),
       t.profitPercent.toFixed(2),
@@ -113,7 +144,7 @@ export function TradeHistory() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `trades_${filter}_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `trades_${timeFilter}_${modeFilter}_${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -125,26 +156,49 @@ export function TradeHistory() {
         <div className="flex items-center gap-2">
           <div className="text-[10px] uppercase tracking-widest text-muted-foreground font-mono">Trade History</div>
           {paginated?.total !== undefined && (
-            <span className="text-[10px] text-muted-foreground font-mono">({paginated.total} total)</span>
+            <span className="text-[10px] text-muted-foreground font-mono">({trades.length} tampil / {paginated.total} total)</span>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Time filter */}
           <div className="flex rounded overflow-hidden border border-border">
             {(["today", "week", "all"] as const).map((f) => (
               <button
                 key={f}
                 data-testid={`button-filter-${f}`}
-                onClick={() => setFilter(f)}
-                className={`px-2.5 py-1 text-[10px] font-mono transition-colors ${
-                  filter === f
+                onClick={() => setTimeFilter(f)}
+                className={`px-2.5 py-1 text-[10px] font-mono transition-colors border-r border-border/30 last:border-r-0 ${
+                  timeFilter === f
                     ? "bg-primary/20 text-primary"
                     : "text-muted-foreground hover:bg-muted"
                 }`}
               >
-                {FILTER_LABELS[f]}
+                {TIME_FILTER_LABELS[f]}
               </button>
             ))}
           </div>
+
+          {/* Mode filter */}
+          <div className="flex rounded overflow-hidden border border-border">
+            {(["all", "live", "paper"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setModeFilter(m)}
+                className={`px-2.5 py-1 text-[10px] font-mono transition-colors border-r border-border/30 last:border-r-0 ${
+                  modeFilter === m
+                    ? m === "live"
+                      ? "bg-loss/20 text-loss"
+                      : m === "paper"
+                      ? "bg-warn/20 text-warn"
+                      : "bg-primary/20 text-primary"
+                    : "text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                {MODE_FILTER_LABELS[m]}
+              </button>
+            ))}
+          </div>
+
           <button
             data-testid="button-export-csv"
             onClick={exportCsv}
@@ -154,6 +208,16 @@ export function TradeHistory() {
           </button>
         </div>
       </div>
+
+      {/* Mode breakdown summary */}
+      {allTrades.length > 0 && modeFilter === "all" && (
+        <div className="flex items-center gap-3 text-[10px] font-mono text-muted-foreground">
+          <span>Breakdown:</span>
+          <span className="text-loss font-bold">{liveCount} LIVE</span>
+          <span className="text-warn font-bold">{paperCount} PAPER</span>
+          <span className="text-muted-foreground/50">— gunakan filter mode untuk pisahkan</span>
+        </div>
+      )}
 
       {/* MEV Summary Bar */}
       {trades.length > 0 && (
@@ -192,9 +256,7 @@ export function TradeHistory() {
               className="bg-primary transition-all duration-500"
               style={{ width: `${mevPct}%` }}
             />
-            <div
-              className="bg-border flex-1"
-            />
+            <div className="bg-border flex-1" />
           </div>
           <div className="flex justify-between text-[10px] font-mono">
             <span className="text-primary">{mevPct}% ✓ MEV</span>
@@ -210,6 +272,7 @@ export function TradeHistory() {
             <tr className="text-[10px] text-muted-foreground uppercase tracking-wider border-b border-border sticky top-0 bg-card">
               <th className="text-left py-1.5 pr-2">Time</th>
               <th className="text-left pr-2">Token</th>
+              <th className="text-left pr-2">Mode</th>
               <th className="text-right pr-2">Entry</th>
               <th className="text-right pr-2">Exit</th>
               <th className="text-right pr-2">P%</th>
@@ -231,6 +294,9 @@ export function TradeHistory() {
                   {formatTime(trade.exitTime)}
                 </td>
                 <td className="pr-2 font-bold text-foreground">{trade.tokenSymbol}</td>
+                <td className="pr-2">
+                  <ModeBadge mode={trade.mode} />
+                </td>
                 <td className="text-right pr-2 text-muted-foreground">${trade.entryPrice.toFixed(6)}</td>
                 <td className="text-right pr-2 text-muted-foreground">${trade.exitPrice.toFixed(6)}</td>
                 <td className={`text-right pr-2 font-bold ${trade.profitPercent >= 0 ? "text-profit" : "text-loss"}`}>
@@ -258,7 +324,7 @@ export function TradeHistory() {
 
         {trades.length === 0 && (
           <div className="py-8 text-center text-muted-foreground text-[11px] font-mono" data-testid="text-no-trades">
-            No trades for {FILTER_LABELS[filter].toLowerCase()}
+            Tidak ada trade {modeFilter !== "all" ? `mode ${modeFilter.toUpperCase()} ` : ""}untuk {TIME_FILTER_LABELS[timeFilter].toLowerCase()}
           </div>
         )}
       </div>

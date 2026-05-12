@@ -156,18 +156,21 @@ export class SwapExecutor {
   /**
    * Find best Uniswap V3 fee tier via quoteExactInputSingle.
    * Uses readProvider (BASE_RPC_URL) — pure static call, no gas needed.
+   * Returns { fee, expectedOut } — if expectedOut === 0n, no Uniswap V3 pool exists.
    */
   private async getBestFeeTier(
     ethers: any,
     readProvider: any,
     tokenAddress: string,
     amountInWei: bigint
-  ): Promise<number> {
+  ): Promise<{ fee: number; expectedOut: bigint }> {
     const cacheKey = tokenAddress.toLowerCase();
     const cached = feeTierCache.get(cacheKey);
     if (cached && Date.now() - cached.timestamp < FEE_CACHE_TTL) {
       logger.debug({ tokenAddress, fee: cached.fee }, "Fee tier from cache (read)");
-      return cached.fee;
+      // Re-quote to get expectedOut since we're using cache
+      const expectedOut = await this.getQuote(ethers, readProvider, tokenAddress, amountInWei, cached.fee);
+      return { fee: cached.fee, expectedOut };
     }
 
     const quoterAbi = [
@@ -196,9 +199,17 @@ export class SwapExecutor {
       }
     }
 
-    feeTierCache.set(cacheKey, { fee: bestFee, timestamp: Date.now() });
-    logger.info({ tokenAddress, bestFee, bestAmountOut: bestAmountOut.toString() }, "Best fee tier (read RPC)");
-    return bestFee;
+    if (bestAmountOut > 0n) {
+      feeTierCache.set(cacheKey, { fee: bestFee, timestamp: Date.now() });
+    }
+
+    logger.info(
+      { tokenAddress, bestFee, bestAmountOut: bestAmountOut.toString() },
+      bestAmountOut > 0n
+        ? "Best fee tier found (read RPC)"
+        : "No Uniswap V3 pool found on any fee tier (read RPC)"
+    );
+    return { fee: bestFee, expectedOut: bestAmountOut };
   }
 
   /**
@@ -226,7 +237,7 @@ export class SwapExecutor {
       });
       return amountOut as bigint;
     } catch (err) {
-      logger.warn({ err, tokenAddress, fee }, "Quote failed (read RPC), using 0 minimum");
+      logger.warn({ err, tokenAddress, fee }, "Quote failed (read RPC)");
       return 0n;
     }
   }
@@ -284,7 +295,7 @@ export class SwapExecutor {
   async executeTWAP(
     tokenAddress: string,
     totalAmountEth: number,
-    routerAddress?: string,
+    _routerAddress?: string,
     marketData?: { volume5mUsd: number; liquidityUsd: number; priceChange5m: number }
   ): Promise<TWAPResult> {
     const slices = this.config.twapSlices || 4;
@@ -296,7 +307,7 @@ export class SwapExecutor {
 
     for (let i = 0; i < slices; i++) {
       try {
-        const result = await this.buyToken(tokenAddress, sliceAmount, routerAddress, marketData);
+        const result = await this.buyToken(tokenAddress, sliceAmount, undefined, marketData);
         results.push(result);
         if (result.success) {
           logger.info({ slice: `${i + 1}/${slices}`, amount: sliceAmount }, "TWAP slice OK");
@@ -320,6 +331,12 @@ export class SwapExecutor {
   /**
    * Buy meme token.
    *
+   * EXECUTION ROUTER NOTE:
+   *   All swaps execute via BASE_CONTRACTS.UNISWAP_V3_ROUTER regardless of which DEX
+   *   the price was quoted from. Aerodrome/BaseSwap use a different router ABI and
+   *   cannot be called with exactInputSingle — they exist for price comparison only.
+   *   If no Uniswap V3 pool exists for this token, the buy is aborted early.
+   *
    * READ phase  (BASE_RPC_URL):  fee tier discovery, quote, WETH/ETH balance
    * WRITE phase (MEV_PROTECTION_RPC): approve (if needed) + swap tx
    *
@@ -329,7 +346,7 @@ export class SwapExecutor {
   async buyToken(
     tokenAddress: string,
     amountEth: number,
-    routerAddress?: string,
+    _routerAddress?: string,
     marketData?: { volume5mUsd: number; liquidityUsd: number; priceChange5m: number }
   ): Promise<SwapResult> {
     if (this.isPaperMode) return this.simulateBuy(tokenAddress, amountEth);
@@ -351,19 +368,26 @@ export class SwapExecutor {
       }
 
       const amountInWei = ethers.parseEther(amountEth.toFixed(18));
-      const targetRouter = routerAddress || BASE_CONTRACTS.UNISWAP_V3_ROUTER;
 
       // All reads via BASE_RPC_URL
-      const [fee, wethBalance] = await Promise.all([
+      const [feeTierResult, wethBalance] = await Promise.all([
         this.getBestFeeTier(ethers, readProvider, tokenAddress, amountInWei),
         this.getWethBalance(ethers, readProvider),
       ]);
 
-      const expectedOut = await this.getQuote(ethers, readProvider, tokenAddress, amountInWei, fee);
+      const { fee, expectedOut } = feeTierResult;
+
+      // ── Pre-flight: abort if no Uniswap V3 pool exists for this token ──
+      // Tokens only listed on Aerodrome/BaseSwap will have expectedOut=0 here.
+      // Attempting the swap would revert with "missing revert data" on the router.
+      if (expectedOut === 0n) {
+        const reason = "No Uniswap V3 liquidity found — token may be Aerodrome/BaseSwap only. Skipping buy.";
+        logger.warn({ tokenAddress, amountEth }, reason);
+        return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: reason };
+      }
+
       const amountOutMinimum =
-        expectedOut > 0n
-          ? (expectedOut * BigInt(Math.floor((100 - slippagePct) * 100))) / 10000n
-          : 0n;
+        (expectedOut * BigInt(Math.floor((100 - slippagePct) * 100))) / 10000n;
 
       const useWeth = wethBalance >= amountInWei;
 
@@ -388,10 +412,12 @@ export class SwapExecutor {
       const feeData = await writeProvider.getFeeData();
       const gasParams = buildGasParams(ethers, feeData, this.config.maxPriorityFeeGwei);
 
+      // Always use Uniswap V3 SwapRouter02 — Aerodrome/BaseSwap use different ABIs
+      // SwapRouter02 exactInputSingle does NOT have 'deadline' in struct (removed vs V1)
       const routerAbi = [
         "function exactInputSingle((address tokenIn, address tokenOut, uint24 fee, address recipient, uint256 amountIn, uint256 amountOutMinimum, uint160 sqrtPriceLimitX96) params) external payable returns (uint256 amountOut)",
       ];
-      const router = new ethers.Contract(targetRouter, routerAbi, writeWallet);
+      const router = new ethers.Contract(BASE_CONTRACTS.UNISWAP_V3_ROUTER, routerAbi, writeWallet);
 
       let tx: any;
 
@@ -451,8 +477,6 @@ export class SwapExecutor {
       }
 
       // ── MEV Sandwich Detection ──────────────────────────────────────────
-      // Compare expected tokens from quote vs actual tokens received.
-      // If actual slippage exceeds configured slippage + 2% buffer → sandwich suspected.
       let sandwichDetected = false;
       let actualSlippagePct = 0;
       const SANDWICH_BUFFER_PCT = 2;
@@ -471,7 +495,7 @@ export class SwapExecutor {
               actualSlippage: actualSlippagePct.toFixed(2),
               mevProtected: mevActive,
             },
-            `⚠️ MEV SANDWICH TERDETEKSI: actual slippage ${actualSlippagePct.toFixed(2)}% >> configured ${slippagePct}%`
+            `MEV SANDWICH DETECTED: actual slippage ${actualSlippagePct.toFixed(2)}% >> configured ${slippagePct}%`
           );
         }
       }
@@ -489,6 +513,7 @@ export class SwapExecutor {
         expectedOut,
       };
     } catch (err: any) {
+      const errMsg = err.shortMessage || err.reason || err.message || "Swap failed";
       logger.error({ err, tokenAddress, amountEth }, "Buy swap failed");
       return {
         success: false,
@@ -496,7 +521,7 @@ export class SwapExecutor {
         amountIn: 0n,
         amountOut: 0n,
         gasUsed: 0n,
-        error: err.shortMessage || err.message || "Swap failed",
+        error: errMsg,
       };
     }
   }
@@ -594,43 +619,54 @@ export class SwapExecutor {
         amountIn: sellAmount,
         amountOut,
         gasUsed: receipt.gasUsed,
+        usedWeth: false,
         mevProtected: mevActive,
       };
     } catch (err: any) {
-      logger.error({ err, tokenAddress }, "Sell swap failed");
+      const errMsg = err.shortMessage || err.reason || err.message || "Sell failed";
+      logger.error({ err, tokenAddress, amountEth }, "Sell swap failed");
       return {
         success: false,
         txHash: null,
         amountIn: 0n,
         amountOut: 0n,
         gasUsed: 0n,
-        error: err.shortMessage || err.message || "Sell failed",
+        error: errMsg,
       };
     }
   }
 
-  // ─── Simulation (paper mode) ──────────────────────────────────────────────
+  // ─── PAPER TRADING SIMULATIONS ────────────────────────────────────────────
 
   private simulateBuy(tokenAddress: string, amountEth: number): SwapResult {
-    logger.info({ tokenAddress, amountEth }, "Paper trade: BUY simulated");
+    const amountInWei = BigInt(Math.floor(amountEth * 1e18));
+    // Simulate getting tokens — use a random price for simulation
+    const simulatedTokens = BigInt(Math.floor(amountEth * 1e18 * (1 + (Math.random() * 0.02 - 0.01))));
+    logger.info({ tokenAddress, amountEth }, "[PAPER] Simulated buy");
     return {
       success: true,
-      txHash: `paper_${Date.now()}_buy`,
-      amountIn: BigInt(Math.floor(amountEth * 1e18)),
-      amountOut: BigInt(Math.floor(Math.random() * 1e18)),
-      gasUsed: 150000n,
+      txHash: null,
+      amountIn: amountInWei,
+      amountOut: simulatedTokens,
+      gasUsed: 0n,
+      usedWeth: false,
       mevProtected: false,
+      sandwichDetected: false,
+      actualSlippagePct: 0,
+      expectedOut: simulatedTokens,
     };
   }
 
-  private simulateSell(tokenAddress: string, estimatedEth: number): SwapResult {
-    logger.info({ tokenAddress, estimatedEth }, "Paper trade: SELL simulated");
+  private simulateSell(tokenAddress: string, amountEth: number): SwapResult {
+    const amountOutWei = BigInt(Math.floor(amountEth * 1e18 * (1 + (Math.random() * 0.04 - 0.01))));
+    logger.info({ tokenAddress, amountEth }, "[PAPER] Simulated sell");
     return {
       success: true,
-      txHash: `paper_${Date.now()}_sell`,
-      amountIn: BigInt(Math.floor(Math.random() * 1e18)),
-      amountOut: BigInt(Math.floor(estimatedEth * 1e18)),
-      gasUsed: 180000n,
+      txHash: null,
+      amountIn: 0n,
+      amountOut: amountOutWei,
+      gasUsed: 0n,
+      usedWeth: false,
       mevProtected: false,
     };
   }

@@ -21,6 +21,14 @@ export interface AIAnalysisResult {
   model: string;
   provider: string;
   latencyMs: number;
+  // Consensus fields (populated when multiple providers are used)
+  consensusVotes?: {
+    provider: string;
+    decision: "buy" | "skip";
+    confidence: number;
+  }[];
+  consensusBuyCount?: number;
+  consensusTotalCount?: number;
 }
 
 // ─── Shared Prompt ───────────────────────────────────────────────────────────
@@ -191,30 +199,29 @@ interface ProviderEntry {
   fn: (data: AIAnalysisInput) => Promise<AIAnalysisResult>;
 }
 
-function buildAvailableRoster(): ProviderEntry[] {
-  const all: ProviderEntry[] = [
-    {
-      name: "Gemini",
-      label: "Google Gemini 2.5 Flash",
-      envKey: "AI_INTEGRATIONS_GEMINI_API_KEY",
-      fn: analyzeWithGemini,
-    },
-    {
-      name: "Groq",
-      label: "Groq / Llama 3.1-8b",
-      envKey: "GROQ_API_KEY",
-      fn: analyzeWithGroq,
-    },
-    {
-      name: "HuggingFace",
-      label: "HuggingFace / Qwen2.5-7B",
-      envKey: "HUGGINGFACE_API_KEY",
-      fn: analyzeWithHuggingFace,
-    },
-  ];
+const ALL_PROVIDERS: ProviderEntry[] = [
+  {
+    name: "Gemini",
+    label: "Google Gemini 2.5 Flash",
+    envKey: "AI_INTEGRATIONS_GEMINI_API_KEY",
+    fn: analyzeWithGemini,
+  },
+  {
+    name: "Groq",
+    label: "Groq / Llama 3.1-8b",
+    envKey: "GROQ_API_KEY",
+    fn: analyzeWithGroq,
+  },
+  {
+    name: "HuggingFace",
+    label: "HuggingFace / Qwen2.5-7B",
+    envKey: "HUGGINGFACE_API_KEY",
+    fn: analyzeWithHuggingFace,
+  },
+];
 
-  // Only include providers that are configured
-  return all.filter((p) => !!process.env[p.envKey]);
+function buildAvailableRoster(): ProviderEntry[] {
+  return ALL_PROVIDERS.filter((p) => !!process.env[p.envKey]);
 }
 
 // ─── AIAnalyzer Class ────────────────────────────────────────────────────────
@@ -227,10 +234,6 @@ export class AIAnalyzer {
   // Cache: avoid re-calling AI for same token in same 90s window
   private cache = new Map<string, { result: AIAnalysisResult; ts: number }>();
   private readonly CACHE_TTL = 90_000; // 90 seconds
-
-  // Strict round-robin index — advances by 1 on every SUCCESSFUL call
-  // This ensures each provider handles exactly 1/N of all analyses
-  private rotationIndex = 0;
 
   // Per-provider failure tracking for smart cooldown
   private providerFailures = new Map<string, { count: number; lastFail: number }>();
@@ -260,7 +263,6 @@ export class AIAnalyzer {
     const f = this.providerFailures.get(name);
     if (!f) return true;
     if (f.count >= 3 && Date.now() - f.lastFail < this.PROVIDER_COOLDOWN_MS) return false;
-    // Reset failures if cooldown has passed
     if (Date.now() - f.lastFail >= this.PROVIDER_COOLDOWN_MS) {
       this.providerFailures.delete(name);
       return true;
@@ -279,6 +281,16 @@ export class AIAnalyzer {
     this.providerFailures.delete(name);
   }
 
+  /**
+   * Parallel Consensus Analysis:
+   *   - ALL configured providers analyze the token simultaneously
+   *   - Each provider gets equal weight — no provider is more important than another
+   *   - Need majority BUY votes (≥ ceil(n/2)) to return "buy"
+   *   - If all providers fail → return null (fail-open: trade proceeds without AI block)
+   *   - 1 provider configured → acts as sole decision maker
+   *   - 2 providers configured → need 2/2 BUY (stricter, protects capital)
+   *   - 3 providers configured → need 2/3 BUY (true majority, balanced)
+   */
   async analyze(data: AIAnalysisInput): Promise<AIAnalysisResult | null> {
     if (!this.enabled) return null;
 
@@ -290,56 +302,110 @@ export class AIAnalyzer {
       return cached.result;
     }
 
-    const roster = buildAvailableRoster();
+    const roster = buildAvailableRoster().filter((p) => this.isProviderHealthy(p.name));
 
     if (roster.length === 0) {
-      logger.warn({}, "No AI providers configured — set at least one of: AI_INTEGRATIONS_GEMINI_API_KEY, GROQ_API_KEY, HUGGINGFACE_API_KEY");
+      logger.warn(
+        {},
+        "No AI providers available — set at least one of: AI_INTEGRATIONS_GEMINI_API_KEY, GROQ_API_KEY, HUGGINGFACE_API_KEY"
+      );
       return null;
     }
 
-    // Round-robin: start at current rotation index
-    // Each provider gets ~1/N of all token analyses
-    const startIndex = this.rotationIndex % roster.length;
+    // ── Run ALL providers simultaneously (parallel, not round-robin) ──
+    const startAll = Date.now();
+    const settled = await Promise.allSettled(roster.map((p) => p.fn(data)));
 
-    for (let attempt = 0; attempt < roster.length; attempt++) {
-      const idx = (startIndex + attempt) % roster.length;
-      const provider = roster[idx];
+    const votes: { provider: string; decision: "buy" | "skip"; confidence: number; reasons: string[]; model: string; latencyMs: number }[] = [];
 
-      if (!this.isProviderHealthy(provider.name)) {
-        logger.debug({ provider: provider.name }, "AI provider on cooldown, trying next");
-        continue;
-      }
-
-      try {
-        const result = await provider.fn(data);
-
-        // Advance rotation index on success — next token goes to next provider
-        this.rotationIndex = (idx + 1) % roster.length;
+    for (let i = 0; i < settled.length; i++) {
+      const entry = settled[i];
+      const provider = roster[i];
+      if (entry.status === "fulfilled") {
         this.recordProviderSuccess(provider.name);
-
-        this.cache.set(cacheKey, { result, ts: Date.now() });
+        votes.push({
+          provider: provider.name,
+          decision: entry.value.decision,
+          confidence: entry.value.confidence,
+          reasons: entry.value.reasons,
+          model: entry.value.model,
+          latencyMs: entry.value.latencyMs,
+        });
         logger.info(
           {
             symbol: data.symbol,
             provider: provider.name,
-            decision: result.decision,
-            confidence: result.confidence,
-            latencyMs: result.latencyMs,
+            decision: entry.value.decision,
+            confidence: entry.value.confidence,
+            latencyMs: entry.value.latencyMs,
           },
-          "AI analysis complete"
+          "AI vote received"
         );
-        return result;
-      } catch (err: any) {
+      } else {
         this.recordProviderFailure(provider.name);
-        logger.warn(
-          { provider: provider.name, err: err?.message },
-          "AI provider failed, rotating to next"
-        );
+        logger.warn({ provider: provider.name, err: (entry.reason as any)?.message }, "AI provider failed in consensus");
       }
     }
 
-    logger.warn({ symbol: data.symbol }, "All AI providers failed — skipping AI filter");
-    return null;
+    if (votes.length === 0) {
+      logger.warn({ symbol: data.symbol }, "All AI providers failed — skipping AI filter");
+      return null;
+    }
+
+    // ── Tally votes ──
+    const buyVotes = votes.filter((v) => v.decision === "buy");
+    const skipVotes = votes.filter((v) => v.decision === "skip");
+
+    // Majority threshold: ceil(n/2) — more providers = stricter consensus
+    const majorityNeeded = Math.ceil(votes.length / 2);
+    const consensusDecision: "buy" | "skip" = buyVotes.length >= majorityNeeded ? "buy" : "skip";
+
+    // Aggregate confidence from BUY voters (or all voters if skip)
+    const votersForAvg = buyVotes.length > 0 ? buyVotes : votes;
+    const avgConfidence = Math.round(
+      votersForAvg.reduce((s, v) => s + v.confidence, 0) / votersForAvg.length
+    );
+
+    // Combine reasons from all voters (max 4 total)
+    const allReasons = votes.flatMap((v) => v.reasons);
+    const uniqueReasons = [...new Set(allReasons)].slice(0, 4);
+
+    // Primary provider label for display: prefer the most confident BUY voter; else first voter
+    const primaryVote = buyVotes.length > 0
+      ? buyVotes.reduce((a, b) => (a.confidence > b.confidence ? a : b))
+      : votes[0];
+
+    const result: AIAnalysisResult = {
+      decision: consensusDecision,
+      confidence: avgConfidence,
+      reasons: uniqueReasons,
+      model: primaryVote.model,
+      provider: votes.length > 1
+        ? `${votes.map((v) => v.provider).join("+")} [${buyVotes.length}/${votes.length} BUY]`
+        : primaryVote.provider,
+      latencyMs: Date.now() - startAll,
+      consensusVotes: votes.map((v) => ({ provider: v.provider, decision: v.decision, confidence: v.confidence })),
+      consensusBuyCount: buyVotes.length,
+      consensusTotalCount: votes.length,
+    };
+
+    this.cache.set(cacheKey, { result, ts: Date.now() });
+
+    logger.info(
+      {
+        symbol: data.symbol,
+        decision: consensusDecision,
+        buyVotes: buyVotes.length,
+        skipVotes: skipVotes.length,
+        totalVotes: votes.length,
+        majorityNeeded,
+        avgConfidence,
+        totalLatencyMs: result.latencyMs,
+      },
+      `AI consensus: ${buyVotes.length}/${votes.length} BUY → ${consensusDecision.toUpperCase()}`
+    );
+
+    return result;
   }
 
   shouldBuy(result: AIAnalysisResult | null): boolean {
@@ -357,13 +423,7 @@ export class AIAnalyzer {
     rotationSlot: number | null;
   }> {
     const roster = buildAvailableRoster();
-    const allProviders: ProviderEntry[] = [
-      { name: "Gemini",      label: "Google Gemini 2.5 Flash",  envKey: "AI_INTEGRATIONS_GEMINI_API_KEY", fn: analyzeWithGemini },
-      { name: "Groq",        label: "Groq / Llama 3.1-8b",      envKey: "GROQ_API_KEY",                  fn: analyzeWithGroq },
-      { name: "HuggingFace", label: "HuggingFace / Qwen2.5-7B", envKey: "HUGGINGFACE_API_KEY",           fn: analyzeWithHuggingFace },
-    ];
-
-    return allProviders.map((p) => {
+    return ALL_PROVIDERS.map((p) => {
       const configured = !!process.env[p.envKey];
       const f = this.providerFailures.get(p.name);
       const slotIndex = roster.findIndex((r) => r.name === p.name);

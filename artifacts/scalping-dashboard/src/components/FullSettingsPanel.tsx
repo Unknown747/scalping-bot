@@ -467,11 +467,11 @@ export function FullSettingsPanel() {
                   <div className="space-y-4">
                     {/* Header info */}
                     <div className="p-3 rounded-lg border border-primary/30 bg-primary/5 space-y-1">
-                      <div className="text-[10px] text-primary font-mono font-bold">AI Token Filter — 3 Provider Round-Robin</div>
+                      <div className="text-[10px] text-primary font-mono font-bold">AI Token Filter — Parallel Consensus (Semua Serentak)</div>
                       <div className="text-[9px] text-muted-foreground leading-relaxed">
-                        Setiap analisis token digilirkan ke provider berbeda secara otomatis.
-                        Token 1→Gemini, Token 2→Groq, Token 3→HuggingFace, Token 4→Gemini, dst.
-                        Credit terdistribusi merata — tidak membebani satu provider.
+                        Setiap token dianalisis oleh <span className="text-primary font-bold">semua provider secara bersamaan</span>.
+                        Butuh mayoritas suara BUY (≥2/3) untuk lanjut beli — jauh lebih akurat dari 1 AI.
+                        3 provider aktif = butuh 2 setuju. 2 provider aktif = butuh 2 setuju. 1 provider = 1 sudah cukup.
                       </div>
                     </div>
 
@@ -487,42 +487,42 @@ export function FullSettingsPanel() {
                     </div>
 
                     {/* Provider cards */}
-                    <SectionHeader title="Provider (Rotasi Otomatis)" />
+                    <SectionHeader title="Provider (Semua Aktif Paralel)" />
                     <div className="space-y-2">
                       {[
                         {
                           id: "gemini",
                           name: "Gemini 2.5 Flash",
-                          role: "Deep Analysis — kualitas terbaik",
+                          role: "Analisis mendalam — kualitas terbaik, 1500 req/hari gratis",
                           color: "text-blue-400 bg-blue-500/10 border-blue-500/25",
                           link: "aistudio.google.com",
                           envKey: "AI_INTEGRATIONS_GEMINI_API_KEY",
-                          slot: "Slot 1",
+                          badge: "Voter 1",
                         },
                         {
                           id: "groq",
                           name: "Groq / Llama 3.1-8b",
-                          role: "Speed Decision — ultra-cepat (<1 detik)",
+                          role: "Ultra-cepat (<1 detik) — vote kedua secara paralel",
                           color: "text-purple-400 bg-purple-500/10 border-purple-500/25",
                           link: "console.groq.com",
                           envKey: "GROQ_API_KEY",
-                          slot: "Slot 2",
+                          badge: "Voter 2",
                         },
                         {
                           id: "huggingface",
                           name: "HuggingFace / Qwen2.5-7B",
-                          role: "Tiebreaker / Backup — gratis unlimited",
+                          role: "Penentu suara ke-3 — gratis unlimited",
                           color: "text-yellow-400 bg-yellow-500/10 border-yellow-500/25",
                           link: "huggingface.co/settings/tokens",
                           envKey: "HUGGINGFACE_API_KEY",
-                          slot: "Slot 3",
+                          badge: "Voter 3",
                         },
                       ].map((p) => (
                         <div key={p.id} className={`p-2.5 rounded-lg border ${p.color}`}>
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
                               <span className={`text-[8px] font-mono font-bold px-1.5 py-0.5 rounded border ${p.color}`}>
-                                {p.slot}
+                                {p.badge}
                               </span>
                               <span className="text-[11px] font-mono font-semibold text-foreground/90">{p.name}</span>
                             </div>
@@ -691,12 +691,13 @@ export function FullSettingsPanel() {
 
                     {/* VPS setup instructions */}
                     <div className="p-3 rounded-lg border border-border bg-muted/5 space-y-2">
-                      <div className="text-[10px] font-mono font-bold text-muted-foreground">CARA SET DI VPS</div>
+                      <div className="text-[10px] font-mono font-bold text-muted-foreground">CARA SET DI VPS (PM2)</div>
                       <div className="text-[9px] font-mono text-muted-foreground/70 leading-relaxed space-y-1">
                         <div>1. Copy file <span className="text-primary">.env.example</span> → <span className="text-primary">.env</span></div>
                         <div>2. Isi semua nilai di .env</div>
-                        <div>3. Jalankan: <span className="text-primary">docker compose up -d</span></div>
-                        <div>4. Dashboard tersedia di port <span className="text-primary">80</span>, API di port <span className="text-primary">8080</span></div>
+                        <div>3. Build: <span className="text-primary">pnpm --filter @workspace/api-server run build</span></div>
+                        <div>4. Jalankan: <span className="text-primary">pm2 start ecosystem.config.cjs</span></div>
+                        <div>5. Dashboard via Nginx di port <span className="text-primary">80</span>, API di port <span className="text-primary">8080</span></div>
                       </div>
                     </div>
 

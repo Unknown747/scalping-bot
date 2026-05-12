@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   useGetBotStatus, useGetStats, useGetPositions,
   useGetWalletBalance, useGetScannedTokens, useGetLogs, useGetConfig,
@@ -32,6 +32,13 @@ type TokenEntry = {
   safetyScore: number; passedFilters: boolean; scannedAt: string; dexUrl?: string | null;
 };
 
+// Fetch combined live + paper stats from /api/stats/both
+async function fetchBothStats() {
+  const res = await fetch("/api/stats/both", { credentials: "include" });
+  if (!res.ok) throw new Error("stats/both fetch failed");
+  return res.json();
+}
+
 export function Dashboard() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [liveTokens, setLiveTokens] = useState<TokenEntry[]>([]);
@@ -46,6 +53,14 @@ export function Dashboard() {
   const { data: stats } = useGetStats({
     query: { refetchInterval: 10000, queryKey: getGetStatsQueryKey() },
   });
+
+  // Both-mode stats — gives live AND paper stats simultaneously
+  const { data: bothStats } = useQuery({
+    queryKey: ["stats-both"],
+    queryFn: fetchBothStats,
+    refetchInterval: 15000,
+  });
+
   const { data: positions } = useGetPositions({
     query: { refetchInterval: 3000, queryKey: getGetPositionsQueryKey() },
   });
@@ -175,6 +190,7 @@ export function Dashboard() {
     updateConfig.mutate({ data: { mode } }, {
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: getGetConfigQueryKey() });
+        queryClient.invalidateQueries({ queryKey: ["stats-both"] });
         toast.info(`Mode diganti ke ${mode.toUpperCase()}`);
       },
     });
@@ -189,7 +205,7 @@ export function Dashboard() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      {/* Paper trading banner — only shown if user deliberately switches to paper mode */}
+      {/* Paper trading banner */}
       <AnimatePresence>
         {isPaperMode && (
           <motion.div
@@ -225,7 +241,7 @@ export function Dashboard() {
           <div className="flex items-center gap-3">
             {wallet?.address && (
               <span className="text-xs text-muted-foreground font-mono hidden sm:block">
-                {wallet.address.slice(0, 6)}...{wallet.address.slice(-4)}
+                {(wallet as any).address.slice(0, 6)}...{(wallet as any).address.slice(-4)}
               </span>
             )}
             <span className="px-2 py-0.5 rounded text-xs font-bold bg-primary/20 text-primary border border-primary/30">
@@ -240,7 +256,6 @@ export function Dashboard() {
               {botStatus?.running ? "RUNNING" : "STOPPED"}
             </div>
 
-            {/* Logout button */}
             <button
               onClick={handleLogout}
               title="Keluar"
@@ -256,7 +271,12 @@ export function Dashboard() {
       </header>
 
       <main className="max-w-[1600px] mx-auto px-4 py-4 space-y-4">
-        <StatsRow stats={stats as any} botStatus={botStatus as any} />
+        {/* Stats with live/paper/both toggle */}
+        <StatsRow
+          stats={stats as any}
+          botStatus={botStatus as any}
+          bothStats={bothStats as any}
+        />
 
         <div className="grid grid-cols-1 xl:grid-cols-[340px_1fr] gap-4">
           <div className="space-y-4">
