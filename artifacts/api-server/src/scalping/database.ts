@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import path from "path";
 import { fileURLToPath } from "url";
 import { logger } from "../lib/logger.js";
@@ -6,22 +6,22 @@ import { logger } from "../lib/logger.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = process.env["SQLITE_PATH"] || path.join(__dirname, "../../scalping.db");
 
-let _db: Database.Database | null = null;
+let _db: DatabaseSync | null = null;
 
-export function getDb(): Database.Database {
+export function getDb(): DatabaseSync {
   if (!_db) {
-    _db = new Database(DB_PATH);
-    _db.pragma("journal_mode = WAL");
-    _db.pragma("foreign_keys = ON");
-    _db.pragma("cache_size = -8000");
-    _db.pragma("temp_store = MEMORY");
+    _db = new DatabaseSync(DB_PATH);
+    _db.exec("PRAGMA journal_mode = WAL");
+    _db.exec("PRAGMA foreign_keys = ON");
+    _db.exec("PRAGMA cache_size = -8000");
+    _db.exec("PRAGMA temp_store = MEMORY");
     initSchema(_db);
     logger.info({ path: DB_PATH }, "SQLite database initialized");
   }
   return _db;
 }
 
-function initSchema(db: Database.Database): void {
+function initSchema(db: DatabaseSync): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS trades (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -131,19 +131,23 @@ function initSchema(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_token_blacklist_address ON token_blacklist(address);
   `);
 
+  // Migration: add mode column to existing trades tables that don't have it yet
   try {
     db.exec(`ALTER TABLE trades ADD COLUMN mode TEXT NOT NULL DEFAULT 'live'`);
+    // Fix: trades with no real txHash are paper trades (live trades always have a txHash)
     db.exec(`UPDATE trades SET mode = 'paper' WHERE tx_hash IS NULL OR tx_hash = ''`);
   } catch {
     // Column already exists — ignore
   }
 
+  // Safety fix: re-run the paper correction in case column already existed but trades were mislabeled
   try {
     db.exec(`UPDATE trades SET mode = 'paper' WHERE (tx_hash IS NULL OR tx_hash = '') AND mode = 'live'`);
   } catch {
     // ignore
   }
 
+  // Migration: add dex_id to positions table (for Aerodrome routing persistence across restarts)
   try {
     db.exec(`ALTER TABLE positions ADD COLUMN dex_id TEXT`);
   } catch {
@@ -372,7 +376,7 @@ export function getLogs(limit = 100, page = 1, level?: string): any[] {
   `).all(limit, offset) as any[];
 }
 
-// Today + all-time stats
+// Today + all-time stats (used by /api/stats and /api/stats/both)
 export function getTodayStats(mode?: "live" | "paper"): { pnlEth: number; totalTrades: number; winningTrades: number; losingTrades: number } {
   const db = getDb();
   const row = (mode
