@@ -65,5 +65,8 @@ testem.log
 .cache/
 .local/
 .agents/
+.replit
+.replitignore
+.replit_integration_files/
 .cursor/rules/nx-rules.mdc
 .github/instructions/nx.instructions.md
