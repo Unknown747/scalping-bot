@@ -448,10 +448,32 @@ export class SwapExecutor {
           simErr.message ||
           "swap simulation failed";
 
+        // Classify the simulation error into 3 categories:
+        // 1. Slippage → retry with 2× slippage
+        // 2. Contract revert (honeypot / FoT / broken token) → skip immediately
+        // 3. Infrastructure (approval not set, RPC rate limit) → proceed anyway
+
         const isSlippageRevert =
           simMsg.includes("Too little received") ||
           simMsg.includes("STF") ||
           simMsg.includes("slippage");
+
+        // "missing revert data" = contract reverted without reason string
+        // Typical for honeypots, fee-on-transfer tokens, and transfer restrictions
+        const isContractRevert =
+          simMsg.includes("missing revert data") ||
+          simMsg.includes("execution reverted") ||
+          simMsg.includes("reverted") ||
+          simMsg.includes("TRANSFER_FROM_FAILED") ||
+          simMsg.includes("TransferHelper");
+
+        // Infrastructure errors that we should ignore (let real tx proceed)
+        const isInfraError =
+          simMsg.includes("rate limit") ||
+          simMsg.includes("over rate limit") ||
+          simMsg.includes("could not coalesce") ||
+          simMsg.includes("timeout") ||
+          simMsg.includes("network");
 
         if (isSlippageRevert) {
           // Retry once with 2× slippage (up to 20%)
@@ -488,10 +510,16 @@ export class SwapExecutor {
             logger.warn({ tokenAddress, fee, retryMsg }, "Slippage retry simulation also failed — skipping buy");
             return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: `Simulation: ${retryMsg}` };
           }
+        } else if (isContractRevert) {
+          // Token contract reverted — likely honeypot or fee-on-transfer. Skip.
+          logger.warn({ tokenAddress, fee, simMsg }, "Token contract revert in simulation — likely honeypot/FoT, skipping buy");
+          return { success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: `Honeypot/FoT: ${simMsg}` };
+        } else if (isInfraError) {
+          // RPC rate limit or network issue — ignore simulation, proceed with real tx
+          logger.warn({ tokenAddress, fee, simMsg }, "Simulation infra error (rate limit/timeout) — proceeding with real tx");
         } else {
-          // Non-slippage error (e.g. approval not set, or RPC issue) — proceed anyway.
-          // The real tx will handle WETH approval via ensureWethApproval below.
-          logger.warn({ tokenAddress, fee, simMsg }, "Simulation non-slippage error — proceeding with real tx anyway");
+          // Approval not set or unknown error — proceed, real tx handles approval
+          logger.warn({ tokenAddress, fee, simMsg }, "Simulation unknown error — proceeding with real tx anyway");
         }
       }
 
