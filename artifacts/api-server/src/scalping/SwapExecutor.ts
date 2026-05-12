@@ -332,6 +332,14 @@ export class SwapExecutor {
     const sliceAmount = totalAmountEth / slices;
     const results: SwapResult[] = [];
 
+    // Errors that will not be resolved by retrying more slices — abort early
+    const NON_TRANSIENT = [
+      "No liquidity on any DEX",
+      "No liquidity on any V2 DEX",
+      "Env var tidak diset",
+      "Honeypot/FoT",
+    ];
+
     logger.info({ tokenAddress, slices, sliceAmount, intervalMs, dexId }, "TWAP execution started");
 
     for (let i = 0; i < slices; i++) {
@@ -342,12 +350,21 @@ export class SwapExecutor {
           logger.info({ slice: `${i + 1}/${slices}`, amount: sliceAmount }, "TWAP slice OK");
         } else {
           logger.warn({ slice: `${i + 1}/${slices}`, error: result.error }, "TWAP slice failed");
+          // Abort early if this is a non-transient error — remaining slices will fail too
+          if (NON_TRANSIENT.some((msg) => result.error?.includes(msg))) {
+            logger.warn({ tokenAddress, error: result.error }, "TWAP aborting early — non-transient error, skipping remaining slices");
+            const abortError = `Aborted (non-transient): ${result.error}`;
+            for (let j = i + 1; j < slices; j++) {
+              results.push({ success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: abortError });
+            }
+            break;
+          }
         }
       } catch (err) {
         logger.error({ err, slice: i + 1 }, "TWAP slice error");
         results.push({ success: false, txHash: null, amountIn: 0n, amountOut: 0n, gasUsed: 0n, error: String(err) });
       }
-      if (i < slices - 1) await sleep(intervalMs);
+      if (i < slices - 1 && results.length <= i + 1) await sleep(intervalMs);
     }
 
     const successfulSlices = results.filter((r) => r.success).length;

@@ -768,25 +768,41 @@ export class ScalpingBot {
         token.dexId
       );
       if (twapResult.successfulSlices === 0) {
-        this.log("error", `TWAP buy failed for ${token.symbol}: all slices failed`, token.symbol);
-        return;
+        // Surface the actual error from the first failed slice so it's visible in dashboard
+        const firstError = twapResult.results[0]?.error || "unknown error";
+        this.log("error", `TWAP buy failed for ${token.symbol}: ${firstError}`, token.symbol);
+        // Fallback: try a direct single swap before giving up
+        this.log("info", `TWAP fallback: tentang direct swap untuk ${token.symbol}`, token.symbol);
+        buyResult = await this.swapExecutor.buyToken(token.address, amountEth, token.dexId, marketData);
+        if (!buyResult.success) {
+          this.log("error", `Direct swap fallback juga gagal untuk ${token.symbol}: ${buyResult.error}`, token.symbol);
+          this.emit("filter-rejection", {
+            symbol: token.symbol, address: token.address, stage: "swap_failed",
+            reason: buyResult.error || "TWAP + direct swap gagal",
+            details: { dex: bestRoute.dex, twapError: firstError },
+            timestamp: new Date().toISOString(),
+          });
+          return;
+        }
+        this.log("info", `TWAP fallback direct swap berhasil untuk ${token.symbol}`, token.symbol);
+      } else {
+        // Aggregate successful TWAP results into a single SwapResult
+        const totalAmountOut = twapResult.results
+          .filter((r) => r.success)
+          .reduce((sum, r) => sum + r.amountOut, 0n);
+        buyResult = {
+          success: true,
+          txHash: twapResult.results.find((r) => r.success)?.txHash || null,
+          amountIn: BigInt(Math.floor(amountEth * 1e18)),
+          amountOut: totalAmountOut,
+          gasUsed: 0n,
+        };
+        this.log(
+          "info",
+          `TWAP completed for ${token.symbol}: ${twapResult.successfulSlices}/${twapResult.totalSlices} slices via ${bestRoute.dex}`,
+          token.symbol
+        );
       }
-      // Aggregate results into a single SwapResult
-      const totalAmountOut = twapResult.results
-        .filter((r) => r.success)
-        .reduce((sum, r) => sum + r.amountOut, 0n);
-      buyResult = {
-        success: true,
-        txHash: twapResult.results.find((r) => r.success)?.txHash || null,
-        amountIn: BigInt(Math.floor(amountEth * 1e18)),
-        amountOut: totalAmountOut,
-        gasUsed: 0n,
-      };
-      this.log(
-        "info",
-        `TWAP completed for ${token.symbol}: ${twapResult.successfulSlices}/${twapResult.totalSlices} slices via ${bestRoute.dex}`,
-        token.symbol
-      );
     } else {
       buyResult = await this.swapExecutor.buyToken(
         token.address,
