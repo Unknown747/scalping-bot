@@ -15,14 +15,22 @@ import { logger } from "../lib/logger.js";
  *   backup  : MEV_PROTECTION_RPC_BACKUP (default: https://rpc.flashbots.net/fast)
  */
 
-// ─── Public fallback RPCs (read only) ─────────────────────────────────────────
+// ─── Public fallback RPCs (read + write fallback) ─────────────────────────────
 const PUBLIC_READ_RPCS = [
   "https://mainnet.base.org",
   "https://base.publicnode.com",
   "https://base.drpc.org",
   "https://1rpc.io/base",
+  "https://rpc.ankr.com/base",
+  "https://base.llamarpc.com",
+  "https://base-mainnet.public.blastapi.io",
+  "https://base.meowrpc.com",
+  "https://base-pokt.nodies.app",
+  "https://gateway.tenderly.co/public/base",
   "https://endpoints.omniatech.io/v1/base/mainnet/public",
   "https://base-rpc.publicnode.com",
+  "https://developer-access-mainnet.base.org",
+  "https://base.api.onfinality.io/public",
 ];
 
 // ─── Health tracking ──────────────────────────────────────────────────────────
@@ -98,10 +106,6 @@ function getWriteRpcList(): string[] {
 }
 
 // ─── getReadProvider ─────────────────────────────────────────────────────────
-/**
- * Returns a provider backed by BASE_RPC_URL (read-only queries).
- * Never uses the MEV endpoint.
- */
 export async function getReadProvider(): Promise<{ provider: any; ethers: any; rpcUrl: string }> {
   const { ethers } = await import("ethers");
   const rpcs = getReadRpcList();
@@ -122,11 +126,6 @@ export async function getReadProvider(): Promise<{ provider: any; ethers: any; r
 }
 
 // ─── getWriteProvider ─────────────────────────────────────────────────────────
-/**
- * Returns a wallet-ready provider for submitting transactions.
- * Tries MEV_PROTECTION_RPC first, logs which path is taken,
- * then falls back to BASE_RPC_URL, then public RPCs.
- */
 export interface WriteProviderResult {
   provider: any;
   ethers: any;
@@ -158,8 +157,8 @@ export async function getWriteProvider(): Promise<WriteProviderResult> {
         logger.warn({ rpc: maskKey(rpc) }, "MEV protection active — Flashbots (backup, primary down)");
       } else {
         logger.warn(
-          { rpc: maskKey(rpc), mevPrimary: maskKey(mevPrimary), mevBackup: maskKey(mevBackup) },
-          "MEV protection unavailable — both MEV RPCs down, using standard RPC"
+          { rpc: maskKey(rpc) },
+          "MEV protection unavailable — using standard RPC"
         );
       }
 
@@ -167,24 +166,17 @@ export async function getWriteProvider(): Promise<WriteProviderResult> {
     } catch (err: any) {
       recordFailure(rpc);
       if (isMevPrimary) {
-        logger.warn({ err: err?.message }, "dRPC MEV Blocker unreachable, trying Flashbots backup");
-      } else if (isMevBackup) {
-        logger.warn({ err: err?.message }, "Flashbots backup unreachable, falling back to standard RPC");
+        logger.warn({ err: err?.message }, "dRPC MEV Blocker unreachable, trying next");
       }
     }
   }
 
-  // Last-resort: force primary RPC (no liveness check — better than failing)
   logger.error({ primaryRpc: maskKey(primaryRpc) }, "All write RPCs failed — using primary RPC as last resort");
   const provider = new ethers.JsonRpcProvider(primaryRpc);
   return { provider, ethers, rpcUrl: primaryRpc, mevActive: false };
 }
 
 // ─── withRpcRetry (read operations) ─────────────────────────────────────────
-/**
- * Execute a read-only call with automatic RPC retry on failure.
- * Only uses read RPCs (BASE_RPC_URL + public backups).
- */
 export async function withRpcRetry<T>(
   fn: (provider: any, ethers: any, rpcUrl: string) => Promise<T>
 ): Promise<T> {
@@ -205,12 +197,60 @@ export async function withRpcRetry<T>(
       const isRateLimit =
         err?.message?.includes("429") ||
         err?.message?.includes("rate limit") ||
-        err?.code === "SERVER_ERROR";
+        err?.message?.includes("over rate limit") ||
+        err?.code === "SERVER_ERROR" ||
+        err?.error?.code === -32016;
       if (isRateLimit) recordFailure(rpc);
       logger.debug({ rpc: maskKey(rpc), err: err?.message }, "Read RPC call failed, trying next");
     }
   }
   throw lastError ?? new Error("All read RPC endpoints failed");
+}
+
+// ─── waitForReceipt ───────────────────────────────────────────────────────────
+/**
+ * Poll for transaction receipt across multiple RPCs.
+ * Fixes "over rate limit" errors from tx.wait() using a single RPC.
+ * Rotates through all available read RPCs until receipt is confirmed.
+ */
+export async function waitForReceipt(
+  txHash: string,
+  timeoutMs = 120_000,
+  intervalMs = 3_000
+): Promise<any> {
+  const { ethers } = await import("ethers");
+  const rpcs = getReadRpcList();
+  const deadline = Date.now() + timeoutMs;
+  let rpcIndex = 0;
+
+  logger.info({ txHash }, "Polling for receipt across multiple RPCs...");
+
+  while (Date.now() < deadline) {
+    const rpc = rpcs[rpcIndex % rpcs.length];
+    rpcIndex++;
+
+    try {
+      const provider = new ethers.JsonRpcProvider(rpc);
+      const receipt = await provider.getTransactionReceipt(txHash);
+      if (receipt && receipt.blockNumber) {
+        recordSuccess(rpc, 0);
+        logger.info({ txHash, rpc: maskKey(rpc), blockNumber: receipt.blockNumber }, "Receipt confirmed");
+        return receipt;
+      }
+    } catch (err: any) {
+      const isRateLimit =
+        err?.message?.includes("429") ||
+        err?.message?.includes("rate limit") ||
+        err?.message?.includes("over rate limit") ||
+        err?.error?.code === -32016;
+      if (isRateLimit) recordFailure(rpc);
+      logger.debug({ rpc: maskKey(rpc), err: err?.message }, "Receipt poll failed, rotating RPC");
+    }
+
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+
+  throw new Error(`Transaction ${txHash} not confirmed within ${timeoutMs / 1000}s`);
 }
 
 // ─── Health report ─────────────────────────────────────────────────────────

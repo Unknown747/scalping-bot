@@ -1,7 +1,7 @@
 import { logger } from "../lib/logger.js";
 import type { ScalpingConfigData } from "./config.js";
 import { BASE_CONTRACTS, calculateDynamicSlippage } from "./config.js";
-import { getReadProvider, getWriteProvider, withRpcRetry } from "./RpcProvider.js";
+import { getReadProvider, getWriteProvider, withRpcRetry, waitForReceipt } from "./RpcProvider.js";
 
 export interface SwapResult {
   success: boolean;
@@ -247,7 +247,7 @@ export class SwapExecutor {
     logger.info({}, "Approving WETH for Uniswap V3 router (write RPC)");
     const weth = new ethers.Contract(BASE_CONTRACTS.WETH, ERC20_ABI, writeWallet);
     const tx = await weth.approve(BASE_CONTRACTS.UNISWAP_V3_ROUTER, ethers.MaxUint256);
-    await tx.wait(1);
+    await waitForReceipt(tx.hash);
     logger.info({ txHash: tx.hash }, "WETH approval confirmed");
   }
 
@@ -272,7 +272,7 @@ export class SwapExecutor {
     logger.info({ tokenAddress }, "Approving token for router (write RPC)");
     const token = new ethers.Contract(tokenAddress, ERC20_ABI, writeWallet);
     const tx = await token.approve(BASE_CONTRACTS.UNISWAP_V3_ROUTER, ethers.MaxUint256);
-    await tx.wait(1);
+    await waitForReceipt(tx.hash);
     logger.info({ txHash: tx.hash, tokenAddress }, "Token approval confirmed");
   }
 
@@ -431,7 +431,7 @@ export class SwapExecutor {
         { txHash: tx.hash, tokenAddress, useWeth, mevActive },
         mevActive ? "Buy tx submitted via MEV RPC" : "Buy tx submitted via standard RPC"
       );
-      const receipt = await tx.wait(1);
+      const receipt = await waitForReceipt(tx.hash);
 
       // Parse amountOut from Transfer event (ERC-20 transfer to wallet)
       let amountOut = 0n;
@@ -539,7 +539,7 @@ export class SwapExecutor {
         { txHash: tx.hash, tokenAddress, mevActive },
         mevActive ? "Sell tx submitted via MEV RPC" : "Sell tx submitted via standard RPC"
       );
-      const receipt = await tx.wait(1);
+      const receipt = await waitForReceipt(tx.hash);
 
       // Parse WETH received from Transfer event
       let amountOut = 0n;
