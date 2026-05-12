@@ -11,7 +11,40 @@ router.get("/tokens/scanned", (req, res) => {
   res.json(tokens);
 });
 
-// AI Score diagnostic: fetch a token from DexScreener and run it through MemeScorer
+// ─── Honeypot / FoT Blacklist endpoints ──────────────────────────────────────
+
+router.get("/tokens/blacklist", (_req, res) => {
+  res.json(db.getHoneypotBlacklist());
+});
+
+router.delete("/tokens/blacklist/:address", (req, res) => {
+  const { address } = req.params;
+  const removed = db.removeFromHoneypotBlacklist(address);
+  if (removed) {
+    res.json({ ok: true, message: `${address} dihapus dari blacklist` });
+  } else {
+    res.status(404).json({ ok: false, message: "Alamat tidak ditemukan di blacklist" });
+  }
+});
+
+router.delete("/tokens/blacklist", (_req, res) => {
+  const count = db.clearHoneypotBlacklist();
+  res.json({ ok: true, deleted: count });
+});
+
+// Manual add to blacklist
+router.post("/tokens/blacklist", (req, res) => {
+  const { address, symbol, reason } = req.body as { address?: string; symbol?: string; reason?: string };
+  if (!address || !symbol) {
+    res.status(400).json({ error: "address dan symbol wajib diisi" });
+    return;
+  }
+  db.addToHoneypotBlacklist(address, symbol, reason || "manual");
+  res.json({ ok: true });
+});
+
+// ─── AI Score diagnostic ──────────────────────────────────────────────────────
+
 router.get("/tokens/score/:address", async (req, res) => {
   const { address } = req.params;
   try {

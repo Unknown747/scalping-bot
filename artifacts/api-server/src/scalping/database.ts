@@ -111,6 +111,14 @@ function initSchema(db: DatabaseSync): void {
       updated_at TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS token_blacklist (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      address TEXT NOT NULL UNIQUE,
+      symbol TEXT NOT NULL,
+      reason TEXT NOT NULL DEFAULT 'honeypot',
+      added_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE INDEX IF NOT EXISTS idx_trades_exit_time ON trades(exit_time);
     CREATE INDEX IF NOT EXISTS idx_trades_token_address ON trades(token_address);
     CREATE INDEX IF NOT EXISTS idx_trades_created_at ON trades(created_at);
@@ -119,6 +127,7 @@ function initSchema(db: DatabaseSync): void {
     CREATE INDEX IF NOT EXISTS idx_bot_logs_timestamp ON bot_logs(timestamp);
     CREATE INDEX IF NOT EXISTS idx_bot_logs_level ON bot_logs(level);
     CREATE INDEX IF NOT EXISTS idx_positions_token_address ON positions(token_address);
+    CREATE INDEX IF NOT EXISTS idx_token_blacklist_address ON token_blacklist(address);
   `);
 
   // Migration: add mode column to existing trades tables that don't have it yet
@@ -393,4 +402,45 @@ export function cleanOldLogs(keepDays = 7): void {
   const db = getDb();
   db.exec(`DELETE FROM bot_logs WHERE timestamp < datetime('now', '-${keepDays} days')`);
   db.exec(`DELETE FROM scanned_tokens WHERE scanned_at < datetime('now', '-1 days')`);
+}
+
+// ─── Permanent Honeypot / FoT Blacklist ──────────────────────────────────────
+
+export function addToHoneypotBlacklist(address: string, symbol: string, reason: string): void {
+  const db = getDb();
+  try {
+    db.prepare(`
+      INSERT INTO token_blacklist (address, symbol, reason)
+      VALUES (?, ?, ?)
+      ON CONFLICT(address) DO UPDATE SET reason = excluded.reason, added_at = datetime('now')
+    `).run(address.toLowerCase(), symbol, reason);
+  } catch {
+    // Ignore duplicate
+  }
+}
+
+export function isHoneypotBlacklisted(address: string): boolean {
+  const db = getDb();
+  const row = db.prepare("SELECT id FROM token_blacklist WHERE address = ?").get(address.toLowerCase());
+  return !!row;
+}
+
+export function getHoneypotBlacklist(): { id: number; address: string; symbol: string; reason: string; addedAt: string }[] {
+  const db = getDb();
+  return (db.prepare(`
+    SELECT id, address, symbol, reason, added_at as addedAt
+    FROM token_blacklist ORDER BY added_at DESC
+  `).all() as any[]);
+}
+
+export function removeFromHoneypotBlacklist(address: string): boolean {
+  const db = getDb();
+  const result = db.prepare("DELETE FROM token_blacklist WHERE address = ?").run(address.toLowerCase());
+  return Number(result.changes) > 0;
+}
+
+export function clearHoneypotBlacklist(): number {
+  const db = getDb();
+  const result = db.prepare("DELETE FROM token_blacklist").run();
+  return Number(result.changes);
 }

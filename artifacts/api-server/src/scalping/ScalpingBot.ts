@@ -623,9 +623,15 @@ export class ScalpingBot {
       return;
     }
 
-    // Token Blacklist: skip recent stop-loss tokens
+    // Token Blacklist: skip recent stop-loss tokens (temporary)
     if (this.isBlacklisted(token.address)) {
       this.log("info", `${token.symbol} blacklisted — cooling off after recent stop-loss`, token.symbol);
+      return;
+    }
+
+    // Permanent honeypot/FoT blacklist: skip forever until manually removed
+    if (db.isHoneypotBlacklisted(token.address)) {
+      this.log("info", `${token.symbol} permanently blacklisted (honeypot/FoT) — skipping`, token.symbol);
       return;
     }
 
@@ -737,6 +743,11 @@ export class ScalpingBot {
 
     if (!buyResult.success) {
       this.log("error", `Buy failed for ${token.symbol}: ${buyResult.error}`, token.symbol);
+      // Auto-blacklist permanently if simulation detected honeypot or fee-on-transfer
+      if (buyResult.error?.startsWith("Honeypot/FoT:")) {
+        db.addToHoneypotBlacklist(token.address, token.symbol, buyResult.error);
+        this.log("warn", `${token.symbol} ditambahkan ke blacklist permanen (honeypot/FoT)`, token.symbol);
+      }
       return;
     }
 
