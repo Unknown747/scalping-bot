@@ -2,11 +2,15 @@ import express, { type Express } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
 import session from "express-session";
+import path from "path";
+import { fileURLToPath } from "url";
 import router from "./routes/index.js";
 import authRouter from "./routes/auth.js";
 import { logger } from "./lib/logger.js";
 import { requireAuth } from "./middleware/auth.js";
 import { runSecurityAudit } from "./scalping/SecurityAudit.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const SESSION_SECRET = process.env["SESSION_SECRET"];
 if (!SESSION_SECRET) {
@@ -65,5 +69,18 @@ app.get("/api/security-audit", (_req, res) => {
 
 // All other /api routes require authentication
 app.use("/api", requireAuth, router);
+
+// ── Production: serve built dashboard static files ────────────────────────────
+// In production, Vite builds the dashboard to artifacts/scalping-dashboard/dist/public.
+// The API server serves those files directly, so only one process/port is needed.
+if (process.env["NODE_ENV"] === "production") {
+  const staticDir = path.resolve(__dirname, "../../scalping-dashboard/dist/public");
+  app.use(express.static(staticDir, { maxAge: "1h", etag: true }));
+  // SPA fallback — all non-API routes serve index.html
+  app.get("*", (_req, res) => {
+    res.sendFile(path.join(staticDir, "index.html"));
+  });
+  logger.info({ staticDir }, "Serving dashboard static files (production mode)");
+}
 
 export default app;

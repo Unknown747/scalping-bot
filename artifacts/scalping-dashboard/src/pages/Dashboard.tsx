@@ -9,7 +9,7 @@ import {
   getGetTradesQueryKey, getGetConfigQueryKey,
   getGetScannedTokensQueryKey, getGetLogsQueryKey, getGetWalletBalanceQueryKey,
 } from "@workspace/api-client-react";
-import { useSocket, type AIDecisionEntry, type MevAlertEntry } from "../hooks/useSocket";
+import { useSocket, type AIDecisionEntry, type MevAlertEntry, type FilterRejectionEntry } from "../hooks/useSocket";
 import { useAuth } from "../hooks/useAuth";
 import { StatsRow } from "../components/StatsRow";
 import { ControlPanel } from "../components/ControlPanel";
@@ -21,6 +21,7 @@ import { LogConsole } from "../components/LogConsole";
 import { PnlChart } from "../components/PnlChart";
 import { FullSettingsPanel } from "../components/FullSettingsPanel";
 import { AIDecisionLog } from "../components/AIDecisionLog";
+import { FilterRejectionLog } from "../components/FilterRejectionLog";
 import { SecurityAuditCard } from "../components/SecurityAuditCard";
 import { WatchdogCard } from "../components/WatchdogCard";
 import { toast } from "sonner";
@@ -45,6 +46,7 @@ export function Dashboard() {
   const [liveTokens, setLiveTokens] = useState<TokenEntry[]>([]);
   const [aiDecisions, setAIDecisions] = useState<AIDecisionEntry[]>([]);
   const [mevAlerts, setMevAlerts] = useState<MevAlertEntry[]>([]);
+  const [filterRejections, setFilterRejections] = useState<FilterRejectionEntry[]>([]);
   const queryClient = useQueryClient();
   const { logout } = useAuth();
 
@@ -134,6 +136,9 @@ export function Dashboard() {
         `⚠️ MEV Sandwich: ${entry.symbol} — slippage ${entry.actualSlippagePct.toFixed(1)}% (config: ${entry.configuredSlippagePct}%)${entry.mevProtected ? " [MEV protected]" : " [TIDAK terlindungi]"}`,
         { duration: 10000 }
       );
+    },
+    onFilterRejection: (entry) => {
+      setFilterRejections((prev) => [entry, ...prev].slice(0, 200));
     },
   });
 
@@ -314,8 +319,10 @@ export function Dashboard() {
             entries={aiDecisions}
             enabled={!!(config as any)?.enableAIFilter}
           />
-          <LogConsole logs={logs} />
+          <FilterRejectionLog entries={filterRejections} />
         </div>
+
+        <LogConsole logs={logs} />
 
         <TradeHistory />
       </main>

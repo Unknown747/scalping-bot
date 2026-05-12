@@ -55,12 +55,31 @@ export type MevAlertEntry = {
   timestamp: string;
 };
 
+export type FilterRejectionStage =
+  | "meme_score"
+  | "new_listing"
+  | "momentum_1h"
+  | "temp_blacklist"
+  | "honeypot"
+  | "safety"
+  | "swap_failed";
+
+export type FilterRejectionEntry = {
+  symbol: string;
+  address: string;
+  stage: FilterRejectionStage;
+  reason: string;
+  details: Record<string, unknown>;
+  timestamp: string;
+};
+
 type SocketCallbacks = {
   onTradeExecuted?: (data: { tokenSymbol: string; profitPercent: number; exitTime: string }) => void;
   onLogs?: (logs: LogEntry[]) => void;
   onTokens?: (tokens: TokenEntry[]) => void;
   onAIDecision?: (entry: AIDecisionEntry) => void;
   onMevAlert?: (entry: MevAlertEntry) => void;
+  onFilterRejection?: (entry: FilterRejectionEntry) => void;
 };
 
 let socketInstance: Socket | null = null;
@@ -116,6 +135,10 @@ export function useSocket(callbacks: SocketCallbacks) {
       callbacksRef.current.onMevAlert?.(entry);
     });
 
+    socket.on("filter-rejection", (entry: FilterRejectionEntry) => {
+      callbacksRef.current.onFilterRejection?.(entry);
+    });
+
     return () => {
       socket.off("bot-status");
       socket.off("position-update");
@@ -125,6 +148,7 @@ export function useSocket(callbacks: SocketCallbacks) {
       socket.off("new-token");
       socket.off("ai-decision");
       socket.off("mev-alert");
+      socket.off("filter-rejection");
     };
   }, [queryClient]);
 

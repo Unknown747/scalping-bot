@@ -598,11 +598,13 @@ export class ScalpingBot {
     );
 
     if (this.config.enableMemeScore && !memeScore.passed) {
-      this.log(
-        "info",
-        `${token.symbol} meme score too low: ${memeScore.score}/100 (min: ${this.config.minMemeScore}) tier: ${memeScore.tier}`,
-        token.symbol
-      );
+      const msg = `meme score ${memeScore.score}/100 < min ${this.config.minMemeScore} (tier: ${memeScore.tier})`;
+      this.log("info", `${token.symbol} meme score too low: ${memeScore.score}/100 (min: ${this.config.minMemeScore}) tier: ${memeScore.tier}`, token.symbol);
+      this.emit("filter-rejection", {
+        symbol: token.symbol, address: token.address, stage: "meme_score",
+        reason: msg, details: { score: memeScore.score, min: this.config.minMemeScore, tier: memeScore.tier },
+        timestamp: new Date().toISOString(),
+      });
       return;
     }
 
@@ -611,11 +613,13 @@ export class ScalpingBot {
     if (isNewListing) {
       // Must have strong buy pressure on new listings (most get dumped on launch)
       if (buySellRatio < this.config.newListingMinBuySellRatio) {
-        this.log(
-          "info",
-          `${token.symbol} [NEW LISTING] rejected: buy/sell ratio too weak (${buySellRatio.toFixed(2)} < ${this.config.newListingMinBuySellRatio} required)`,
-          token.symbol
-        );
+        const msg = `buy/sell ratio ${buySellRatio.toFixed(2)} < ${this.config.newListingMinBuySellRatio} required`;
+        this.log("info", `${token.symbol} [NEW LISTING] rejected: ${msg}`, token.symbol);
+        this.emit("filter-rejection", {
+          symbol: token.symbol, address: token.address, stage: "new_listing",
+          reason: msg, details: { buySellRatio: +buySellRatio.toFixed(2), min: this.config.newListingMinBuySellRatio },
+          timestamp: new Date().toISOString(),
+        });
         return;
       }
       this.log("info", `${token.symbol} [NEW LISTING ${token.ageMinutes.toFixed(0)}min] buy/sell ratio ${buySellRatio.toFixed(2)} ✓`, token.symbol);
@@ -623,19 +627,37 @@ export class ScalpingBot {
 
     // 1h Momentum Confirmation
     if (this.config.require1hMomentum && token.priceChange1h <= 0) {
+      const msg = `1h momentum negatif: ${token.priceChange1h.toFixed(1)}%`;
       this.log("info", `${token.symbol} rejected: 1h momentum negative (${token.priceChange1h.toFixed(1)}%)`, token.symbol);
+      this.emit("filter-rejection", {
+        symbol: token.symbol, address: token.address, stage: "momentum_1h",
+        reason: msg, details: { priceChange1h: token.priceChange1h },
+        timestamp: new Date().toISOString(),
+      });
       return;
     }
 
     // Token Blacklist: skip recent stop-loss tokens (temporary)
     if (this.isBlacklisted(token.address)) {
+      const msg = "cooldown — stop-loss baru-baru ini";
       this.log("info", `${token.symbol} blacklisted — cooling off after recent stop-loss`, token.symbol);
+      this.emit("filter-rejection", {
+        symbol: token.symbol, address: token.address, stage: "temp_blacklist",
+        reason: msg, details: {},
+        timestamp: new Date().toISOString(),
+      });
       return;
     }
 
     // Permanent honeypot/FoT blacklist: skip forever until manually removed
     if (db.isHoneypotBlacklisted(token.address)) {
+      const msg = "honeypot/FoT permanen";
       this.log("info", `${token.symbol} permanently blacklisted (honeypot/FoT) — skipping`, token.symbol);
+      this.emit("filter-rejection", {
+        symbol: token.symbol, address: token.address, stage: "honeypot",
+        reason: msg, details: {},
+        timestamp: new Date().toISOString(),
+      });
       return;
     }
 
@@ -651,7 +673,13 @@ export class ScalpingBot {
     // Safety check
     const safety = await this.safetyChecker.check(token.address);
     if (!safety.passed) {
+      const msg = `safety score ${safety.score}/100 — ${safety.warnings.slice(0, 2).join(", ")}`;
       this.log("warn", `${token.symbol} failed safety check (score: ${safety.score}): ${safety.warnings.join(", ")}`, token.symbol);
+      this.emit("filter-rejection", {
+        symbol: token.symbol, address: token.address, stage: "safety",
+        reason: msg, details: { score: safety.score, warnings: safety.warnings },
+        timestamp: new Date().toISOString(),
+      });
       return;
     }
 
@@ -755,6 +783,12 @@ export class ScalpingBot {
         db.addToHoneypotBlacklist(token.address, token.symbol, buyResult.error);
         this.log("warn", `${token.symbol} ditambahkan ke blacklist permanen (honeypot/FoT)`, token.symbol);
       }
+      this.emit("filter-rejection", {
+        symbol: token.symbol, address: token.address, stage: "swap_failed",
+        reason: buyResult.error || "swap gagal",
+        details: { dex: bestRoute.dex },
+        timestamp: new Date().toISOString(),
+      });
       return;
     }
 
