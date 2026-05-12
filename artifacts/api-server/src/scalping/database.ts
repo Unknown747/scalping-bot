@@ -360,15 +360,24 @@ export function getLogs(limit = 100, page = 1, level?: string): any[] {
 // Today + all-time stats (used by /api/stats and /api/stats/both)
 export function getTodayStats(mode?: "live" | "paper"): { pnlEth: number; totalTrades: number; winningTrades: number; losingTrades: number } {
   const db = getDb();
-  const modeClause = mode ? `AND mode = '${mode}'` : "";
-  const row = db.prepare(`
-    SELECT
-      COALESCE(SUM(profit_eth), 0) as pnlEth,
-      COUNT(*) as totalTrades,
-      SUM(CASE WHEN profit_eth > 0 THEN 1 ELSE 0 END) as winningTrades,
-      SUM(CASE WHEN profit_eth <= 0 THEN 1 ELSE 0 END) as losingTrades
-    FROM trades WHERE date(exit_time) = date('now') ${modeClause}
-  `).get() as any;
+  const row = (mode
+    ? db.prepare(`
+        SELECT
+          COALESCE(SUM(profit_eth), 0) as pnlEth,
+          COUNT(*) as totalTrades,
+          SUM(CASE WHEN profit_eth > 0 THEN 1 ELSE 0 END) as winningTrades,
+          SUM(CASE WHEN profit_eth <= 0 THEN 1 ELSE 0 END) as losingTrades
+        FROM trades WHERE date(exit_time) = date('now') AND mode = ?
+      `).get(mode)
+    : db.prepare(`
+        SELECT
+          COALESCE(SUM(profit_eth), 0) as pnlEth,
+          COUNT(*) as totalTrades,
+          SUM(CASE WHEN profit_eth > 0 THEN 1 ELSE 0 END) as winningTrades,
+          SUM(CASE WHEN profit_eth <= 0 THEN 1 ELSE 0 END) as losingTrades
+        FROM trades WHERE date(exit_time) = date('now')
+      `).get()
+  ) as any;
   return {
     pnlEth: Number(row?.pnlEth || 0),
     totalTrades: Number(row?.totalTrades || 0),
@@ -379,16 +388,26 @@ export function getTodayStats(mode?: "live" | "paper"): { pnlEth: number; totalT
 
 export function getAllTimeStats(mode?: "live" | "paper"): { totalPnlEth: number; avgProfitPercent: number; avgHoldSeconds: number; largestWin: number; largestLoss: number } {
   const db = getDb();
-  const modeClause = mode ? `WHERE mode = '${mode}'` : "";
-  const row = db.prepare(`
-    SELECT
-      COALESCE(SUM(profit_eth), 0) as totalPnlEth,
-      COALESCE(AVG(profit_percent), 0) as avgProfitPercent,
-      COALESCE(AVG(hold_seconds), 0) as avgHoldSeconds,
-      COALESCE(MAX(profit_percent), 0) as largestWin,
-      COALESCE(MIN(profit_percent), 0) as largestLoss
-    FROM trades ${modeClause}
-  `).get() as any;
+  const row = (mode
+    ? db.prepare(`
+        SELECT
+          COALESCE(SUM(profit_eth), 0) as totalPnlEth,
+          COALESCE(AVG(profit_percent), 0) as avgProfitPercent,
+          COALESCE(AVG(hold_seconds), 0) as avgHoldSeconds,
+          COALESCE(MAX(profit_percent), 0) as largestWin,
+          COALESCE(MIN(profit_percent), 0) as largestLoss
+        FROM trades WHERE mode = ?
+      `).get(mode)
+    : db.prepare(`
+        SELECT
+          COALESCE(SUM(profit_eth), 0) as totalPnlEth,
+          COALESCE(AVG(profit_percent), 0) as avgProfitPercent,
+          COALESCE(AVG(hold_seconds), 0) as avgHoldSeconds,
+          COALESCE(MAX(profit_percent), 0) as largestWin,
+          COALESCE(MIN(profit_percent), 0) as largestLoss
+        FROM trades
+      `).get()
+  ) as any;
   return {
     totalPnlEth: Number(row?.totalPnlEth || 0),
     avgProfitPercent: Number(row?.avgProfitPercent || 0),

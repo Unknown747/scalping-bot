@@ -33,12 +33,6 @@ async function rateLimitedGet(url: string, headers: Record<string, string>): Pro
   }
 }
 
-// Pool categories to scan on GeckoTerminal
-const GECKO_POOL_PAGES = ["new_pools", "trending_pools"];
-
-// Token categories (trending, gainers)
-const GECKO_TOKEN_CATEGORIES = ["trending", "top_gainers"];
-
 function geckoPoolToTokenData(pool: any): TokenData | null {
   try {
     const baseToken = pool.relationships?.base_token?.data;
@@ -202,26 +196,6 @@ async function scanGeckoTokens(category: string): Promise<TokenData[]> {
     logger.warn({ err: err?.message, category }, `GeckoTerminal tokens/${category} failed`);
     geckoCache.set(cacheKey, { data: [], timestamp: Date.now() });
     return [];
-  }
-}
-
-/**
- * Scan a specific pool address on GeckoTerminal to get full data.
- */
-export async function fetchGeckoPool(poolAddress: string): Promise<TokenData | null> {
-  try {
-    const res = await axios.get(
-      `${GECKO_BASE_URL}/networks/${NETWORK}/pools/${poolAddress}`,
-      {
-        headers: { Accept: "application/json;version=20230302" },
-        timeout: 8000,
-      }
-    );
-    const pool = res.data?.data;
-    if (!pool) return null;
-    return geckoPoolToTokenData(pool);
-  } catch {
-    return null;
   }
 }
 

@@ -650,7 +650,6 @@ export class ScalpingBot {
 
     // AI Filter: use Gemini/Groq/HuggingFace to validate entry
     if (this.config.enableAIFilter) {
-      const buySellRatioForAI = buySellRatio;
       const aiResult = await this.aiAnalyzer.analyze({
         symbol: token.symbol,
         name: token.name,
@@ -660,7 +659,7 @@ export class ScalpingBot {
         volume5mUsd: token.volume5mUsd,
         liquidityUsd: token.liquidityUsd,
         ageMinutes: token.ageMinutes,
-        buySellRatio5m: buySellRatioForAI,
+        buySellRatio5m: buySellRatio,
         safetyScore: safety.score,
         memeScore: memeScore.score,
       });
