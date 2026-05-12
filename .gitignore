@@ -24,9 +24,6 @@ node_modules/
 *.sqlite
 *.sqlite3
 
-# ─── PM2 ecosystem file — mungkin berisi path/env sensitif ───────────────────
-ecosystem.config.cjs
-ecosystem.config.js
 
 # ─── Python / Replit boilerplate ──────────────────────────────────────────────
 main.py
