@@ -22,170 +22,193 @@
             border-bottom: 1px solid #00ffcc33;
         }
         h1 { font-size: 24px; letter-spacing: 2px; }
-        .status-badge {
-            background: #00ffcc22;
-            padding: 8px 16px;
+        .badges { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+        .badge {
+            padding: 6px 14px;
             border-radius: 20px;
-            font-size: 14px;
-            border: 1px solid #00ffcc;
+            font-size: 13px;
+            border: 1px solid currentColor;
         }
-        .status-badge.running { background: #00ff8822; border-color: #00ff88; color: #00ff88; }
-        .status-badge.stopped { background: #ff336622; border-color: #ff3366; color: #ff3366; }
+        .badge-bot { color: #00ffcc; border-color: #00ffcc33; background: #00ffcc11; }
+        .badge-bot.running { color: #00ff88; border-color: #00ff88; background: #00ff8811; }
+        .badge-bot.stopped { color: #ff3366; border-color: #ff3366; background: #ff336611; }
+        .badge-sim { color: #ffaa00; border-color: #ffaa00; background: #ffaa0011; display:none; }
+        .badge-tg { color: #4285f4; border-color: #4285f455; background: #4285f411; }
+        .ws-dot { font-size: 12px; color: #888; }
+        .ws-dot.on { color: #00ff88; }
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
             gap: 15px;
             margin-bottom: 20px;
         }
         .stat-card {
-            background: rgba(26, 26, 46, 0.8);
-            backdrop-filter: blur(10px);
+            background: rgba(26,26,46,0.8);
             border-radius: 12px;
             padding: 15px;
-            border: 1px solid #00ffcc33;
+            border: 1px solid #00ffcc22;
             transition: all 0.3s;
         }
-        .stat-card:hover { border-color: #00ffcc; box-shadow: 0 0 15px #00ffcc33; }
-        .stat-label { font-size: 12px; color: #888; letter-spacing: 1px; }
-        .stat-value { font-size: 28px; font-weight: bold; margin-top: 5px; }
+        .stat-card:hover { border-color: #00ffcc; box-shadow: 0 0 15px #00ffcc22; }
+        .stat-label { font-size: 11px; color: #888; letter-spacing: 1px; }
+        .stat-value { font-size: 26px; font-weight: bold; margin-top: 5px; }
         .profit { color: #00ff88; }
-        .loss { color: #ff3366; }
-        .neutral { color: #00ffcc; }
+        .loss   { color: #ff3366; }
+        .neutral{ color: #00ffcc; }
         .panel {
             background: #1a1a2e;
             border-radius: 12px;
             padding: 20px;
             margin-bottom: 20px;
-            border: 1px solid #333;
+            border: 1px solid #2a2a4a;
         }
         .panel-title {
-            font-size: 18px;
+            font-size: 17px;
             margin-bottom: 15px;
             color: #00ffcc;
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 8px;
         }
-        .config-row {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 15px;
-            align-items: flex-end;
-            margin-bottom: 15px;
-        }
+        .config-row { display: flex; flex-wrap: wrap; gap: 15px; align-items: flex-end; margin-bottom: 14px; }
         .config-group { display: flex; flex-direction: column; gap: 5px; }
-        .config-group label { font-size: 11px; color: #888; }
+        .config-group label { font-size: 11px; color: #888; letter-spacing: 0.5px; }
         input, select {
             background: #0a0a0f;
             border: 1px solid #333;
             color: #00ffcc;
-            padding: 10px 15px;
+            padding: 9px 14px;
             border-radius: 8px;
             font-family: monospace;
-            font-size: 14px;
-            min-width: 120px;
+            font-size: 13px;
+            min-width: 110px;
         }
         input:focus, select:focus { outline: none; border-color: #00ffcc; }
+        .sim-toggle {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 16px;
+            border-radius: 8px;
+            border: 1px solid #ffaa0055;
+            background: #ffaa0008;
+            cursor: pointer;
+            user-select: none;
+        }
+        .sim-toggle input[type=checkbox] { width: 18px; height: 18px; accent-color: #ffaa00; cursor: pointer; }
+        .sim-toggle span { font-size: 13px; color: #ffaa00; }
         .btn {
             background: linear-gradient(135deg, #00ffcc, #00aa88);
             color: #0a0a0f;
             border: none;
-            padding: 12px 25px;
+            padding: 11px 22px;
             border-radius: 8px;
             cursor: pointer;
             font-weight: bold;
-            font-size: 14px;
+            font-size: 13px;
             transition: all 0.2s;
+            white-space: nowrap;
         }
-        .btn:hover { transform: translateY(-2px); box-shadow: 0 5px 20px #00ffcc66; }
+        .btn:hover { transform: translateY(-2px); box-shadow: 0 4px 16px #00ffcc44; }
+        .btn:active { transform: translateY(0); }
         .btn-stop { background: linear-gradient(135deg, #ff3366, #cc0044); color: #fff; }
-        .btn-stop:hover { box-shadow: 0 5px 20px #ff336666; }
-        .btn-small { padding: 8px 16px; font-size: 12px; }
-        .btn-warn { background: linear-gradient(135deg, #ffaa00, #cc8800); }
-        .ai-signals {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 15px;
-            margin-bottom: 15px;
-        }
+        .btn-stop:hover { box-shadow: 0 4px 16px #ff336644; }
+        .btn-sim  { background: linear-gradient(135deg, #ffaa00, #cc8800); color: #0a0a0f; }
+        .btn-sim:hover { box-shadow: 0 4px 16px #ffaa0044; }
+        .btn-sm   { padding: 8px 14px; font-size: 12px; }
+        .btn-gray { background: #2a2a4a; color: #aaa; }
+        .btn-gray:hover { box-shadow: 0 4px 10px #ffffff11; }
+        .btn-blue { background: linear-gradient(135deg, #4285f4, #1a5cc8); color: #fff; }
+        .btn-blue:hover { box-shadow: 0 4px 16px #4285f444; }
+        .panel-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+        .ai-signals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 15px; }
         .ai-card {
             background: #0a0a0f;
             border-radius: 10px;
             padding: 15px;
             text-align: center;
-            border: 1px solid #222;
+            border: 1px solid #1a1a2e;
         }
-        .ai-name { font-size: 16px; font-weight: bold; margin-bottom: 10px; }
+        .ai-name { font-size: 15px; font-weight: bold; margin-bottom: 8px; }
         .ai-gemini .ai-name { color: #4285f4; }
-        .ai-groq .ai-name { color: #f9ab00; }
+        .ai-groq .ai-name   { color: #f9ab00; }
         .ai-huangfing .ai-name { color: #9c27b0; }
-        .ai-signal { font-size: 24px; font-weight: bold; margin: 10px 0; }
-        .signal-buy { color: #00ff88; }
+        .ai-signal { font-size: 22px; font-weight: bold; margin: 8px 0; }
+        .signal-buy  { color: #00ff88; }
         .signal-sell { color: #ff3366; }
         .signal-hold { color: #ffaa00; }
-        .ai-confidence { font-size: 12px; color: #888; }
+        .ai-conf { font-size: 12px; color: #888; }
         .consensus-bar {
             display: flex;
             justify-content: space-between;
             align-items: center;
             background: #0a0a0f;
             border-radius: 10px;
-            padding: 15px 20px;
-            border: 1px solid #222;
+            padding: 14px 20px;
+            border: 1px solid #1a1a2e;
         }
-        .consensus-label { font-size: 14px; color: #888; }
+        .consensus-label { font-size: 12px; color: #888; margin-bottom: 4px; }
         .consensus-value { font-size: 20px; font-weight: bold; }
+        .rpc-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+        .rpc-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #888; }
+        .rpc-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .rpc-healthy { background: #00ff88; }
+        .rpc-down    { background: #ff3366; }
+        .rpc-unknown { background: #ffaa00; }
         .log-panel {
             background: #0a0a0f;
             border-radius: 10px;
-            padding: 15px;
-            height: 300px;
+            padding: 14px;
+            height: 280px;
             overflow-y: auto;
             font-family: 'Courier New', monospace;
             font-size: 12px;
         }
-        .log-entry { padding: 4px 0; border-bottom: 1px solid #1a1a2e; color: #aaa; }
-        .log-entry.info { color: #00ffcc; }
-        .log-entry.error { color: #ff3366; }
+        .log-entry { padding: 3px 0; border-bottom: 1px solid #111; }
+        .log-entry.info    { color: #00ffcc; }
+        .log-entry.error   { color: #ff3366; }
         .log-entry.success { color: #00ff88; }
         .log-entry.warning { color: #ffaa00; }
-        .rpc-status {
+        .log-entry.default { color: #888; }
+        /* Check Panel */
+        .check-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px,1fr)); gap: 10px; }
+        .check-item {
             display: flex;
-            flex-wrap: wrap;
+            align-items: flex-start;
             gap: 10px;
-            font-size: 12px;
-            color: #888;
+            background: #0a0a0f;
+            border-radius: 8px;
+            padding: 12px;
+            border-left: 3px solid #333;
         }
-        .rpc-dot {
-            width: 8px; height: 8px;
-            border-radius: 50%;
-            display: inline-block;
-            margin-right: 4px;
-        }
-        .rpc-healthy { background: #00ff88; }
-        .rpc-down { background: #ff3366; }
-        .rpc-unknown { background: #ffaa00; }
-        .panel-actions { display: flex; gap: 10px; flex-wrap: wrap; }
-        .ws-status { font-size: 12px; color: #888; margin-left: auto; }
-        .ws-connected { color: #00ff88; }
-        .ws-disconnected { color: #ff3366; }
-        .section-divider { border: none; border-top: 1px solid #00ffcc22; margin: 15px 0; }
-        @media (max-width: 600px) {
+        .check-item.ok      { border-color: #00ff88; }
+        .check-item.error   { border-color: #ff3366; }
+        .check-item.missing { border-color: #ffaa00; }
+        .check-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+        .check-name { font-size: 13px; font-weight: bold; color: #ccc; }
+        .check-msg  { font-size: 11px; color: #888; margin-top: 2px; }
+        .check-lat  { font-size: 10px; color: #555; margin-top: 2px; }
+        .check-placeholder { color: #555; font-size: 13px; text-align: center; padding: 20px; }
+        hr { border: none; border-top: 1px solid #00ffcc15; margin: 14px 0; }
+        @media(max-width:600px){
             .ai-signals { grid-template-columns: 1fr; }
-            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+            .stats-grid { grid-template-columns: repeat(2,1fr); }
         }
     </style>
 </head>
 <body>
 
+<!-- Header -->
 <div class="header">
     <div>
         <h1>⚡ MEME SCALPER AI PRO</h1>
-        <div style="font-size:12px;color:#888;margin-top:4px;">Base Network | Multi-RPC | 3 AI Providers | MEV Shield</div>
+        <div style="font-size:11px;color:#555;margin-top:4px;">Base Network | Multi-RPC | 3 AI Providers | MEV Shield</div>
     </div>
-    <div style="display:flex;gap:12px;align-items:center;">
-        <span class="ws-status ws-disconnected" id="wsStatus">● Disconnected</span>
-        <span class="status-badge stopped" id="botStatusBadge">STOPPED</span>
+    <div class="badges">
+        <span class="ws-dot" id="wsDot">● Connecting...</span>
+        <span class="badge badge-bot stopped" id="botBadge">STOPPED</span>
+        <span class="badge badge-sim" id="simBadge">SIM MODE</span>
+        <span class="badge badge-tg" id="tgBadge" style="display:none;">📱 TG</span>
     </div>
 </div>
 
@@ -197,27 +220,31 @@
     </div>
     <div class="stat-card">
         <div class="stat-label">WIN RATE</div>
-        <div class="stat-value neutral" id="winRate">0%</div>
+        <div class="stat-value neutral" id="winRate">0.0%</div>
     </div>
     <div class="stat-card">
         <div class="stat-label">TOTAL PROFIT</div>
-        <div class="stat-value neutral" id="totalProfit">$0.00</div>
+        <div class="stat-value neutral" id="totalProfit">$0.0000</div>
     </div>
     <div class="stat-card">
         <div class="stat-label">DAILY PnL</div>
-        <div class="stat-value neutral" id="dailyPnl">$0.00</div>
+        <div class="stat-value neutral" id="dailyPnl">$0.0000</div>
     </div>
     <div class="stat-card">
-        <div class="stat-label">ACTIVE POSITIONS</div>
-        <div class="stat-value neutral" id="activePositions">0</div>
+        <div class="stat-label">ACTIVE POS.</div>
+        <div class="stat-value neutral" id="activePos">0</div>
     </div>
     <div class="stat-card">
         <div class="stat-label">WIN / LOSS</div>
-        <div class="stat-value neutral"><span id="wins" class="profit">0</span> / <span id="losses" class="loss">0</span></div>
+        <div class="stat-value">
+            <span class="profit" id="wins">0</span>
+            <span style="color:#555;font-size:18px;"> / </span>
+            <span class="loss" id="losses">0</span>
+        </div>
     </div>
 </div>
 
-<!-- Controls -->
+<!-- Control Panel -->
 <div class="panel">
     <div class="panel-title">⚙️ Bot Configuration</div>
     <div class="config-row">
@@ -268,13 +295,29 @@
             <input type="number" id="cooldown" value="30" min="5">
         </div>
     </div>
-    <hr class="section-divider">
+    <hr>
     <div class="panel-actions">
-        <button class="btn" id="startBtn">▶ START BOT</button>
-        <button class="btn btn-stop" id="stopBtn">■ STOP BOT</button>
-        <button class="btn btn-warn btn-small" id="withdrawBtn">💰 Withdraw</button>
-        <button class="btn btn-small" id="resetStatsBtn" style="background:#333;color:#aaa;">↺ Reset Stats</button>
+        <button class="btn" id="startLiveBtn">▶ START LIVE</button>
+        <button class="btn btn-sim" id="startSimBtn">🧪 START SIM</button>
+        <button class="btn btn-stop" id="stopBtn">■ STOP</button>
+        <button class="btn btn-gray btn-sm" id="withdrawBtn">💰 Withdraw</button>
+        <button class="btn btn-gray btn-sm" id="resetStatsBtn">↺ Reset Stats</button>
     </div>
+</div>
+
+<!-- System Check Panel -->
+<div class="panel">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;">
+        <div class="panel-title" style="margin-bottom:0;">🔍 System Check</div>
+        <div style="display:flex;gap:8px;">
+            <button class="btn btn-blue btn-sm" id="runCheckBtn">Run Check</button>
+            <button class="btn btn-blue btn-sm" id="tgTestBtn">📱 Test Telegram</button>
+        </div>
+    </div>
+    <div class="check-grid" id="checkGrid">
+        <div class="check-placeholder">Click "Run Check" to verify all connections</div>
+    </div>
+    <div id="tgTestResult" style="display:none;margin-top:12px;padding:12px;background:#0a0a0f;border-radius:8px;font-size:13px;"></div>
 </div>
 
 <!-- AI Signals -->
@@ -284,17 +327,17 @@
         <div class="ai-card ai-gemini">
             <div class="ai-name">🔵 GEMINI</div>
             <div class="ai-signal signal-hold" id="geminiSignal">HOLD</div>
-            <div class="ai-confidence" id="geminiConf">--</div>
+            <div class="ai-conf" id="geminiConf">--</div>
         </div>
         <div class="ai-card ai-groq">
             <div class="ai-name">🟡 GROQ</div>
             <div class="ai-signal signal-hold" id="groqSignal">HOLD</div>
-            <div class="ai-confidence" id="groqConf">--</div>
+            <div class="ai-conf" id="groqConf">--</div>
         </div>
         <div class="ai-card ai-huangfing">
             <div class="ai-name">🟣 HUANGFING</div>
             <div class="ai-signal signal-hold" id="huangfingSignal">HOLD</div>
-            <div class="ai-confidence" id="huangfingConf">--</div>
+            <div class="ai-conf" id="huangfingConf">--</div>
         </div>
     </div>
     <div class="consensus-bar">
@@ -312,198 +355,247 @@
 <!-- RPC Status -->
 <div class="panel">
     <div class="panel-title">📡 RPC Endpoints</div>
-    <div style="font-size:12px;color:#888;margin-bottom:10px;">Active: <span id="activeRpc" style="color:#00ffcc;">--</span></div>
-    <div class="rpc-status" id="rpcStatus">
-        <span><span class="rpc-dot rpc-unknown"></span>Checking...</span>
+    <div style="font-size:12px;color:#555;margin-bottom:10px;">Active: <span id="activeRpc" style="color:#00ffcc;">--</span></div>
+    <div class="rpc-grid" id="rpcStatus">
+        <div class="rpc-item"><span class="rpc-dot rpc-unknown"></span><span>Checking...</span></div>
     </div>
 </div>
 
 <!-- Log -->
 <div class="panel">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
         <div class="panel-title" style="margin-bottom:0;">📋 Live Log</div>
-        <button class="btn btn-small" id="clearLogBtn" style="background:#333;color:#aaa;">Clear</button>
+        <button class="btn btn-gray btn-sm" id="clearLogBtn">Clear</button>
     </div>
     <div class="log-panel" id="logPanel">
-        <div class="log-entry info">[--:--:--] 🚀 Meme Scalper AI Pro - Connecting...</div>
+        <div class="log-entry info">[--:--:--] 🚀 Meme Scalper AI Pro — Connecting...</div>
     </div>
 </div>
 
 <script>
-    let ws;
-    let reconnectTimer;
+    let ws, reconnectTimer;
 
     function connect() {
         const proto = location.protocol === 'https:' ? 'wss' : 'ws';
         ws = new WebSocket(`${proto}://${location.host}/ws`);
 
         ws.onopen = () => {
-            document.getElementById('wsStatus').textContent = '● Connected';
-            document.getElementById('wsStatus').className = 'ws-status ws-connected';
+            setWS(true);
             clearTimeout(reconnectTimer);
             addLog('WebSocket connected', 'success');
         };
-
         ws.onclose = () => {
-            document.getElementById('wsStatus').textContent = '● Disconnected';
-            document.getElementById('wsStatus').className = 'ws-status ws-disconnected';
+            setWS(false);
             addLog('WebSocket disconnected, reconnecting...', 'warning');
             reconnectTimer = setTimeout(connect, 3000);
         };
-
         ws.onerror = () => {};
-
-        ws.onmessage = (event) => {
-            try {
-                const msg = JSON.parse(event.data);
-                handleMessage(msg.type, msg.data);
-            } catch(e) {}
+        ws.onmessage = (e) => {
+            try { handleMsg(JSON.parse(e.data)); } catch(_) {}
         };
     }
 
-    function handleMessage(type, data) {
-        if (type === 'init' || type === 'update') {
-            if (data.stats) updateStats(data.stats);
-            if (data.running !== undefined) updateBotStatus(data.running);
-            if (data.rpcEndpoints) updateRPC(data.rpcEndpoints, data.activeRpc);
-            if (data.log) addLog(data.log.message, data.log.type);
-        }
-        if (type === 'ai_update' && data.ai) {
-            updateAI(data.ai);
-        }
-        if (type === 'log' && data) {
-            addLog(data.message, data.type);
+    function setWS(on) {
+        const el = document.getElementById('wsDot');
+        el.textContent = on ? '● Connected' : '● Disconnected';
+        el.className = 'ws-dot' + (on ? ' on' : '');
+    }
+
+    function handleMsg(msg) {
+        const d = msg.data;
+        switch (msg.type) {
+            case 'init':
+            case 'update':
+                if (d.stats)   updateStats(d.stats);
+                if (d.running !== undefined) updateBotBadge(d.running, d.simMode);
+                if (d.rpcEndpoints) updateRPC(d.rpcEndpoints, d.activeRpc);
+                if (d.telegram) document.getElementById('tgBadge').style.display = '';
+                if (d.log)     addLog(d.log.message, d.log.type);
+                break;
+            case 'ai_update':
+                if (d.ai) updateAI(d.ai);
+                break;
+            case 'log':
+                if (d) addLog(d.message, d.type);
+                break;
+            case 'check_result':
+                renderCheckResults(d);
+                break;
+            case 'telegram_test':
+                renderTgTestResult(d);
+                break;
         }
     }
 
-    function updateStats(stats) {
-        const profit = stats.totalProfitUSD || 0;
-        const daily = stats.dailyPnL || 0;
-        const wr = stats.winRate || 0;
-
-        document.getElementById('totalTrades').textContent = stats.totalTrades || 0;
-        document.getElementById('winRate').textContent = wr.toFixed(1) + '%';
-        document.getElementById('totalProfit').textContent = '$' + profit.toFixed(4);
-        document.getElementById('dailyPnl').textContent = '$' + daily.toFixed(4);
-        document.getElementById('activePositions').textContent = stats.activePositions || 0;
-        document.getElementById('wins').textContent = stats.winningTrades || 0;
-        document.getElementById('losses').textContent = stats.losingTrades || 0;
-
-        const profitEl = document.getElementById('totalProfit');
-        profitEl.className = 'stat-value ' + (profit >= 0 ? 'profit' : 'loss');
-        const dailyEl = document.getElementById('dailyPnl');
-        dailyEl.className = 'stat-value ' + (daily >= 0 ? 'profit' : 'loss');
-        const wrEl = document.getElementById('winRate');
-        wrEl.className = 'stat-value ' + (wr >= 50 ? 'profit' : wr >= 30 ? 'neutral' : 'loss');
+    function updateStats(s) {
+        const profit = s.totalProfitUSD || 0;
+        const daily  = s.dailyPnL || 0;
+        const wr     = s.winRate || 0;
+        setText('totalTrades', s.totalTrades || 0);
+        setText('winRate', wr.toFixed(1) + '%');
+        setText('totalProfit', '$' + profit.toFixed(4));
+        setText('dailyPnl', '$' + daily.toFixed(4));
+        setText('activePos', s.activePositions || 0);
+        setText('wins', s.winningTrades || 0);
+        setText('losses', s.losingTrades || 0);
+        setClass('totalProfit', 'stat-value ' + pnlClass(profit));
+        setClass('dailyPnl',    'stat-value ' + pnlClass(daily));
+        setClass('winRate',     'stat-value ' + (wr >= 50 ? 'profit' : wr >= 30 ? 'neutral' : 'loss'));
     }
 
-    function updateBotStatus(running) {
-        const badge = document.getElementById('botStatusBadge');
-        if (running) {
-            badge.textContent = 'RUNNING';
-            badge.className = 'status-badge running';
-        } else {
-            badge.textContent = 'STOPPED';
-            badge.className = 'status-badge stopped';
-        }
+    function updateBotBadge(running, simMode) {
+        const badge = document.getElementById('botBadge');
+        const simB  = document.getElementById('simBadge');
+        badge.textContent = running ? 'RUNNING' : 'STOPPED';
+        badge.className   = 'badge badge-bot ' + (running ? 'running' : 'stopped');
+        simB.style.display = (running && simMode) ? '' : 'none';
     }
 
     function updateAI(ai) {
-        const providers = { gemini: 'gemini', groq: 'groq', huangfing: 'huangfing' };
-        for (const [key, id] of Object.entries(providers)) {
-            if (ai[key]) {
-                const sigEl = document.getElementById(id + 'Signal');
-                const confEl = document.getElementById(id + 'Conf');
-                if (sigEl) {
-                    sigEl.textContent = ai[key].signal || 'HOLD';
-                    sigEl.className = 'ai-signal ' + signalClass(ai[key].signal);
-                }
-                if (confEl) confEl.textContent = ai[key].confidence || '--';
-            }
-        }
+        ['gemini','groq','huangfing'].forEach(p => {
+            if (!ai[p]) return;
+            const sig = document.getElementById(p + 'Signal');
+            const conf = document.getElementById(p + 'Conf');
+            if (sig) { sig.textContent = ai[p].signal || 'HOLD'; sig.className = 'ai-signal ' + sigClass(ai[p].signal); }
+            if (conf) conf.textContent = ai[p].confidence || '--';
+        });
         if (ai.finalDecision) {
-            document.getElementById('finalDecision').innerHTML = getSignalHTML(ai.finalDecision);
+            const el = document.getElementById('finalDecision');
+            const span = document.createElement('span');
+            const allowed = ['BUY','SELL','HOLD'];
+            const safe = allowed.includes(ai.finalDecision) ? ai.finalDecision : 'HOLD';
+            span.className = sigClass(safe);
+            span.textContent = safe;
+            el.innerHTML = '';
+            el.appendChild(span);
         }
-        if (ai.consensus !== undefined) {
-            document.getElementById('consensusScore').textContent = ai.consensus + '%';
-        }
+        if (ai.consensus !== undefined) setText('consensusScore', ai.consensus + '%');
     }
 
     function updateRPC(endpoints, activeRpc) {
         const container = document.getElementById('rpcStatus');
         container.innerHTML = '';
         (endpoints || []).forEach(ep => {
-            const span = document.createElement('span');
+            const item = document.createElement('div');
+            item.className = 'rpc-item';
             const dot = document.createElement('span');
-            const allowedStatuses = ['healthy', 'down', 'unknown'];
-            const safeStatus = allowedStatuses.includes(ep.status) ? ep.status : 'unknown';
+            const allowed = ['healthy','down','unknown'];
+            const safeStatus = allowed.includes(ep.status) ? ep.status : 'unknown';
             dot.className = 'rpc-dot rpc-' + safeStatus;
-            const name = document.createTextNode(String(ep.name || '').slice(0, 40));
-            span.appendChild(dot);
-            span.appendChild(name);
-            container.appendChild(span);
+            const name = document.createElement('span');
+            name.textContent = String(ep.name || '').slice(0, 40);
+            item.appendChild(dot);
+            item.appendChild(name);
+            container.appendChild(item);
         });
-        if (activeRpc) document.getElementById('activeRpc').textContent = String(activeRpc).slice(0, 50);
+        if (activeRpc) setText('activeRpc', String(activeRpc).slice(0, 50));
     }
 
-    function signalClass(signal) {
-        if (signal === 'BUY') return 'signal-buy';
-        if (signal === 'SELL') return 'signal-sell';
+    function renderCheckResults(report) {
+        const grid = document.getElementById('checkGrid');
+        grid.innerHTML = '';
+        if (!report || !report.results || report.results.length === 0) {
+            grid.innerHTML = '<div class="check-placeholder">No results</div>';
+            return;
+        }
+        report.results.forEach(r => {
+            const item = document.createElement('div');
+            const safeStatus = ['ok','error','missing'].includes(r.status) ? r.status : 'error';
+            item.className = 'check-item ' + safeStatus;
+            const icon = document.createElement('div');
+            icon.className = 'check-icon';
+            icon.textContent = safeStatus === 'ok' ? '✅' : safeStatus === 'missing' ? '⚠️' : '❌';
+            const info = document.createElement('div');
+            const nameEl = document.createElement('div');
+            nameEl.className = 'check-name';
+            nameEl.textContent = String(r.name || '').slice(0, 40);
+            const msgEl = document.createElement('div');
+            msgEl.className = 'check-msg';
+            msgEl.textContent = String(r.message || '').slice(0, 80);
+            info.appendChild(nameEl);
+            info.appendChild(msgEl);
+            if (r.latency_ms > 0) {
+                const lat = document.createElement('div');
+                lat.className = 'check-lat';
+                lat.textContent = r.latency_ms + 'ms';
+                info.appendChild(lat);
+            }
+            item.appendChild(icon);
+            item.appendChild(info);
+            grid.appendChild(item);
+        });
+    }
+
+    function renderTgTestResult(result) {
+        const el = document.getElementById('tgTestResult');
+        el.style.display = '';
+        if (result.ok) {
+            el.style.color = '#00ff88';
+            el.textContent = '✅ ' + (result.message || 'OK') + (result.bot_name ? ' — Bot: ' + result.bot_name : '');
+        } else {
+            el.style.color = '#ff3366';
+            el.textContent = '❌ ' + (result.message || 'Failed') + (result.bot_name ? ' — Bot: ' + result.bot_name : '');
+        }
+    }
+
+    function sigClass(s) {
+        if (s === 'BUY')  return 'signal-buy';
+        if (s === 'SELL') return 'signal-sell';
         return 'signal-hold';
     }
 
-    function getSignalHTML(signal) {
-        const span = document.createElement('span');
-        const allowed = ['BUY', 'SELL', 'HOLD'];
-        const safeSignal = allowed.includes(signal) ? signal : 'HOLD';
-        span.className = signalClass(safeSignal);
-        span.textContent = safeSignal;
-        return span.outerHTML;
-    }
+    function pnlClass(v) { return v >= 0 ? 'profit' : 'loss'; }
+    function setText(id, val) { const el = document.getElementById(id); if (el) el.textContent = val; }
+    function setClass(id, cls) { const el = document.getElementById(id); if (el) el.className = cls; }
 
     function addLog(message, type = 'info') {
         const panel = document.getElementById('logPanel');
         const time = new Date().toLocaleTimeString();
         const div = document.createElement('div');
-        div.className = 'log-entry ' + type;
-        div.textContent = `[${time}] ${message}`;
+        const allowed = ['info','error','success','warning','default'];
+        div.className = 'log-entry ' + (allowed.includes(type) ? type : 'default');
+        div.textContent = '[' + time + '] ' + String(message).slice(0, 200);
         panel.appendChild(div);
         panel.scrollTop = panel.scrollHeight;
         while (panel.children.length > 500) panel.removeChild(panel.firstChild);
     }
 
-    function sendCommand(action, params = {}) {
-        if (ws && ws.readyState === WebSocket.OPEN) {
+    function send(action, params = {}) {
+        if (ws && ws.readyState === WebSocket.OPEN)
             ws.send(JSON.stringify({ action, ...params }));
-        }
     }
 
-    document.getElementById('startBtn').onclick = () => {
-        const cfg = {
-            positionSize: parseFloat(document.getElementById('positionSize').value),
-            slippage: parseFloat(document.getElementById('slippage').value),
-            dexPriority: document.getElementById('dexPriority').value,
-            mevMode: document.getElementById('mevMode').value,
-            aiVoting: document.getElementById('aiVoting').value,
-            scalpStrategy: document.getElementById('scalpStrategy').value,
-            cooldown: parseInt(document.getElementById('cooldown').value)
+    function buildConfig() {
+        return {
+            positionSize: parseFloat(document.getElementById('positionSize').value) || 1,
+            slippage:     parseFloat(document.getElementById('slippage').value) || 0.5,
+            dexPriority:  document.getElementById('dexPriority').value,
+            mevMode:      document.getElementById('mevMode').value,
+            aiVoting:     document.getElementById('aiVoting').value,
+            scalpStrategy:document.getElementById('scalpStrategy').value,
+            cooldown:     parseInt(document.getElementById('cooldown').value) || 30,
         };
-        sendCommand('start', { config: cfg });
-        addLog('Starting bot with custom config...', 'info');
-    };
+    }
 
-    document.getElementById('stopBtn').onclick = () => {
-        sendCommand('stop');
+    document.getElementById('startLiveBtn').onclick = () => {
+        send('start', { config: buildConfig(), simMode: false });
+        addLog('Starting bot in LIVE mode...', 'info');
     };
-
-    document.getElementById('withdrawBtn').onclick = () => {
-        sendCommand('withdraw');
+    document.getElementById('startSimBtn').onclick = () => {
+        send('start', { config: buildConfig(), simMode: true });
+        addLog('Starting bot in SIMULATION mode...', 'warning');
     };
-
-    document.getElementById('resetStatsBtn').onclick = () => {
-        sendCommand('reset_stats');
+    document.getElementById('stopBtn').onclick  = () => send('stop');
+    document.getElementById('withdrawBtn').onclick = () => send('withdraw');
+    document.getElementById('resetStatsBtn').onclick = () => send('reset_stats');
+    document.getElementById('runCheckBtn').onclick = () => {
+        document.getElementById('checkGrid').innerHTML = '<div class="check-placeholder">⏳ Running checks...</div>';
+        send('run_check');
     };
-
+    document.getElementById('tgTestBtn').onclick = () => {
+        document.getElementById('tgTestResult').style.display = 'none';
+        send('test_telegram');
+    };
     document.getElementById('clearLogBtn').onclick = () => {
         document.getElementById('logPanel').innerHTML = '<div class="log-entry info">[--:--:--] Log cleared</div>';
     };
