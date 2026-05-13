@@ -822,21 +822,45 @@ func runBot() {
                         tokens = generateSimTokens()
                 }
 
-                // Count how many pass filters and log a summary every cycle
+                // Count how many pass filters; log why real tokens are rejected
                 passCount := 0
+                realCount := 0
                 for _, t := range tokens {
-                        if passesFilters(t) {
+                        if strings.HasPrefix(t.Address, "0xSIM") {
+                                continue
+                        }
+                        realCount++
+                        reason := filterRejectReason(t)
+                        if reason == "" {
                                 passCount++
+                                log.Printf("✅ REAL token passed: [%s] vol5m=$%.0f vol24h=$%.0f liq=$%.0f chg5m=%.1f%% buys=%d sells=%d age=%ds",
+                                        t.Symbol, t.Volume5m, t.Volume24h, t.LiquidityUSD, t.PriceChange5m, t.Buys5m, t.Sells5m, t.AgeSeconds)
+                        } else {
+                                log.Printf("🚫 REAL token rejected [%s]: %s | vol5m=$%.0f liq=$%.0f buys=%d age=%ds",
+                                        t.Symbol, reason, t.Volume5m, t.LiquidityUSD, t.Buys5m, t.AgeSeconds)
                         }
                 }
 
-                // In simulation mode, if real tokens pass 0 filters (e.g. all established pools),
-                // inject synthetic tokens that match the Pro Config strategy parameters.
+                // In simulation mode, if real tokens pass 0 filters fallback to sim tokens
                 if simMode && passCount == 0 {
+                        if realCount > 0 {
+                                log.Printf("⚠️  All %d real tokens rejected by filters — running sim fallback", realCount)
+                        }
                         tokens = generateSimTokens()
                         passCount = len(tokens)
+                } else {
+                        // remove sim tokens if real ones passed
+                        var realTokens []data.TokenData
+                        for _, t := range tokens {
+                                if !strings.HasPrefix(t.Address, "0xSIM") {
+                                        realTokens = append(realTokens, t)
+                                }
+                        }
+                        if len(realTokens) > 0 {
+                                tokens = realTokens
+                        }
                 }
-                log.Printf("🔎 Filter result: %d/%d tokens passed", passCount, len(tokens))
+                log.Printf("🔎 Filter result: %d/%d real tokens passed", passCount, realCount)
                 if passCount > 0 {
                         broadcast("log", map[string]interface{}{
                                 "message": fmt.Sprintf("🔎 %d token(s) passed filters — analyzing with AI...", passCount),
@@ -887,12 +911,14 @@ func runBot() {
 
                                 if !gp.OK && !gp.Skipped {
                                         if !cfg.GoPlus.SkipOnAPIError {
+                                                log.Printf("🔒 GoPlus ERR [%s]: %s — skip", token.Symbol, gp.Error)
                                                 broadcast("log", map[string]interface{}{
                                                         "message": fmt.Sprintf("🔒 GoPlus ERR [%s]: %s — skip", token.Symbol, gp.Error),
                                                         "type":    "warning",
                                                 })
                                                 continue
                                         }
+                                        log.Printf("🔒 GoPlus ERR [%s]: %s — pass-through (skip_on_api_error=true)", token.Symbol, gp.Error)
                                         broadcast("log", map[string]interface{}{
                                                 "message": fmt.Sprintf("🔒 GoPlus ERR [%s]: %s — pass-through", token.Symbol, gp.Error),
                                                 "type":    "info",
@@ -913,11 +939,10 @@ func runBot() {
                                                 reject = fmt.Sprintf("buy tax %.1f%% (max %.1f%%)", gp.BuyTax, cfg.GoPlus.MaxBuyTaxPct)
                                         } else if cfg.GoPlus.MaxSellTaxPct > 0 && gp.SellTax > cfg.GoPlus.MaxSellTaxPct {
                                                 reject = fmt.Sprintf("sell tax %.1f%% (max %.1f%%)", gp.SellTax, cfg.GoPlus.MaxSellTaxPct)
-                                        } else if cfg.GoPlus.MinSmartMoneyCount > 0 && gp.SmartMoneyCount < cfg.GoPlus.MinSmartMoneyCount {
-                                                reject = fmt.Sprintf("smart money wallets %d (min %d)", gp.SmartMoneyCount, cfg.GoPlus.MinSmartMoneyCount)
                                         }
 
                                         if reject != "" {
+                                                log.Printf("🚫 GoPlus [%s]: %s", token.Symbol, reject)
                                                 broadcast("log", map[string]interface{}{
                                                         "message": fmt.Sprintf("🚫 GoPlus [%s]: %s", token.Symbol, reject),
                                                         "type":    "warning",
@@ -925,9 +950,11 @@ func runBot() {
                                                 continue
                                         }
 
+                                        log.Printf("✅ GoPlus [%s]: dev=%.1f%% top10=%.1f%% tax=%.0f%%/%.0f%%",
+                                                token.Symbol, gp.DevPercent, gp.Top10HolderPct, gp.BuyTax, gp.SellTax)
                                         broadcast("log", map[string]interface{}{
-                                                "message": fmt.Sprintf("✅ GoPlus [%s]: dev=%.1f%% top10=%.1f%% tax=%.0f%%/%.0f%% wallets=%d",
-                                                        token.Symbol, gp.DevPercent, gp.Top10HolderPct, gp.BuyTax, gp.SellTax, gp.SmartMoneyCount),
+                                                "message": fmt.Sprintf("✅ GoPlus [%s]: dev=%.1f%% top10=%.1f%% tax=%.0f%%/%.0f%%",
+                                                        token.Symbol, gp.DevPercent, gp.Top10HolderPct, gp.BuyTax, gp.SellTax),
                                                 "type": "info",
                                         })
                                 }
@@ -964,12 +991,14 @@ func runBot() {
                         priceImpactPct := (maxKellyUSD / token.LiquidityUSD) * 100
                         risk := mevShield.Assess(priceImpactPct, token.LiquidityUSD, float64(token.TxCount5m)/5.0)
                         if risk.ShouldSkip {
+                                log.Printf("🛡️ MEV skip [%s]: score=%.0f level=%s — %s", token.Symbol, risk.RiskPercent, risk.RiskLevel, risk.Reason)
                                 broadcast("log", map[string]interface{}{
                                         "message": fmt.Sprintf("🛡️ MEV risk [%s]: %s — skipping %s", risk.RiskLevel, risk.Reason, token.Symbol),
                                         "type":    "warning",
                                 })
                                 continue
                         }
+                        log.Printf("🛡️ MEV ok [%s]: score=%.0f level=%s — proceeding to trade", token.Symbol, risk.RiskPercent, risk.RiskLevel)
 
                         if !simMode {
                                 mevShield.RandomDelay()
@@ -988,6 +1017,94 @@ func runBot() {
         }
 
         log.Println("Bot loop stopped")
+}
+
+// filterRejectReason returns the first reason a token fails filters, or "" if it passes.
+func filterRejectReason(token data.TokenData) string {
+        f := cfg.Monitoring.TokenFilters
+        isNew := token.AgeSeconds > 0 && token.AgeSeconds < 5400
+
+        minLiq := f.MinLiquidityUSD
+        if isNew {
+                minLiq = 500
+        }
+        if token.LiquidityUSD < minLiq {
+                return fmt.Sprintf("liquidity $%.0f < min $%.0f", token.LiquidityUSD, minLiq)
+        }
+        if isNew {
+                minVol5m := f.MinVolume5mUSD
+                if minVol5m <= 0 {
+                        minVol5m = 50000
+                }
+                if token.Volume5m < minVol5m {
+                        return fmt.Sprintf("new token vol5m $%.0f < $%.0f", token.Volume5m, minVol5m)
+                }
+        } else if token.Volume24h < f.MinVolume24hUSD {
+                return fmt.Sprintf("vol24h $%.0f < $%.0f", token.Volume24h, f.MinVolume24hUSD)
+        }
+        if f.MinVolume5mUSD > 0 && token.Volume5m > 0 && token.Volume5m < f.MinVolume5mUSD {
+                return fmt.Sprintf("vol5m $%.0f < $%.0f", token.Volume5m, f.MinVolume5mUSD)
+        }
+        if f.MaxPriceUSD > 0 && token.PriceUSD > f.MaxPriceUSD {
+                return fmt.Sprintf("price $%.8f > max $%.4f", token.PriceUSD, f.MaxPriceUSD)
+        }
+        minTx := f.MinTxCount5m
+        if isNew {
+                minTx = 2
+        }
+        if token.TxCount5m < minTx {
+                return fmt.Sprintf("txCount5m %d < %d", token.TxCount5m, minTx)
+        }
+        if token.AgeSeconds > 0 {
+                if f.MinAgeSecs > 0 && token.AgeSeconds < f.MinAgeSecs {
+                        return fmt.Sprintf("age %ds < min %ds", token.AgeSeconds, f.MinAgeSecs)
+                }
+                if f.MaxAgeSecs > 0 && token.AgeSeconds > f.MaxAgeSecs {
+                        return fmt.Sprintf("age %ds > max %ds", token.AgeSeconds, f.MaxAgeSecs)
+                }
+        }
+        if f.MinBuySellRatio > 0 {
+                if token.Buys5m == 0 && token.Sells5m == 0 {
+                        return "no buy/sell data"
+                }
+                var ratio float64
+                if token.Sells5m == 0 {
+                        ratio = 99.0
+                } else {
+                        ratio = float64(token.Buys5m) / float64(token.Sells5m)
+                }
+                if ratio < f.MinBuySellRatio {
+                        return fmt.Sprintf("buy/sell ratio %.2f < %.2f", ratio, f.MinBuySellRatio)
+                }
+                if !isNew && f.MaxBuySellRatio > 0 && ratio > f.MaxBuySellRatio {
+                        return fmt.Sprintf("buy/sell ratio %.2f > max %.2f (manipulation?)", ratio, f.MaxBuySellRatio)
+                }
+        }
+        if cfg.DevFilter.Enabled {
+                if cfg.DevFilter.MinTokenAgeSecs > 0 && token.AgeSeconds > 0 && token.AgeSeconds < cfg.DevFilter.MinTokenAgeSecs {
+                        return fmt.Sprintf("dev filter: age %ds < %ds", token.AgeSeconds, cfg.DevFilter.MinTokenAgeSecs)
+                }
+        }
+        if token.Volume24h > 0 && token.Volume5m > 0 {
+                avg5m := token.Volume24h / 288.0
+                if avg5m > 0 && token.Volume5m < avg5m*1.5 {
+                        return fmt.Sprintf("no vol spike: vol5m $%.0f < 1.5x avg $%.0f", token.Volume5m, avg5m)
+                }
+        }
+        minAbsBuys := 5
+        if isNew {
+                minAbsBuys = 3
+        }
+        if token.Buys5m > 0 && token.Buys5m < minAbsBuys {
+                return fmt.Sprintf("buys5m %d < min %d", token.Buys5m, minAbsBuys)
+        }
+        if !isNew && token.PriceChange5m < 0 {
+                return fmt.Sprintf("negative momentum: chg5m %.1f%%", token.PriceChange5m)
+        }
+        if token.LiquidityUSD < 5000 {
+                return fmt.Sprintf("liquidity $%.0f < $5000 absolute min", token.LiquidityUSD)
+        }
+        return ""
 }
 
 // ── Rule-based signal (fallback when no AI keys configured) ──────────────────
@@ -1375,23 +1492,27 @@ func executeTrade(token data.TokenData, decision *ai.TradingDecision, simMode bo
         }
 
         if mtp.Enabled {
+                msg := fmt.Sprintf("📈%s OPEN %s | Entry: $%.6f | Size: %.6f WETH ($%.2f) | Kelly: %.2f× [%s] | TP1: +%.0f%% TP2: +%.0f%% TP3: +%.0f%% | SL: -%.0f%% | Conf: %.0f%%",
+                        simTag, token.Symbol, token.PriceUSD,
+                        wethAmount, posSize,
+                        kr.Multiplier, kr.Mode,
+                        mtp.TP1Percent, mtp.TP2Percent, mtp.TP3Percent, strat.MomentumSL,
+                        decision.Confidence)
+                log.Print(msg)
                 broadcast("log", map[string]interface{}{
-                        "message": fmt.Sprintf("📈%s OPEN %s | Entry: $%.6f | Size: %.6f WETH ($%.2f) | Kelly: %.2f× [%s] | TP1: +%.0f%% TP2: +%.0f%% TP3: +%.0f%% | SL: -%.0f%% | Conf: %.0f%%",
-                                simTag, token.Symbol, token.PriceUSD,
-                                wethAmount, posSize,
-                                kr.Multiplier, kr.Mode,
-                                mtp.TP1Percent, mtp.TP2Percent, mtp.TP3Percent, strat.MomentumSL,
-                                decision.Confidence),
-                        "type": "success",
+                        "message": msg,
+                        "type":    "success",
                 })
         } else {
+                msg := fmt.Sprintf("📈%s OPEN %s | WETH→TOKEN | Entry: $%.6f | Size: %.6f WETH ($%.2f) | Kelly: %.2f× [%s] | TP: +%.1f%% | SL: -%.1f%% | Conf: %.0f%%",
+                        simTag, token.Symbol, token.PriceUSD,
+                        wethAmount, posSize,
+                        kr.Multiplier, kr.Mode,
+                        strat.MomentumTP, strat.MomentumSL,
+                        decision.Confidence)
+                log.Print(msg)
                 broadcast("log", map[string]interface{}{
-                        "message": fmt.Sprintf("📈%s OPEN %s | WETH→TOKEN | Entry: $%.6f | Size: %.6f WETH ($%.2f) | Kelly: %.2f× [%s] | TP: +%.1f%% | SL: -%.1f%% | Conf: %.0f%%",
-                                simTag, token.Symbol, token.PriceUSD,
-                                wethAmount, posSize,
-                                kr.Multiplier, kr.Mode,
-                                strat.MomentumTP, strat.MomentumSL,
-                                decision.Confidence),
+                        "message": msg,
                         "type": "success",
                 })
         }
