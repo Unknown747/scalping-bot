@@ -11,9 +11,11 @@ import (
 )
 
 const (
-	dexScreenerBase = "https://api.dexscreener.com"
-	dexTokensURL    = "https://api.dexscreener.com/latest/dex/tokens/%s"
-	dexMaxAddresses = 30
+	dexScreenerBase  = "https://api.dexscreener.com"
+	dexTokensURL     = "https://api.dexscreener.com/latest/dex/tokens/%s"
+	dexBoostsURL     = "https://api.dexscreener.com/token-boosts/latest/v1"
+	dexSearchURL     = "https://api.dexscreener.com/latest/dex/search?q=base"
+	dexMaxAddresses  = 30
 )
 
 type DexScreenerClient struct {
@@ -28,27 +30,116 @@ func NewDexScreenerClient() *DexScreenerClient {
 	}
 }
 
-// GetLatestTokens fetches live price/volume data from DexScreener for a list
-// of token addresses that were discovered by GeckoTerminal. This lets us use
-// DexScreener as a data-enrichment source rather than a discovery source,
-// since DexScreener's search/boost endpoints don't reliably surface new Base
-// chain tokens.
+// GetLatestTokens tries two DexScreener strategies to find REAL new meme tokens on Base:
+//  1. token-boosts/latest/v1 → lists recently boosted tokens (people pay to boost new tokens)
+//  2. search?q=base as secondary fallback
+//
+// This replaces the old "known stable addresses" approach which only returned WETH/AERO.
 func (d *DexScreenerClient) GetLatestTokens(ctx context.Context, chainID string) ([]TokenData, error) {
-	// We use DexScreener's token lookup with a set of well-known active Base
-	// addresses so the fallback always returns something meaningful.
-	// These are long-lived high-liquidity Base tokens — they act as a health
-	// check that confirms DexScreener is reachable and the bot can parse the
-	// response format correctly.
-	knownBaseTokens := []string{
-		"0x4200000000000000000000000000000000000006", // WETH
-		"0x940181a94a35a4569e4529a3cdfb74e38fd98631", // AERO
-		"0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", // USDC
-		"0x50c5725949a6f0c72e6c4a641f24049a917db0cb", // DAI
-		"0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca", // USDbC
+	// Strategy 1: token boosts — new meme tokens pay to appear here
+	tokens, err := d.getFromBoosts(ctx, chainID)
+	if err == nil && len(tokens) > 0 {
+		return tokens, nil
 	}
 
-	batchURL := fmt.Sprintf(dexTokensURL, strings.Join(knownBaseTokens, ","))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, batchURL, nil)
+	// Strategy 2: search by chain to get recently active pairs
+	tokens, err = d.getFromSearch(ctx, chainID)
+	if err == nil && len(tokens) > 0 {
+		return tokens, nil
+	}
+
+	return nil, fmt.Errorf("dexscreener: all strategies failed (boosts: %v)", err)
+}
+
+// getFromBoosts calls the /token-boosts/latest/v1 endpoint, collects Base token
+// addresses from the result, and enriches them with pair data.
+func (d *DexScreenerClient) getFromBoosts(ctx context.Context, chainID string) ([]TokenData, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, dexBoostsURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "MemeScalperBot/2.0")
+
+	resp, err := d.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("dexscreener boosts request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("dexscreener boosts API: HTTP %d", resp.StatusCode)
+	}
+
+	var raw []struct {
+		URL          string `json:"url"`
+		ChainID      string `json:"chainId"`
+		TokenAddress string `json:"tokenAddress"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("dexscreener boosts decode: %w", err)
+	}
+
+	// Collect Base chain token addresses
+	var addrs []string
+	seen := make(map[string]bool)
+	for _, b := range raw {
+		if !strings.EqualFold(b.ChainID, chainID) {
+			continue
+		}
+		addr := strings.ToLower(b.TokenAddress)
+		if addr == "" || seen[addr] {
+			continue
+		}
+		seen[addr] = true
+		addrs = append(addrs, b.TokenAddress)
+		if len(addrs) >= dexMaxAddresses {
+			break
+		}
+	}
+	if len(addrs) == 0 {
+		return nil, fmt.Errorf("dexscreener boosts: no Base tokens found")
+	}
+
+	// Fetch pair data for these addresses (batch, max 30)
+	batchURL := fmt.Sprintf(dexTokensURL, strings.Join(addrs, ","))
+	return d.fetchPairData(ctx, batchURL, chainID)
+}
+
+// getFromSearch calls the DexScreener search endpoint filtered to Base.
+func (d *DexScreenerClient) getFromSearch(ctx context.Context, chainID string) ([]TokenData, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, dexSearchURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("User-Agent", "MemeScalperBot/2.0")
+
+	resp, err := d.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("dexscreener search request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("dexscreener search API: HTTP %d", resp.StatusCode)
+	}
+
+	var raw struct {
+		Pairs []dexPair `json:"pairs"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+		return nil, fmt.Errorf("dexscreener search decode: %w", err)
+	}
+
+	tokens, err := pairsToTokens(raw.Pairs, chainID, dexMaxAddresses)
+	if err != nil {
+		return nil, err
+	}
+	return tokens, nil
+}
+
+// fetchPairData fetches pair details from a DexScreener batch URL.
+func (d *DexScreenerClient) fetchPairData(ctx context.Context, url, chainID string) ([]TokenData, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -71,11 +162,7 @@ func (d *DexScreenerClient) GetLatestTokens(ctx context.Context, chainID string)
 		return nil, fmt.Errorf("dexscreener tokens decode: %w", err)
 	}
 
-	tokens, err := pairsToTokens(raw.Pairs, chainID, dexMaxAddresses)
-	if err != nil {
-		return nil, err
-	}
-	return tokens, nil
+	return pairsToTokens(raw.Pairs, chainID, dexMaxAddresses)
 }
 
 type dexPair struct {

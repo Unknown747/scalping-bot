@@ -737,8 +737,10 @@ func runBot() {
                         broadcast("log", map[string]interface{}{"message": "✅ Circuit breaker reset. Resuming...", "type": "success"})
                 }
 
-                // ── Token fetch with 60s cache + Gecko rate-limit awareness ──────────
-                const cacheTTL = 60 * time.Second
+                // ── Token fetch with 5-min cache + Gecko rate-limit awareness ────────
+                // 5 minutes = GeckoTerminal cooldown window, so bot keeps real meme
+                // token data instead of falling to useless DexScreener (WETH/AERO).
+                const cacheTTL = 5 * time.Minute
                 tokenCache.Lock()
                 cacheAge := time.Since(tokenCache.fetchedAt)
                 cachedTokens := tokenCache.tokens
@@ -1512,8 +1514,16 @@ func executeTrade(token data.TokenData, decision *ai.TradingDecision, simMode bo
         }
 
         if !simMode {
-                autoWrapETHIfNeeded(wethAmount)
+                if wrapErr := autoWrapETHIfNeeded(wethAmount); wrapErr != nil {
+                        broadcast("log", map[string]interface{}{
+                                "message": fmt.Sprintf("❌ [LIVE] Trade blocked for %s — wallet/wrap error: %v", token.Symbol, wrapErr),
+                                "type":    "error",
+                        })
+                        log.Printf("❌ [LIVE] Trade blocked for %s: %v", token.Symbol, wrapErr)
+                        return
+                }
                 if txResult, buyErr := executeLiveBuy(token.Address, wethAmount); buyErr != nil {
+                        log.Printf("❌ [LIVE] On-chain BUY failed for %s: %v", token.Symbol, buyErr)
                         broadcast("log", map[string]interface{}{
                                 "message": fmt.Sprintf("❌ [LIVE] On-chain BUY failed for %s: %v", token.Symbol, buyErr),
                                 "type":    "error",
@@ -1526,6 +1536,7 @@ func executeTrade(token data.TokenData, decision *ai.TradingDecision, simMode bo
                         if len(shortTx) > 12 {
                                 shortTx = "..." + txResult.TxHash[len(txResult.TxHash)-8:]
                         }
+                        log.Printf("🔗 [LIVE] BUY confirmed: %s | tx: %s | gas: %d", token.Symbol, shortTx, txResult.GasUsed)
                         broadcast("log", map[string]interface{}{
                                 "message": fmt.Sprintf("🔗 [LIVE] BUY confirmed: %s | tx: %s | gas: %d",
                                         token.Symbol, shortTx, txResult.GasUsed),
@@ -2061,19 +2072,39 @@ const wrapGasReserveETH = 0.003 // keep 0.003 ETH (~$9) for gas fees on Base
 
 // autoWrapETHIfNeeded checks WETH balance before a live trade.
 // If insufficient, it wraps available native ETH → WETH while keeping a gas reserve.
-func autoWrapETHIfNeeded(neededWETH float64) {
+// Returns an error if WETH balance is still insufficient after the wrap attempt —
+// callers MUST check this and abort the trade, otherwise the swap will revert on-chain.
+func autoWrapETHIfNeeded(neededWETH float64) error {
         rpcURL, err := rpcClient.GetActiveEndpoint()
         if err != nil {
-                return
+                return fmt.Errorf("no active RPC endpoint: %w", err)
         }
         exec := swappkg.NewExecutor(rpcURL)
         ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
         defer cancel()
 
-        wethBal, err := exec.GetWETHBalanceWei(ctx)
-        if err != nil {
-                log.Printf("⚠️  Auto-wrap: WETH balance check failed: %v", err)
-                return
+        // ── Log current balances before every trade ────────────────────────────
+        ethBal, ethErr := exec.GetNativeETHBalance(ctx)
+        wethBal, wethErr := exec.GetWETHBalanceWei(ctx)
+
+        ethFloat := 0.0
+        if ethErr == nil && ethBal != nil {
+                ethFloat, _ = new(big.Float).SetInt(ethBal).Float64()
+                ethFloat /= 1e18
+        }
+        wethFloat := 0.0
+        if wethErr == nil && wethBal != nil {
+                wethFloat, _ = new(big.Float).SetInt(wethBal).Float64()
+                wethFloat /= 1e18
+        }
+        log.Printf("💼 Wallet balances — ETH: %.6f | WETH: %.6f | Need WETH: %.6f", ethFloat, wethFloat, neededWETH)
+        broadcast("log", map[string]interface{}{
+                "message": fmt.Sprintf("💼 Wallet: ETH=%.6f | WETH=%.6f | Need=%.6f WETH", ethFloat, wethFloat, neededWETH),
+                "type":    "info",
+        })
+
+        if wethErr != nil {
+                return fmt.Errorf("WETH balance check failed: %w", wethErr)
         }
 
         // Convert needed WETH (float ETH units) → wei
@@ -2081,13 +2112,11 @@ func autoWrapETHIfNeeded(neededWETH float64) {
         new(big.Float).SetFloat64(neededWETH * 1e18).Int(neededWei)
 
         if wethBal.Cmp(neededWei) >= 0 {
-                return // already have enough WETH
+                return nil // already have enough WETH
         }
 
-        ethBal, err := exec.GetNativeETHBalance(ctx)
-        if err != nil {
-                log.Printf("⚠️  Auto-wrap: ETH balance check failed: %v", err)
-                return
+        if ethErr != nil {
+                return fmt.Errorf("ETH balance check failed: %w", ethErr)
         }
 
         reserveWei := new(big.Int)
@@ -2095,11 +2124,12 @@ func autoWrapETHIfNeeded(neededWETH float64) {
 
         available := new(big.Int).Sub(ethBal, reserveWei)
         if available.Sign() <= 0 {
+                msg := fmt.Sprintf("ETH too low to wrap (have %.6f ETH, need %.3f ETH gas reserve)", ethFloat, wrapGasReserveETH)
                 broadcast("log", map[string]interface{}{
-                        "message": fmt.Sprintf("⚠️  Auto-wrap skipped: ETH too low (keeping %.3f ETH for gas)", wrapGasReserveETH),
+                        "message": "⚠️  Auto-wrap skipped: " + msg,
                         "type":    "warning",
                 })
-                return
+                return fmt.Errorf("insufficient ETH to wrap: %s", msg)
         }
 
         // Wrap only what's needed (not the entire available ETH)
@@ -2124,7 +2154,7 @@ func autoWrapETHIfNeeded(neededWETH float64) {
                         "message": fmt.Sprintf("❌ Auto-wrap failed: %v", err),
                         "type":    "error",
                 })
-                return
+                return fmt.Errorf("wrap ETH failed: %w", err)
         }
         shortTx := result.TxHash
         if len(shortTx) > 12 {
@@ -2134,6 +2164,20 @@ func autoWrapETHIfNeeded(neededWETH float64) {
                 "message": fmt.Sprintf("✅ Wrapped %.6f ETH → WETH | tx: %s | gas: %d", wrapETH, shortTx, result.GasUsed),
                 "type":    "success",
         })
+
+        // ── Verify final WETH balance is truly sufficient ──────────────────────
+        ctx3, cancel3 := context.WithTimeout(context.Background(), 15*time.Second)
+        defer cancel3()
+        wethFinal, err := exec.GetWETHBalanceWei(ctx3)
+        if err != nil {
+                return fmt.Errorf("post-wrap WETH balance check failed: %w", err)
+        }
+        if wethFinal.Cmp(neededWei) < 0 {
+                finalFloat, _ := new(big.Float).SetInt(wethFinal).Float64()
+                finalFloat /= 1e18
+                return fmt.Errorf("WETH still insufficient after wrap: have %.6f, need %.6f", finalFloat, neededWETH)
+        }
+        return nil
 }
 
 // handleWrap is the manual ETH→WETH wrap endpoint (POST /api/wrap).

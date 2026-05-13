@@ -143,7 +143,7 @@
     "backup_relay": "https://bloxroute.max-profit.blxrbdn.com",
     "random_delay_ms": { "min": 100, "max": 500 },
     "sandwich_detection": true,
-    "max_sandwich_risk_percent": 25,
+    "max_sandwich_risk_percent": 60,
     "frontrun_detection": true,
     "miner_tip_gwei": 0.01,
     "use_mev_boost": true
