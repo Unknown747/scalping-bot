@@ -10,12 +10,13 @@
 
   "rpc_config": {
     "primary_endpoints": [
-      "https://1rpc.io/base",
       "https://base.drpc.org",
-      "https://base.publicnode.com"
+      "https://base.publicnode.com",
+      "https://mainnet.base.org"
     ],
     "backup_endpoints": [
-      "https://base.meowrpc.com"
+      "https://base.meowrpc.com",
+      "https://base-rpc.publicnode.com"
     ],
     "websocket_endpoints": [
       "wss://base.drpc.org"
@@ -109,7 +110,7 @@
     },
     "openrouter": {
       "enabled": true,
-      "model": "meta-llama/llama-3.1-8b-instruct:free",
+      "model": "openai/gpt-oss-20b:free",
       "temperature": 0.2,
       "max_tokens": 300,
       "timeout_seconds": 10,

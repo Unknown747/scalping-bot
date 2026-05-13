@@ -1518,6 +1518,8 @@ func executeTrade(token data.TokenData, decision *ai.TradingDecision, simMode bo
                                 "message": fmt.Sprintf("❌ [LIVE] On-chain BUY failed for %s: %v", token.Symbol, buyErr),
                                 "type":    "error",
                         })
+                        // Mark as traded so bot doesn't retry the same token next cycle
+                        posTracker.MarkFailed(token.Address)
                         return
                 } else {
                         shortTx := txResult.TxHash

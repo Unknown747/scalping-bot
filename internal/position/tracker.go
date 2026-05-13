@@ -116,6 +116,14 @@ func (t *Tracker) AlreadyTraded(addr string) bool {
         return exists
 }
 
+// MarkFailed records a failed BUY attempt so the bot skips this token for
+// the rest of the session, preventing endless retry loops.
+func (t *Tracker) MarkFailed(addr string) {
+        t.mu.Lock()
+        defer t.mu.Unlock()
+        t.traded[addr] = time.Now()
+}
+
 func (t *Tracker) HasOpen(addr string) bool {
         t.mu.RLock()
         defer t.mu.RUnlock()

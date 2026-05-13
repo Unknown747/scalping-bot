@@ -49,19 +49,40 @@ func (e *Executor) Buy(ctx context.Context, tokenAddr string, wethWei *big.Int) 
         if err != nil {
                 return nil, err
         }
+
+        // Check which fee tiers actually have a pool before sending any TX
+        validFees, err := e.detectValidFeeTiers(ctx, WETHAddr, tokenAddr)
+        if err != nil {
+                log.Printf("⚠️  Pool detection error: %v — trying all fee tiers", err)
+                validFees = feeTiers
+        }
+        if len(validFees) == 0 {
+                return nil, fmt.Errorf("no Uniswap V3 pool found for %s on Base — token not tradeable", tokenAddr)
+        }
+        log.Printf("🔎 Pool check: %s valid fee tiers: %v", tokenAddr[:10], validFees)
+
         if err := e.ensureApproval(ctx, WETHAddr, RouterV3Addr, wallet, wethWei); err != nil {
                 return nil, fmt.Errorf("WETH approval: %w", err)
         }
+
+        // Fetch nonce once, increment locally for each retry to avoid nonce-too-low
+        nonce, err := e.rpc.getNonce(ctx, wallet)
+        if err != nil {
+                return nil, fmt.Errorf("get nonce: %w", err)
+        }
+
         var lastErr error
-        for _, fee := range feeTiers {
+        for _, fee := range validFees {
                 calldata := exactInputSingleCalldata(WETHAddr, tokenAddr, fee, wallet, wethWei, big.NewInt(0))
-                result, err := e.executeSwap(ctx, wallet, RouterV3Addr, calldata)
+                result, err := e.executeSwapWithNonce(ctx, wallet, RouterV3Addr, calldata, nonce)
                 if err == nil {
                         log.Printf("💱 [LIVE] BUY %s…%s fee=%d tx=%s…", tokenAddr[:6], tokenAddr[len(tokenAddr)-4:], fee, result.TxHash[:12])
                         return result, nil
                 }
                 log.Printf("⚠️  BUY fee=%d failed: %v", fee, err)
                 lastErr = err
+                // Increment nonce so next fee tier gets the next slot
+                nonce = new(big.Int).Add(nonce, big.NewInt(1))
         }
         return nil, fmt.Errorf("all fee tiers failed for BUY: %w", lastErr)
 }
@@ -80,19 +101,38 @@ func (e *Executor) Sell(ctx context.Context, tokenAddr string) (*SwapResult, err
         if tokenBalance.Sign() == 0 {
                 return nil, fmt.Errorf("zero token balance — nothing to sell")
         }
+
+        // Check which fee tiers have a pool
+        validFees, err := e.detectValidFeeTiers(ctx, tokenAddr, WETHAddr)
+        if err != nil {
+                log.Printf("⚠️  Pool detection error: %v — trying all fee tiers", err)
+                validFees = feeTiers
+        }
+        if len(validFees) == 0 {
+                return nil, fmt.Errorf("no Uniswap V3 pool found for %s — cannot sell", tokenAddr)
+        }
+
         if err := e.ensureApproval(ctx, tokenAddr, RouterV3Addr, wallet, tokenBalance); err != nil {
                 return nil, fmt.Errorf("token approval: %w", err)
         }
+
+        // Fetch nonce once, increment locally for each retry
+        nonce, err := e.rpc.getNonce(ctx, wallet)
+        if err != nil {
+                return nil, fmt.Errorf("get nonce: %w", err)
+        }
+
         var lastErr error
-        for _, fee := range feeTiers {
+        for _, fee := range validFees {
                 calldata := exactInputSingleCalldata(tokenAddr, WETHAddr, fee, wallet, tokenBalance, big.NewInt(0))
-                result, err := e.executeSwap(ctx, wallet, RouterV3Addr, calldata)
+                result, err := e.executeSwapWithNonce(ctx, wallet, RouterV3Addr, calldata, nonce)
                 if err == nil {
                         log.Printf("💱 [LIVE] SELL %s…%s fee=%d tx=%s…", tokenAddr[:6], tokenAddr[len(tokenAddr)-4:], fee, result.TxHash[:12])
                         return result, nil
                 }
                 log.Printf("⚠️  SELL fee=%d failed: %v", fee, err)
                 lastErr = err
+                nonce = new(big.Int).Add(nonce, big.NewInt(1))
         }
         return nil, fmt.Errorf("all fee tiers failed for SELL: %w", lastErr)
 }
@@ -142,20 +182,27 @@ func (e *Executor) queryGasPrice(ctx context.Context) (priorityFee, maxFee *big.
 }
 
 func (e *Executor) executeSwap(ctx context.Context, walletAddr, routerAddr string, calldata []byte) (*SwapResult, error) {
-        privKey, err := loadPrivKey()
-        if err != nil {
-                return nil, err
-        }
         nonce, err := e.rpc.getNonce(ctx, walletAddr)
         if err != nil {
                 return nil, fmt.Errorf("get nonce: %w", err)
+        }
+        return e.executeSwapWithNonce(ctx, walletAddr, routerAddr, calldata, nonce)
+}
+
+// executeSwapWithNonce signs and sends a swap TX using a caller-supplied nonce.
+// This avoids the nonce-too-low problem when retrying across multiple fee tiers
+// in a single block: the caller increments the nonce locally between retries.
+func (e *Executor) executeSwapWithNonce(ctx context.Context, walletAddr, routerAddr string, calldata []byte, nonce *big.Int) (*SwapResult, error) {
+        privKey, err := loadPrivKey()
+        if err != nil {
+                return nil, err
         }
         priorityFee, maxFee := e.queryGasPrice(ctx)
         rawTx, err := buildAndSignTx(
                 big.NewInt(BaseChainID), nonce,
                 priorityFee,
                 maxFee,
-                big.NewInt(250_000), // realistic Uniswap V3 gas on Base
+                big.NewInt(250_000),
                 routerAddr, big.NewInt(0), calldata, privKey,
         )
         if err != nil {
@@ -170,11 +217,50 @@ func (e *Executor) executeSwap(ctx context.Context, walletAddr, routerAddr strin
                 return nil, fmt.Errorf("wait receipt: %w", err)
         }
         if receipt.Status == "0x0" {
-                return nil, fmt.Errorf("tx reverted (txHash=%s) — try different fee tier or insufficient liquidity", txHash)
+                return nil, fmt.Errorf("tx reverted (txHash=%s) — insufficient liquidity or pool issue", txHash)
         }
         gasUsed := new(big.Int)
         gasUsed.SetString(strings.TrimPrefix(receipt.GasUsed, "0x"), 16)
         return &SwapResult{TxHash: txHash, GasUsed: gasUsed.Uint64()}, nil
+}
+
+// detectValidFeeTiers calls Uniswap V3 Factory.getPool() for each fee tier and
+// returns only those where a real pool (non-zero address) exists on Base.
+// Factory: 0x33128a8fC17869897dcE68Ed026d694621f6FDfD (Uniswap V3 on Base)
+func (e *Executor) detectValidFeeTiers(ctx context.Context, tokenA, tokenB string) ([]uint32, error) {
+        const factoryAddr = "0x33128a8fC17869897dcE68Ed026d694621f6FDfD"
+        var valid []uint32
+        for _, fee := range feeTiers {
+                data := getPoolCalldata(tokenA, tokenB, fee)
+                result, err := e.rpc.ethCall(ctx, factoryAddr, data)
+                if err != nil {
+                        continue
+                }
+                if len(result) >= 20 {
+                        // Pool address is in the last 20 bytes; zero address = no pool
+                        addr := result[len(result)-20:]
+                        allZero := true
+                        for _, b := range addr {
+                                if b != 0 {
+                                        allZero = false
+                                        break
+                                }
+                        }
+                        if !allZero {
+                                valid = append(valid, fee)
+                        }
+                }
+        }
+        return valid, nil
+}
+
+// getPool(address,address,uint24) selector: 0x1698ee82
+func getPoolCalldata(tokenA, tokenB string, fee uint32) []byte {
+        d := []byte{0x16, 0x98, 0xee, 0x82}
+        d = append(d, abiAddr(tokenA)...)
+        d = append(d, abiAddr(tokenB)...)
+        d = append(d, abiUint256(big.NewInt(int64(fee)))...)
+        return d
 }
 
 func (e *Executor) ensureApproval(ctx context.Context, tokenAddr, spender, owner string, amount *big.Int) error {
