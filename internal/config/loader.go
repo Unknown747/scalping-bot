@@ -162,6 +162,19 @@ type DevFilterConfig struct {
         BlacklistedAddresses []string `json:"blacklisted_addresses"`
 }
 
+type GoPlusConfig struct {
+        Enabled             bool    `json:"enabled"`
+        MaxDevHoldingPct    float64 `json:"max_dev_holding_percent"`
+        MaxTop10HolderPct   float64 `json:"max_top10_holder_percent"`
+        MinSmartMoneyCount  int     `json:"min_smart_money_count"`
+        MaxBuyTaxPct        float64 `json:"max_buy_tax_percent"`
+        MaxSellTaxPct       float64 `json:"max_sell_tax_percent"`
+        BlockHoneypot       bool    `json:"block_honeypot"`
+        BlockMintable       bool    `json:"block_mintable"`
+        TimeoutSeconds      int     `json:"timeout_seconds"`
+        SkipOnAPIError      bool    `json:"skip_on_api_error"`
+}
+
 type KellyConfig struct {
         Enabled           bool    `json:"enabled"`
         Fraction          float64 `json:"fraction"`
@@ -182,6 +195,7 @@ type Config struct {
         Monitoring  MonitoringConfig `json:"monitoring"`
         Risk        RiskConfig       `json:"risk_management"`
         Scalping    ScalpingConfig   `json:"scalping_strategies"`
+        GoPlus      GoPlusConfig     `json:"goplus_filter"`
         DevFilter   DevFilterConfig  `json:"dev_filter"`
         Kelly       KellyConfig      `json:"kelly"`
 }

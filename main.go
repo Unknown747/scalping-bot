@@ -854,6 +854,64 @@ func runBot() {
                                 continue
                         }
 
+                        // ── GoPlus on-chain security check ─────────────────────
+                        // FREE API (no key needed): checks dev holding %, top-10
+                        // holder concentration, tax, honeypot, mintable flag, and
+                        // counts non-dev EOA holders as a "smart money" proxy.
+                        if cfg.GoPlus.Enabled {
+                                gpCtx, gpCancel := context.WithTimeout(context.Background(),
+                                        time.Duration(cfg.GoPlus.TimeoutSeconds)*time.Second)
+                                gp := checker.CheckTokenSecurity(gpCtx, token.Address)
+                                gpCancel()
+
+                                if !gp.OK && !gp.Skipped {
+                                        if !cfg.GoPlus.SkipOnAPIError {
+                                                broadcast("log", map[string]interface{}{
+                                                        "message": fmt.Sprintf("🔒 GoPlus ERR [%s]: %s — skip", token.Symbol, gp.Error),
+                                                        "type":    "warning",
+                                                })
+                                                continue
+                                        }
+                                        broadcast("log", map[string]interface{}{
+                                                "message": fmt.Sprintf("🔒 GoPlus ERR [%s]: %s — pass-through", token.Symbol, gp.Error),
+                                                "type":    "info",
+                                        })
+                                }
+
+                                if gp.OK && !gp.Skipped {
+                                        reject := ""
+                                        if gp.IsHoneypot && cfg.GoPlus.BlockHoneypot {
+                                                reject = "honeypot detected"
+                                        } else if gp.IsMintable && cfg.GoPlus.BlockMintable {
+                                                reject = "mintable token"
+                                        } else if cfg.GoPlus.MaxDevHoldingPct > 0 && gp.DevPercent > cfg.GoPlus.MaxDevHoldingPct {
+                                                reject = fmt.Sprintf("dev holds %.1f%% (max %.1f%%)", gp.DevPercent, cfg.GoPlus.MaxDevHoldingPct)
+                                        } else if cfg.GoPlus.MaxTop10HolderPct > 0 && gp.Top10HolderPct > cfg.GoPlus.MaxTop10HolderPct {
+                                                reject = fmt.Sprintf("top-10 hold %.1f%% (max %.1f%%)", gp.Top10HolderPct, cfg.GoPlus.MaxTop10HolderPct)
+                                        } else if cfg.GoPlus.MaxBuyTaxPct > 0 && gp.BuyTax > cfg.GoPlus.MaxBuyTaxPct {
+                                                reject = fmt.Sprintf("buy tax %.1f%% (max %.1f%%)", gp.BuyTax, cfg.GoPlus.MaxBuyTaxPct)
+                                        } else if cfg.GoPlus.MaxSellTaxPct > 0 && gp.SellTax > cfg.GoPlus.MaxSellTaxPct {
+                                                reject = fmt.Sprintf("sell tax %.1f%% (max %.1f%%)", gp.SellTax, cfg.GoPlus.MaxSellTaxPct)
+                                        } else if cfg.GoPlus.MinSmartMoneyCount > 0 && gp.SmartMoneyCount < cfg.GoPlus.MinSmartMoneyCount {
+                                                reject = fmt.Sprintf("smart money wallets %d (min %d)", gp.SmartMoneyCount, cfg.GoPlus.MinSmartMoneyCount)
+                                        }
+
+                                        if reject != "" {
+                                                broadcast("log", map[string]interface{}{
+                                                        "message": fmt.Sprintf("🚫 GoPlus [%s]: %s", token.Symbol, reject),
+                                                        "type":    "warning",
+                                                })
+                                                continue
+                                        }
+
+                                        broadcast("log", map[string]interface{}{
+                                                "message": fmt.Sprintf("✅ GoPlus [%s]: dev=%.1f%% top10=%.1f%% tax=%.0f%%/%.0f%% wallets=%d",
+                                                        token.Symbol, gp.DevPercent, gp.Top10HolderPct, gp.BuyTax, gp.SellTax, gp.SmartMoneyCount),
+                                                "type": "info",
+                                        })
+                                }
+                        }
+
                         // Stagger AI calls so multiple tokens don't hit the same
                         // provider simultaneously and trigger rate limiting.
                         time.Sleep(600 * time.Millisecond)

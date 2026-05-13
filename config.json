@@ -239,6 +239,19 @@
     "blacklisted_addresses": []
   },
 
+  "goplus_filter": {
+    "enabled": true,
+    "max_dev_holding_percent": 1.0,
+    "max_top10_holder_percent": 25.0,
+    "min_smart_money_count": 3,
+    "max_buy_tax_percent": 5.0,
+    "max_sell_tax_percent": 5.0,
+    "block_honeypot": true,
+    "block_mintable": true,
+    "timeout_seconds": 7,
+    "skip_on_api_error": true
+  },
+
   "kelly": {
     "enabled": true,
     "fraction": 0.5,
