@@ -6,14 +6,13 @@ import (
         "fmt"
         "log"
         "math"
+        "math/big"
         "math/rand"
         "net/http"
         "os"
         "strings"
         "sync"
         "time"
-
-        "math/big"
 
         "github.com/gorilla/websocket"
         "github.com/joho/godotenv"
