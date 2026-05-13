@@ -132,6 +132,29 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
 .log-panel{background:#0a0a0f;border-radius:8px;padding:12px;height:280px;overflow-y:auto;font-family:'Courier New',monospace;font-size:11px;}
 .log-entry{padding:2px 0;border-bottom:1px solid #0f0f0f;}
 .log-entry.info{color:#00ffcc;}.log-entry.error{color:#ff3366;}.log-entry.success{color:#00ff88;}.log-entry.warning{color:#ffaa00;}.log-entry.default{color:#666;}
+/* ── Live Activity Log (Dashboard) ── */
+.activity-log{background:#0a0a0f;border-radius:8px;height:230px;overflow-y:auto;font-family:'Courier New',monospace;font-size:11px;scroll-behavior:smooth;}
+.activity-entry{display:flex;align-items:flex-start;gap:7px;padding:5px 10px;border-bottom:1px solid #0d0d0d;transition:background .15s;cursor:default;}
+.activity-entry:hover{background:#13131f;}
+.activity-entry:last-child{border-bottom:none;}
+.activity-ts{color:#2a2a4a;font-size:10px;white-space:nowrap;padding-top:1px;min-width:58px;}
+.activity-icon{font-size:13px;line-height:1.3;flex-shrink:0;}
+.activity-body{flex:1;min-width:0;}
+.activity-title{color:#bbb;line-height:1.4;word-break:break-word;}
+.activity-title strong{color:#fff;}
+.activity-sub{font-size:10px;color:#444;margin-top:1px;}
+.activity-entry.type-scan .activity-title{color:#00ffcc99;}
+.activity-entry.type-ai .activity-title{color:#ccc;}
+.activity-entry.type-trade .activity-title{color:#00ff88;}
+.activity-entry.type-trade.loss .activity-title{color:#ff3366;}
+.activity-entry.type-warn .activity-title{color:#ffaa00;}
+.activity-entry.type-error .activity-title{color:#ff3366;}
+.activity-filter-bar{display:flex;gap:5px;padding:8px 10px 6px;border-bottom:1px solid #0f0f1a;flex-wrap:wrap;}
+.af-btn{background:none;border:1px solid #1e1e35;color:#444;border-radius:5px;padding:3px 10px;font-size:10px;cursor:pointer;font-family:inherit;transition:all .15s;white-space:nowrap;}
+.af-btn:hover{color:#00ffcc;border-color:#00ffcc44;}
+.af-btn.af-active{color:#00ffcc;border-color:#00ffcc55;background:#00ffcc0a;}
+.activity-empty{text-align:center;padding:30px;color:#2a2a3a;font-size:12px;}
+.activity-count{display:inline-block;background:#00ffcc22;color:#00ffcc88;border-radius:8px;padding:0px 6px;font-size:10px;margin-left:5px;}
 /* ── Check ── */
 .check-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:8px;}
 .check-item{display:flex;align-items:flex-start;gap:8px;background:#0a0a0f;border-radius:7px;padding:10px;border-left:3px solid #333;}
@@ -373,6 +396,31 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
     </div>
   </div>
 
+  <!-- Live Activity Log -->
+  <div class="panel">
+    <div class="panel-hdr">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+        <div class="panel-title" style="margin:0;">📡 Live Activity</div>
+        <span class="activity-count" id="activityCount">0</span>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <span id="activityStatus" style="font-size:10px;color:#444;">● idle</span>
+        <button class="btn btn-gray btn-sm" id="clearActivityBtn">Clear</button>
+        <button class="btn btn-gray btn-sm" id="pauseActivityBtn">⏸ Pause</button>
+      </div>
+    </div>
+    <div class="activity-filter-bar">
+      <button class="af-btn af-active" data-af="all">All</button>
+      <button class="af-btn" data-af="scan">🔍 Scan</button>
+      <button class="af-btn" data-af="ai">🤖 AI</button>
+      <button class="af-btn" data-af="trade">💰 Trade</button>
+      <button class="af-btn" data-af="warn">⚠️ Warn</button>
+    </div>
+    <div class="activity-log" id="activityLog">
+      <div class="activity-empty">Waiting for bot activity...</div>
+    </div>
+  </div>
+
 </div><!-- end tab-dashboard -->
 
 <!-- ── TAB: Positions ── -->
@@ -462,6 +510,134 @@ let chartMode = 'pertrade';
 
 // pnlHistory stores rich objects: {pnlPct, pnl, symbol, reason, closedAt}
 let pnlHistory = [];
+
+// ── Live Activity Log ─────────────────────────────────────────────────────────
+let activityEntries = [];   // [{type, icon, title, sub, ts, raw}]
+let activityFilter  = 'all';
+let activityPaused  = false;
+let activityTotal   = 0;
+
+const ACTIVITY_MAX = 200;
+
+function tsNow() {
+  return new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+}
+
+function addActivity(type, icon, title, sub) {
+  if (activityPaused) return;
+  const entry = { type, icon, title, sub, ts: tsNow() };
+  activityEntries.push(entry);
+  if (activityEntries.length > ACTIVITY_MAX) activityEntries.shift();
+  activityTotal++;
+  setText('activityCount', activityTotal);
+  renderActivityEntry(entry);
+}
+
+function renderActivityEntry(entry) {
+  const log = document.getElementById('activityLog');
+  // Remove empty state
+  const empty = log.querySelector('.activity-empty');
+  if (empty) empty.remove();
+
+  // Filter check
+  if (activityFilter !== 'all' && entry.type !== activityFilter) return;
+
+  const div = document.createElement('div');
+  div.className = 'activity-entry type-' + entry.type + (entry.type === 'trade' && entry.loss ? ' loss' : '');
+  div.dataset.type = entry.type;
+  div.innerHTML =
+    `<span class="activity-ts">${entry.ts}</span>` +
+    `<span class="activity-icon">${entry.icon}</span>` +
+    `<div class="activity-body">` +
+      `<div class="activity-title">${entry.title}</div>` +
+      (entry.sub ? `<div class="activity-sub">${entry.sub}</div>` : '') +
+    `</div>`;
+
+  log.appendChild(div);
+  // Keep DOM lean
+  while (log.children.length > ACTIVITY_MAX) log.removeChild(log.firstChild);
+  log.scrollTop = log.scrollHeight;
+}
+
+function rerenderActivity() {
+  const log = document.getElementById('activityLog');
+  log.innerHTML = '';
+  const filtered = activityFilter === 'all'
+    ? activityEntries
+    : activityEntries.filter(e => e.type === activityFilter);
+  if (filtered.length === 0) {
+    log.innerHTML = '<div class="activity-empty">No entries for this filter</div>';
+    return;
+  }
+  filtered.forEach(e => {
+    const div = document.createElement('div');
+    div.className = 'activity-entry type-' + e.type;
+    div.dataset.type = e.type;
+    div.innerHTML =
+      `<span class="activity-ts">${e.ts}</span>` +
+      `<span class="activity-icon">${e.icon}</span>` +
+      `<div class="activity-body">` +
+        `<div class="activity-title">${e.title}</div>` +
+        (e.sub ? `<div class="activity-sub">${e.sub}</div>` : '') +
+      `</div>`;
+    log.appendChild(div);
+  });
+  log.scrollTop = log.scrollHeight;
+}
+
+// Map log message text → activity type + icon
+function classifyLog(message, type) {
+  const m = String(message).toLowerCase();
+  if (m.includes('scan') || m.includes('token') || m.includes('fetch') || m.includes('pool'))
+    return { type: 'scan', icon: '🔍' };
+  if (m.includes('circuit') || m.includes('pause') || m.includes('resume'))
+    return { type: 'warn', icon: '⚡' };
+  if (m.includes('mev') || m.includes('sandwich') || m.includes('skip'))
+    return { type: 'warn', icon: '🛡️' };
+  if (m.includes('buy') || m.includes('sell') || m.includes('trade') || m.includes('position') || m.includes('tp') || m.includes('sl'))
+    return { type: 'trade', icon: m.includes('profit') || m.includes('tp') ? '✅' : m.includes('sl') ? '❌' : '💰' };
+  if (type === 'error')   return { type: 'error', icon: '❌' };
+  if (type === 'warning') return { type: 'warn',  icon: '⚠️' };
+  if (type === 'success') return { type: 'trade', icon: '✅' };
+  return { type: 'scan', icon: '📡' };
+}
+
+// Activity filter buttons
+document.querySelectorAll('.af-btn').forEach(btn => {
+  btn.onclick = () => {
+    activityFilter = btn.dataset.af;
+    document.querySelectorAll('.af-btn').forEach(b => b.classList.toggle('af-active', b === btn));
+    rerenderActivity();
+  };
+});
+
+document.getElementById('clearActivityBtn').onclick = () => {
+  activityEntries = [];
+  activityTotal   = 0;
+  setText('activityCount', 0);
+  const log = document.getElementById('activityLog');
+  log.innerHTML = '<div class="activity-empty">Log cleared.</div>';
+  setActivityStatus('idle');
+};
+
+document.getElementById('pauseActivityBtn').onclick = function() {
+  activityPaused = !activityPaused;
+  this.textContent = activityPaused ? '▶ Resume' : '⏸ Pause';
+  this.style.color  = activityPaused ? '#ffaa00' : '';
+};
+
+function setActivityStatus(status) {
+  const el = document.getElementById('activityStatus');
+  const map = {
+    scanning: { text: '● scanning', color: '#00ffcc' },
+    trading:  { text: '● trading',  color: '#00ff88' },
+    idle:     { text: '● idle',     color: '#444'    },
+    error:    { text: '● error',    color: '#ff3366' },
+  };
+  const s = map[status] || map.idle;
+  el.textContent = s.text;
+  el.style.color  = s.color;
+}
 
 // ── Notification ─────────────────────────────────────────────────────────────
 (function(){
@@ -769,25 +945,74 @@ function handleMsg(msg) {
       if (d.log)       addLog(d.log.message, d.log.type);
       if (d.history)   loadHistory(d.history);
       if (d.positions) renderPositions(d.positions);
+      if (d.running)   setActivityStatus('scanning');
       break;
     case 'update':
       if (d.stats)        updateStats(d.stats);
-      if (d.running !== undefined) updateBotBadge(d.running, d.simMode);
+      if (d.running !== undefined) {
+        updateBotBadge(d.running, d.simMode);
+        setActivityStatus(d.running ? 'scanning' : 'idle');
+      }
       if (d.rpcEndpoints) updateRPC(d.rpcEndpoints, d.activeRpc);
       if (d.telegram)     document.getElementById('tgBadge').style.display = '';
       break;
-    case 'log':          if (d) addLog(d.message, d.type); break;
-    case 'ai_update':   if (d.ai) updateAI(d.ai); break;
-    case 'positions_update': renderPositions(d); break;
+    case 'log':
+      if (d) {
+        addLog(d.message, d.type);
+        // Mirror to activity panel with classification
+        const cls = classifyLog(d.message, d.type);
+        addActivity(cls.type, cls.icon, esc(String(d.message).slice(0, 180)));
+        if (d.type === 'error') setActivityStatus('error');
+      }
+      break;
+    case 'ai_update':
+      if (d.ai) {
+        updateAI(d.ai);
+        // Log AI decision to activity panel
+        const votes = [];
+        ['gemini','groq','huangfing'].forEach(p => {
+          if (d.ai[p]) {
+            const sig   = d.ai[p].signal || 'HOLD';
+            const conf  = parseFloat(d.ai[p].confidence) || 0;
+            const emoji = sig === 'BUY' ? '🟢' : sig === 'SELL' ? '🔴' : '🟡';
+            votes.push(`${emoji} ${p.charAt(0).toUpperCase()+p.slice(1)}: <strong>${sig}</strong> ${conf.toFixed(0)}%`);
+          }
+        });
+        if (votes.length > 0) {
+          const final   = d.ai.finalDecision || 'HOLD';
+          const cons    = d.ai.consensus !== undefined ? d.ai.consensus + '%' : '';
+          const token   = d.symbol ? esc(String(d.symbol).slice(0,12)) : (d.token ? esc(String(d.token).slice(0,10)) : '');
+          const fEmoji  = final === 'BUY' ? '🚀' : final === 'SELL' ? '📉' : '⏸';
+          const sub     = votes.join(' &nbsp;·&nbsp; ');
+          addActivity('ai', fEmoji,
+            `AI → <strong>${final}</strong>${cons ? ' &nbsp;<span style="color:#555">consensus '+cons+'</span>' : ''}${token ? ' &nbsp;<span style="color:#00ffcc66">'+token+'</span>' : ''}`,
+            sub
+          );
+        }
+        setActivityStatus('scanning');
+      }
+      break;
+    case 'positions_update':
+      renderPositions(d);
+      if (d && d.length > 0) setActivityStatus('trading');
+      break;
     case 'history_add':
       if (d) {
         prependHistoryRow(d);
-        // Prepend to pnlHistory (newest first → reverse for chart)
         pnlHistory.push({ pnlPct: d.pnlPct || 0, pnl: d.pnl || 0, symbol: d.symbol || '?', reason: d.reason || '?', closedAt: d.closedAt || '' });
         drawChart(true);
-        const sign = (d.pnl || 0) >= 0 ? '+' : '';
+        const sign    = (d.pnl || 0) >= 0 ? '+' : '';
+        const isWin   = (d.pnl || 0) >= 0;
+        const rIcon   = d.reason === 'TP' ? '✅' : d.reason === 'SL' ? '❌' : '⏱';
+        const simTag  = d.simMode ? ' <span style="color:#ffaa0088;font-size:9px;">[SIM]</span>' : '';
+        addActivity(
+          'trade',
+          rIcon,
+          `<strong>${esc(d.symbol||'?')}</strong> closed — ${d.reason||'?'}${simTag}`,
+          `PnL: <span style="color:${isWin?'#00ff88':'#ff3366'}">${sign}$${Math.abs(d.pnl||0).toFixed(4)} (${sign}${(d.pnlPct||0).toFixed(2)}%)</span>`
+        );
         pushNotif(
-          `${d.reason === 'TP' ? '✅' : d.reason === 'SL' ? '❌' : '⏱'} ${d.symbol} — ${d.reason}`,
+          `${rIcon} ${d.symbol} — ${d.reason}`,
           `PnL: ${sign}$${Math.abs(d.pnl||0).toFixed(4)} (${sign}${(d.pnlPct||0).toFixed(2)}%)`
         );
       }

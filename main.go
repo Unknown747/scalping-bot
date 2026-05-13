@@ -680,7 +680,7 @@ func runBot() {
 
                         marketMap := geckoData.ToMarketMap(token)
                         decision := aiOrch.GetTradingDecision(token.Address, marketMap)
-                        broadcastAIUpdate(decision, token.Address)
+                        broadcastAIUpdate(decision, token.Address, token.Symbol)
 
                         if decision.Action != "BUY" || decision.Confidence < cfg.AIConfig.MinConfidenceThreshold {
                                 continue
@@ -1345,7 +1345,7 @@ func broadcastLoop() {
         }
 }
 
-func broadcastAIUpdate(decision *ai.TradingDecision, tokenAddr string) {
+func broadcastAIUpdate(decision *ai.TradingDecision, tokenAddr, tokenSymbol string) {
         lastDecisions := aiOrch.GetLastDecisions()
 
         aiData := map[string]interface{}{
@@ -1361,8 +1361,9 @@ func broadcastAIUpdate(decision *ai.TradingDecision, tokenAddr string) {
         }
 
         broadcast("ai_update", map[string]interface{}{
-                "ai":    aiData,
-                "token": tokenAddr,
+                "ai":     aiData,
+                "token":  tokenAddr,
+                "symbol": tokenSymbol,
         })
 }
 
