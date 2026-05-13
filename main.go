@@ -671,12 +671,29 @@ func runBot() {
                         break
                 }
 
-                // Daily loss limit check
+                // Daily loss limit check (USD cap OR % of estimated capital)
+                dailyLossHit := false
                 if cfg.Risk.MaxDailyLossUSD > 0 && dailyPnl <= -cfg.Risk.MaxDailyLossUSD {
+                        dailyLossHit = true
                         broadcast("log", map[string]interface{}{
                                 "message": fmt.Sprintf("🛑 Daily loss limit hit ($%.2f). Stopping bot.", cfg.Risk.MaxDailyLossUSD),
                                 "type":    "error",
                         })
+                }
+                if !dailyLossHit && cfg.Risk.MaxDailyLossPct > 0 {
+                        capital := cfg.Trading.PositionSizeUSD * 10
+                        if capital <= 0 {
+                                capital = 10
+                        }
+                        if dailyPnl <= -(capital*cfg.Risk.MaxDailyLossPct/100.0) {
+                                dailyLossHit = true
+                                broadcast("log", map[string]interface{}{
+                                        "message": fmt.Sprintf("🛑 Daily loss %.0f%% modal hit ($%.2f). Stopping bot.", cfg.Risk.MaxDailyLossPct, dailyPnl),
+                                        "type":    "error",
+                                })
+                        }
+                }
+                if dailyLossHit {
                         botState.mu.Lock()
                         botState.Running = false
                         botState.mu.Unlock()
@@ -791,6 +808,13 @@ func runBot() {
                                 passCount++
                         }
                 }
+
+                // In simulation mode, if real tokens pass 0 filters (e.g. all established pools),
+                // inject synthetic tokens that match the Pro Config strategy parameters.
+                if simMode && passCount == 0 {
+                        tokens = generateSimTokens()
+                        passCount = len(tokens)
+                }
                 log.Printf("🔎 Filter result: %d/%d tokens passed", passCount, len(tokens))
                 if passCount > 0 {
                         broadcast("log", map[string]interface{}{
@@ -880,23 +904,29 @@ func runBot() {
 // ── Token generation & filtering ─────────────────────────────────────────────
 
 func generateSimTokens() []data.TokenData {
-        syms := []string{"DEGEN", "BRETT", "TOSHI", "MOCHI", "BENJI", "FROG", "PEPE", "MEME"}
+        syms := []string{"DEGEN", "BRETT", "TOSHI", "MOCHI", "BENJI", "FROG", "PEPE", "MEME", "CHAD", "WOJAK"}
         out := make([]data.TokenData, 3)
         for i := range out {
                 sym := syms[rand.Intn(len(syms))]
-                buys := 15 + rand.Intn(40)
+                buys := 30 + rand.Intn(60)
                 sells := 5 + rand.Intn(15)
+                // Generate sim tokens that match Pro Config strategy criteria:
+                // - Age: 1–30 min (60–1800 s)
+                // - Liquidity: >$15k
+                // - Volume 5m: >$50k
+                // - Buy/sell ratio bullish
                 out[i] = data.TokenData{
                         Address:       fmt.Sprintf("0xSIM%04d", rand.Intn(9999)),
                         Symbol:        sym,
                         PriceUSD:      0.0001 + rand.Float64()*0.009,
-                        Volume24h:     15000 + rand.Float64()*50000,
-                        LiquidityUSD:  8000 + rand.Float64()*30000,
-                        PriceChange5m: 1.5 + rand.Float64()*4,
+                        Volume24h:     100000 + rand.Float64()*200000,
+                        Volume5m:      50000 + rand.Float64()*150000,
+                        LiquidityUSD:  15000 + rand.Float64()*35000,
+                        PriceChange5m: 2.0 + rand.Float64()*5,
                         TxCount5m:     buys + sells,
                         Buys5m:        buys,
                         Sells5m:       sells,
-                        AgeSeconds:    300 + rand.Intn(3000),
+                        AgeSeconds:    60 + rand.Intn(1740),
                 }
         }
         return out
@@ -921,11 +951,20 @@ func passesFilters(token data.TokenData) bool {
 
         // ── Volume ─────────────────────────────────────────────────────────────
         if isNew {
-                // For new tokens, require at least $50 in 5-min volume (any activity at all)
-                if token.Volume5m < 50 {
+                // For new tokens, use 5m volume threshold from config (strategy: >$50k)
+                minVol5m := f.MinVolume5mUSD
+                if minVol5m <= 0 {
+                        minVol5m = 50000
+                }
+                if token.Volume5m < minVol5m {
                         return false
                 }
         } else if token.Volume24h < f.MinVolume24hUSD {
+                return false
+        }
+
+        // ── 5m volume for all tokens (if configured) ───────────────────────────
+        if f.MinVolume5mUSD > 0 && token.Volume5m > 0 && token.Volume5m < f.MinVolume5mUSD {
                 return false
         }
 
@@ -1106,9 +1145,15 @@ func executeTrade(token data.TokenData, decision *ai.TradingDecision, simMode bo
         tpPrice := token.PriceUSD * (1 + strat.MomentumTP/100.0)
         slPrice := token.PriceUSD * (1 - strat.MomentumSL/100.0)
 
+        // Multi-TP price levels
+        mtp := cfg.Scalping.MultiTP
+        tp1Price := token.PriceUSD * (1 + mtp.TP1Percent/100.0)
+        tp2Price := token.PriceUSD * (1 + mtp.TP2Percent/100.0)
+        tp3Price := token.PriceUSD * (1 + mtp.TP3Percent/100.0)
+
         maxHold := cfg.Scalping.MaxHoldingMinutes
         if maxHold <= 0 {
-                maxHold = 8
+                maxHold = 30
         }
 
         // Compute WETH amount for this position (USD ÷ WETH price)
@@ -1123,15 +1168,27 @@ func executeTrade(token data.TokenData, decision *ai.TradingDecision, simMode bo
                 simTag = " [SIM]"
         }
 
-        broadcast("log", map[string]interface{}{
-                "message": fmt.Sprintf("📈%s OPEN %s | WETH→TOKEN | Entry: $%.6f | Size: %.6f WETH ($%.2f) | Kelly: %.2f× [%s] | TP: +%.1f%% | SL: -%.1f%% | Conf: %.0f%%",
-                        simTag, token.Symbol, token.PriceUSD,
-                        wethAmount, posSize,
-                        kr.Multiplier, kr.Mode,
-                        strat.MomentumTP, strat.MomentumSL,
-                        decision.Confidence),
-                "type": "success",
-        })
+        if mtp.Enabled {
+                broadcast("log", map[string]interface{}{
+                        "message": fmt.Sprintf("📈%s OPEN %s | Entry: $%.6f | Size: %.6f WETH ($%.2f) | Kelly: %.2f× [%s] | TP1: +%.0f%% TP2: +%.0f%% TP3: +%.0f%% | SL: -%.0f%% | Conf: %.0f%%",
+                                simTag, token.Symbol, token.PriceUSD,
+                                wethAmount, posSize,
+                                kr.Multiplier, kr.Mode,
+                                mtp.TP1Percent, mtp.TP2Percent, mtp.TP3Percent, strat.MomentumSL,
+                                decision.Confidence),
+                        "type": "success",
+                })
+        } else {
+                broadcast("log", map[string]interface{}{
+                        "message": fmt.Sprintf("📈%s OPEN %s | WETH→TOKEN | Entry: $%.6f | Size: %.6f WETH ($%.2f) | Kelly: %.2f× [%s] | TP: +%.1f%% | SL: -%.1f%% | Conf: %.0f%%",
+                                simTag, token.Symbol, token.PriceUSD,
+                                wethAmount, posSize,
+                                kr.Multiplier, kr.Mode,
+                                strat.MomentumTP, strat.MomentumSL,
+                                decision.Confidence),
+                        "type": "success",
+                })
+        }
 
         pos := &position.Position{
                 TokenAddress:   token.Address,
@@ -1139,11 +1196,16 @@ func executeTrade(token data.TokenData, decision *ai.TradingDecision, simMode bo
                 EntryPrice:     token.PriceUSD,
                 CurrentPrice:   token.PriceUSD,
                 SizeUSD:        posSize,
+                OrigSizeUSD:    posSize,
+                RemainFrac:     1.0,
                 WETHAmount:     wethAmount,
                 WETHPriceEntry: wethPrice,
                 EntryTime:      time.Now(),
                 TPPrice:        tpPrice,
                 SLPrice:        slPrice,
+                TP1Price:       tp1Price,
+                TP2Price:       tp2Price,
+                TP3Price:       tp3Price,
                 MaxHoldMins:    maxHold,
                 SimMode:        simMode,
                 AIConfidence:   decision.Confidence,
@@ -1161,7 +1223,7 @@ func executeTrade(token data.TokenData, decision *ai.TradingDecision, simMode bo
 // ── Position monitor (fast loop) ─────────────────────────────────────────────
 
 func monitorPositions() {
-        ticker := time.NewTicker(5 * time.Second)
+        ticker := time.NewTicker(500 * time.Millisecond)
         for range ticker.C {
                 positions := posTracker.GetAllOpen()
                 if len(positions) == 0 {
@@ -1223,7 +1285,90 @@ func monitorPositions() {
 
                         pnlPct := ((currentPrice - pos.EntryPrice) / pos.EntryPrice) * 100
 
-                        // Determine exit condition
+                        // ── Multi-TP partial exit logic ───────────────────────────────────
+                        mtp := cfg.Scalping.MultiTP
+                        if mtp.Enabled && pos.TP1Price > 0 {
+                                origSize := pos.OrigSizeUSD
+                                if origSize <= 0 {
+                                        origSize = pos.SizeUSD
+                                }
+
+                                if !pos.TP1Hit && currentPrice >= pos.TP1Price {
+                                        partialPnl := origSize * mtp.TP1ExitFraction * (mtp.TP1Percent / 100.0)
+                                        posTracker.MarkTP1Hit(pos.TokenAddress)
+                                        broadcast("log", map[string]interface{}{
+                                                "message": fmt.Sprintf("🎯 %s TP1 HIT +%.0f%% → Jual %.0f%% posisi | Profit: +$%.4f",
+                                                        pos.Symbol, mtp.TP1Percent, mtp.TP1ExitFraction*100, partialPnl),
+                                                "type": "success",
+                                        })
+                                        recordPartialExit(pos, partialPnl, fmt.Sprintf("TP1+%.0f%%", mtp.TP1Percent))
+                                        tgBot.NotifyTrade(pos.Symbol, fmt.Sprintf("PARTIAL_SELL TP1+%.0f%%", mtp.TP1Percent), partialPnl, pos.AIConfidence, pos.SimMode)
+                                        continue
+                                }
+
+                                if pos.TP1Hit && !pos.TP2Hit && currentPrice >= pos.TP2Price {
+                                        partialPnl := origSize * mtp.TP2ExitFraction * (mtp.TP2Percent / 100.0)
+                                        posTracker.MarkTP2Hit(pos.TokenAddress)
+                                        broadcast("log", map[string]interface{}{
+                                                "message": fmt.Sprintf("🎯 %s TP2 HIT +%.0f%% → Jual %.0f%% posisi | Profit: +$%.4f",
+                                                        pos.Symbol, mtp.TP2Percent, mtp.TP2ExitFraction*100, partialPnl),
+                                                "type": "success",
+                                        })
+                                        recordPartialExit(pos, partialPnl, fmt.Sprintf("TP2+%.0f%%", mtp.TP2Percent))
+                                        tgBot.NotifyTrade(pos.Symbol, fmt.Sprintf("PARTIAL_SELL TP2+%.0f%%", mtp.TP2Percent), partialPnl, pos.AIConfidence, pos.SimMode)
+                                        continue
+                                }
+
+                                if pos.TP1Hit && pos.TP2Hit && currentPrice >= pos.TP3Price {
+                                        if _, ok := posTracker.Close(pos.TokenAddress); ok {
+                                                remainFrac := mtp.TP3ExitFraction
+                                                partialPnl := origSize * remainFrac * (mtp.TP3Percent / 100.0)
+                                                broadcast("log", map[string]interface{}{
+                                                        "message": fmt.Sprintf("🏆 %s TP3 HIT +%.0f%% → Jual sisa %.0f%% | Profit: +$%.4f | FULL EXIT",
+                                                                pos.Symbol, mtp.TP3Percent, remainFrac*100, partialPnl),
+                                                        "type": "success",
+                                                })
+                                                closePositionResult(pos, partialPnl, fmt.Sprintf("TP3+%.0f%%", mtp.TP3Percent))
+                                        }
+                                        continue
+                                }
+
+                                // SL / TIMEOUT / BOT_STOPPED for remaining position
+                                reason := ""
+                                switch {
+                                case currentPrice <= pos.SLPrice:
+                                        reason = "SL"
+                                case held >= maxHold:
+                                        reason = "TIMEOUT"
+                                case !running:
+                                        reason = "BOT_STOPPED"
+                                }
+                                if reason != "" {
+                                        if _, ok := posTracker.Close(pos.TokenAddress); ok {
+                                                remainFrac := pos.RemainFrac
+                                                if remainFrac <= 0 {
+                                                        remainFrac = 1.0
+                                                }
+                                                pnl := pos.OrigSizeUSD * remainFrac * (pnlPct / 100.0)
+                                                closePositionResult(pos, pnl, reason)
+                                        }
+                                } else if int(held.Seconds())%30 < 1 {
+                                        tpStatus := ""
+                                        if pos.TP1Hit && pos.TP2Hit {
+                                                tpStatus = " [TP1✓ TP2✓ waiting TP3]"
+                                        } else if pos.TP1Hit {
+                                                tpStatus = " [TP1✓ waiting TP2]"
+                                        }
+                                        broadcast("log", map[string]interface{}{
+                                                "message": fmt.Sprintf("👁 %s | Held: %s | $%.6f | PnL: %+.2f%%%s",
+                                                        pos.Symbol, held.Round(time.Second), currentPrice, pnlPct, tpStatus),
+                                                "type": "info",
+                                        })
+                                }
+                                continue
+                        }
+
+                        // ── Single-TP exit logic (fallback when MultiTP disabled) ─────────
                         reason := ""
                         switch {
                         case currentPrice >= pos.TPPrice:
@@ -1243,7 +1388,7 @@ func monitorPositions() {
                                 }
                         } else {
                                 // Live position log (only every ~30s to reduce noise)
-                                if int(held.Seconds())%30 < 5 {
+                                if int(held.Seconds())%30 < 1 {
                                         broadcast("log", map[string]interface{}{
                                                 "message": fmt.Sprintf("👁 %s | Held: %s | $%.6f | PnL: %+.2f%%",
                                                         pos.Symbol, held.Round(time.Second), currentPrice, pnlPct),
@@ -1287,6 +1432,30 @@ func monitorPositions() {
                 // Clean up stale traded entries older than 24h
                 posTracker.CleanupTraded(24 * time.Hour)
         }
+}
+
+// recordPartialExit logs and accounts for a partial take-profit exit without closing the position.
+func recordPartialExit(pos *position.Position, pnl float64, reason string) {
+        simTag := ""
+        if pos.SimMode {
+                simTag = " [SIM]"
+        }
+        broadcast("log", map[string]interface{}{
+                "message": fmt.Sprintf("💰%s [%s] %s | Partial PnL: +$%.4f", simTag, reason, pos.Symbol, pnl),
+                "type":    "success",
+        })
+
+        botState.mu.Lock()
+        botState.Stats.TotalProfitUSD += pnl
+        botState.Stats.DailyPnL += pnl
+        if pos.SimMode {
+                botState.SimStats.TotalProfitUSD += pnl
+                botState.SimStats.DailyPnL += pnl
+        } else {
+                botState.LiveStats.TotalProfitUSD += pnl
+                botState.LiveStats.DailyPnL += pnl
+        }
+        botState.mu.Unlock()
 }
 
 func closePositionResult(pos *position.Position, pnl float64, reason string) {

@@ -11,11 +11,18 @@ type Position struct {
         EntryPrice        float64
         CurrentPrice      float64
         SizeUSD           float64
+        OrigSizeUSD       float64
+        RemainFrac        float64
         WETHAmount        float64
         WETHPriceEntry    float64
         EntryTime         time.Time
         TPPrice           float64
         SLPrice           float64
+        TP1Price          float64
+        TP2Price          float64
+        TP3Price          float64
+        TP1Hit            bool
+        TP2Hit            bool
         MaxHoldMins       int
         SimMode           bool
         TrailingActivated bool
@@ -38,8 +45,32 @@ func NewTracker() *Tracker {
 func (t *Tracker) Open(p *Position) {
         t.mu.Lock()
         defer t.mu.Unlock()
+        if p.OrigSizeUSD == 0 {
+                p.OrigSizeUSD = p.SizeUSD
+        }
+        if p.RemainFrac == 0 {
+                p.RemainFrac = 1.0
+        }
         t.open[p.TokenAddress] = p
         t.traded[p.TokenAddress] = time.Now()
+}
+
+func (t *Tracker) MarkTP1Hit(addr string) {
+        t.mu.Lock()
+        defer t.mu.Unlock()
+        if p, ok := t.open[addr]; ok {
+                p.TP1Hit = true
+                p.RemainFrac = 0.75
+        }
+}
+
+func (t *Tracker) MarkTP2Hit(addr string) {
+        t.mu.Lock()
+        defer t.mu.Unlock()
+        if p, ok := t.open[addr]; ok {
+                p.TP2Hit = true
+                p.RemainFrac = 0.50
+        }
 }
 
 func (t *Tracker) Close(addr string) (*Position, bool) {

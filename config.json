@@ -35,8 +35,8 @@
     "position_size_usd": 1.0,
     "max_concurrent_positions": 3,
     "max_daily_trades": 50,
-    "slippage_tolerance_percent": 0.5,
-    "max_gas_price_gwei": 0.1,
+    "slippage_tolerance_percent": 10,
+    "max_gas_price_gwei": 100,
     "gas_price_multiplier": 1.1,
     "auto_compound_profits": true,
     "min_profit_to_compound_usd": 0.5
@@ -170,22 +170,31 @@
       "volume_spike_threshold": 2.5,
       "price_change_threshold_percent": 1.5,
       "lookback_candles": 5,
-      "take_profit_percent": 1.5,
-      "stop_loss_percent": 0.8
+      "take_profit_percent": 80,
+      "stop_loss_percent": 20
     },
     "grid": {
       "levels": 3,
       "grid_spacing_percent": 0.8,
-      "take_profit_percent": 1.2,
-      "stop_loss_percent": 0.6
+      "take_profit_percent": 80,
+      "stop_loss_percent": 20
     },
     "trailing_stop": {
       "enabled": true,
-      "activation_percent": 0.8,
-      "trailing_distance_percent": 0.4
+      "activation_percent": 20,
+      "trailing_distance_percent": 5
+    },
+    "multi_tp": {
+      "enabled": true,
+      "tp1_percent": 30,
+      "tp1_exit_fraction": 0.25,
+      "tp2_percent": 50,
+      "tp2_exit_fraction": 0.25,
+      "tp3_percent": 80,
+      "tp3_exit_fraction": 0.50
     },
     "cooldown_seconds": 15,
-    "max_holding_minutes": 8
+    "max_holding_minutes": 30
   },
 
   "monitoring": {
@@ -194,16 +203,18 @@
     "poll_interval_seconds": 2,
     "websocket_reconnect_delay_seconds": 5,
     "token_filters": {
-      "min_liquidity_usd": 5000,
-      "min_age_seconds": 300,
-      "max_age_seconds": 3600,
+      "min_liquidity_usd": 15000,
+      "min_age_seconds": 60,
+      "max_age_seconds": 1800,
       "min_volume_24h_usd": 10000,
+      "min_volume_5m_usd": 50000,
       "max_price_usd": 0.01,
       "exclude_honeypot": true,
       "exclude_mintable": true,
       "min_tx_count_5m": 10,
       "min_buy_sell_ratio": 1.2,
-      "max_buy_sell_ratio": 8.0
+      "max_buy_sell_ratio": 8.0,
+      "max_tax_percent": 5
     },
     "pairs_to_watch": [],
     "blacklisted_tokens": [],
@@ -211,7 +222,8 @@
   },
 
   "risk_management": {
-    "max_daily_loss_usd": 2.0,
+    "max_daily_loss_usd": 3.0,
+    "max_daily_loss_percent": 30,
     "max_drawdown_percent": 20,
     "circuit_breaker": {
       "enabled": true,

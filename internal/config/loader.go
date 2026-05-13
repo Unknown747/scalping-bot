@@ -79,12 +79,14 @@ type TokenFilters struct {
         MinAgeSecs      int     `json:"min_age_seconds"`
         MaxAgeSecs      int     `json:"max_age_seconds"`
         MinVolume24hUSD float64 `json:"min_volume_24h_usd"`
+        MinVolume5mUSD  float64 `json:"min_volume_5m_usd"`
         MaxPriceUSD     float64 `json:"max_price_usd"`
         ExcludeHoneypot bool    `json:"exclude_honeypot"`
         ExcludeMintable bool    `json:"exclude_mintable"`
         MinTxCount5m    int     `json:"min_tx_count_5m"`
         MinBuySellRatio float64 `json:"min_buy_sell_ratio"`
         MaxBuySellRatio float64 `json:"max_buy_sell_ratio"`
+        MaxTaxPercent   float64 `json:"max_tax_percent"`
 }
 
 type MonitoringConfig struct {
@@ -106,6 +108,7 @@ type CircuitBreaker struct {
 
 type RiskConfig struct {
         MaxDailyLossUSD float64        `json:"max_daily_loss_usd"`
+        MaxDailyLossPct float64        `json:"max_daily_loss_percent"`
         MaxDrawdownPct  float64        `json:"max_drawdown_percent"`
         CircuitBreaker  CircuitBreaker `json:"circuit_breaker"`
 }
@@ -131,12 +134,23 @@ type TrailingStopConfig struct {
         TrailingDistancePct float64 `json:"trailing_distance_percent"`
 }
 
+type MultiTPConfig struct {
+        Enabled         bool    `json:"enabled"`
+        TP1Percent      float64 `json:"tp1_percent"`
+        TP1ExitFraction float64 `json:"tp1_exit_fraction"`
+        TP2Percent      float64 `json:"tp2_percent"`
+        TP2ExitFraction float64 `json:"tp2_exit_fraction"`
+        TP3Percent      float64 `json:"tp3_percent"`
+        TP3ExitFraction float64 `json:"tp3_exit_fraction"`
+}
+
 type ScalpingConfig struct {
         Primary           string              `json:"primary"`
         Secondary         string              `json:"secondary"`
         Momentum          MomentumScalpConfig `json:"momentum"`
         Grid              GridScalpConfig     `json:"grid"`
         TrailingStop      TrailingStopConfig  `json:"trailing_stop"`
+        MultiTP           MultiTPConfig       `json:"multi_tp"`
         CooldownSecs      int                 `json:"cooldown_seconds"`
         MaxHoldingMinutes int                 `json:"max_holding_minutes"`
 }
