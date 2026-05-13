@@ -1,12 +1,16 @@
 #!/bin/bash
 # ============================================================
-#  MemeScalper AI Pro v2.0.0 — UPDATE SCRIPT
-#  Untuk memperbarui bot yang sudah terinstall
-#  Jalankan: sudo bash update.sh
+#  MemeScalper AI Pro v2.0.0 — VPS UPDATE SCRIPT
+#  Cara pakai:
+#    1. Upload folder project terbaru ke VPS (zip/scp/git)
+#    2. sudo bash update.sh
+#  Atau langsung dari GitHub:
+#    sudo bash update.sh --git https://github.com/USER/REPO.git
 # ============================================================
 
-set -e
+set -euo pipefail
 
+# ── Warna ─────────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -14,103 +18,183 @@ CYAN='\033[0;36m'
 BOLD='\033[1m'
 NC='\033[0m'
 
+# ── Konfigurasi ───────────────────────────────────────────────────────────────
 APP_DIR="/opt/meme-scalper"
 SERVICE_NAME="meme-scalper"
 BINARY="meme-scalper"
 BACKUP_DIR="/opt/meme-scalper-backup"
 PORT="5000"
+GO_VERSION="1.21.13"
 TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GIT_REPO=""
+TEMP_DIR=""
 
-print_banner() {
+# ── Helper ────────────────────────────────────────────────────────────────────
+banner() {
     echo -e "${CYAN}${BOLD}"
     echo "  ╔══════════════════════════════════════════╗"
-    echo "  ║      MemeScalper AI Pro v2.0.0           ║"
-    echo "  ║          UPDATE SCRIPT — Base Net        ║"
+    echo "  ║   MemeScalper AI Pro — VPS UPDATE        ║"
+    echo "  ║   $(date '+%Y-%m-%d %H:%M:%S')                   ║"
     echo "  ╚══════════════════════════════════════════╝"
     echo -e "${NC}"
 }
-
-step()  { echo -e "\n${YELLOW}▶ $1${NC}"; }
+step()  { echo -e "\n${YELLOW}${BOLD}▶ $1${NC}"; }
 ok()    { echo -e "${GREEN}  ✅ $1${NC}"; }
 info()  { echo -e "${CYAN}  ℹ  $1${NC}"; }
-fail()  { echo -e "${RED}  ❌ $1${NC}"; exit 1; }
 warn()  { echo -e "${YELLOW}  ⚠️  $1${NC}"; }
+fail()  { echo -e "${RED}  ❌ $1${NC}"; exit 1; }
+hr()    { echo -e "${CYAN}${BOLD}════════════════════════════════════════════${NC}"; }
 
-print_banner
+cleanup() {
+    if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
+        rm -rf "$TEMP_DIR"
+    fi
+}
+trap cleanup EXIT
+
+# ── Parse argumen ─────────────────────────────────────────────────────────────
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --git)
+            GIT_REPO="$2"
+            shift 2
+            ;;
+        --help|-h)
+            echo ""
+            echo "  Cara pakai:"
+            echo "    sudo bash update.sh                            # update dari folder ini"
+            echo "    sudo bash update.sh --git <URL_REPO>          # update dari git"
+            echo ""
+            exit 0
+            ;;
+        *)
+            shift
+            ;;
+    esac
+done
+
+banner
 
 # ── Root check ────────────────────────────────────────────────────────────────
-if [ "$EUID" -ne 0 ]; then
-    fail "Jalankan sebagai root: sudo bash update.sh"
+[ "$EUID" -ne 0 ] && fail "Jalankan sebagai root: sudo bash update.sh"
+
+# ── Cek instalasi ─────────────────────────────────────────────────────────────
+step "Memeriksa instalasi..."
+[ ! -d "$APP_DIR" ] && fail "Bot belum terinstall di ${APP_DIR}. Jalankan install.sh terlebih dahulu."
+ok "Bot terinstall di ${APP_DIR}"
+
+# ── Go binary path ────────────────────────────────────────────────────────────
+export PATH=$PATH:/usr/local/go/bin
+
+# ── Ambil source baru ─────────────────────────────────────────────────────────
+if [ -n "$GIT_REPO" ]; then
+    step "Clone dari git: $GIT_REPO"
+    if ! command -v git &>/dev/null; then
+        apt-get install -y git -qq &>/dev/null || fail "Gagal install git"
+    fi
+    TEMP_DIR=$(mktemp -d)
+    git clone --depth=1 "$GIT_REPO" "$TEMP_DIR/repo" \
+        || fail "Gagal clone repo dari: $GIT_REPO"
+    SOURCE_DIR="$TEMP_DIR/repo"
+    ok "Source berhasil diclone"
+else
+    # Cek apakah ini adalah source directory yang valid
+    if [ ! -f "$SCRIPT_DIR/main.go" ]; then
+        fail "main.go tidak ditemukan di direktori ini (${SCRIPT_DIR}).\nPastikan kamu menjalankan update.sh dari dalam folder project."
+    fi
+    SOURCE_DIR="$SCRIPT_DIR"
+    info "Update dari: ${SOURCE_DIR}"
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# ── Cek apakah sudah terinstall ───────────────────────────────────────────────
-step "Cek instalasi sebelumnya..."
-if [ ! -d "$APP_DIR" ]; then
-    fail "Bot belum terinstall di ${APP_DIR}. Jalankan install.sh terlebih dahulu."
+# Cek versi baru
+NEW_VERSION="(tidak diketahui)"
+if grep -q 'Version' "$SOURCE_DIR/main.go" 2>/dev/null; then
+    NEW_VERSION=$(grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' "$SOURCE_DIR/main.go" | head -1)
 fi
-ok "Instalasi ditemukan di ${APP_DIR}"
+info "Versi baru: ${NEW_VERSION}"
 
-# ── Backup konfigurasi & binary lama ─────────────────────────────────────────
+# ── Backup ────────────────────────────────────────────────────────────────────
 step "Backup konfigurasi dan binary lama..."
-mkdir -p "${BACKUP_DIR}/${TIMESTAMP}"
+BACKUP_PATH="${BACKUP_DIR}/${TIMESTAMP}"
+mkdir -p "$BACKUP_PATH"
 
-# Backup .env (konfigurasi paling penting)
+# Backup .env (WAJIB — jangan sampai hilang)
 if [ -f "$APP_DIR/.env" ]; then
-    cp "$APP_DIR/.env" "${BACKUP_DIR}/${TIMESTAMP}/.env"
-    ok ".env di-backup ke ${BACKUP_DIR}/${TIMESTAMP}/.env"
+    cp "$APP_DIR/.env" "$BACKUP_PATH/.env"
+    ok ".env di-backup"
+else
+    warn ".env tidak ditemukan — konfigurasi mungkin hilang!"
 fi
 
 # Backup config.json
-if [ -f "$APP_DIR/config.json" ]; then
-    cp "$APP_DIR/config.json" "${BACKUP_DIR}/${TIMESTAMP}/config.json"
-    ok "config.json di-backup"
-fi
+[ -f "$APP_DIR/config.json" ] && cp "$APP_DIR/config.json" "$BACKUP_PATH/config.json" && ok "config.json di-backup"
 
 # Backup binary lama
 if [ -f "$APP_DIR/$BINARY" ]; then
-    cp "$APP_DIR/$BINARY" "${BACKUP_DIR}/${TIMESTAMP}/${BINARY}.old"
-    ok "Binary lama di-backup"
+    cp "$APP_DIR/$BINARY" "$BACKUP_PATH/${BINARY}.old"
+    BINARY_OLD_SIZE=$(du -sh "$BACKUP_PATH/${BINARY}.old" | cut -f1)
+    ok "Binary lama di-backup (${BINARY_OLD_SIZE})"
 fi
 
-info "Semua backup tersimpan di: ${BACKUP_DIR}/${TIMESTAMP}/"
+info "Backup tersimpan di: ${BACKUP_PATH}"
 
-# Hapus backup lama (simpan 5 terbaru saja)
-ls -dt "${BACKUP_DIR}"/20* 2>/dev/null | tail -n +6 | xargs rm -rf 2>/dev/null || true
-info "Backup lama dibersihkan (simpan 5 terbaru)"
+# Hapus backup lama — simpan 5 terbaru
+TOTAL_BACKUPS=$(ls -d "${BACKUP_DIR}"/20* 2>/dev/null | wc -l)
+if [ "$TOTAL_BACKUPS" -gt 5 ]; then
+    ls -dt "${BACKUP_DIR}"/20* | tail -n +6 | xargs rm -rf 2>/dev/null || true
+    info "Backup lama dihapus (tersisa 5 terbaru)"
+fi
 
 # ── Stop service ──────────────────────────────────────────────────────────────
-step "Menghentikan bot sementara..."
-if systemctl is-active --quiet "$SERVICE_NAME"; then
+step "Menghentikan bot..."
+if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
     systemctl stop "$SERVICE_NAME"
     ok "Bot dihentikan"
 else
-    warn "Bot tidak sedang berjalan — lanjut update"
+    warn "Bot tidak berjalan — lanjut update"
 fi
 
-# ── Update file aplikasi ──────────────────────────────────────────────────────
+# Pastikan port tidak terpakai (fallback)
+if lsof -i ":${PORT}" -sTCP:LISTEN &>/dev/null 2>&1; then
+    warn "Port ${PORT} masih terpakai, paksa kill..."
+    fuser -k "${PORT}/tcp" 2>/dev/null || true
+    sleep 2
+fi
+
+# ── Salin file baru ───────────────────────────────────────────────────────────
 step "Menyalin file aplikasi terbaru..."
-rsync -a \
-    --exclude='.git' \
-    --exclude='*.log' \
-    --exclude='.env' \
-    --exclude='config.json' \
-    "$SCRIPT_DIR/" "$APP_DIR/" 2>/dev/null \
-    || cp -r "$SCRIPT_DIR/." "$APP_DIR/"
 
-# Pulihkan .env yang asli (jangan ditimpa saat update)
-if [ -f "${BACKUP_DIR}/${TIMESTAMP}/.env" ] && [ ! -f "$APP_DIR/.env" ]; then
-    cp "${BACKUP_DIR}/${TIMESTAMP}/.env" "$APP_DIR/.env"
+# Gunakan rsync jika tersedia, fallback ke cp
+if command -v rsync &>/dev/null; then
+    rsync -a \
+        --exclude='.git' \
+        --exclude='*.log' \
+        --exclude='.env' \
+        --exclude='config.json' \
+        --exclude="${BINARY}" \
+        "${SOURCE_DIR}/" "${APP_DIR}/"
+else
+    # Salin semua kecuali file yang dilindungi
+    find "$SOURCE_DIR" -maxdepth 1 -not -name '.git' -not -name '.env' \
+        -not -name 'config.json' -not -name "$BINARY" -not -name '.' \
+        | while read -r item; do
+            cp -r "$item" "$APP_DIR/"
+        done
 fi
 
-ok "File aplikasi berhasil diperbarui"
+# Pulihkan .env jika tidak ada
+if [ ! -f "$APP_DIR/.env" ] && [ -f "$BACKUP_PATH/.env" ]; then
+    cp "$BACKUP_PATH/.env" "$APP_DIR/.env"
+    warn ".env dipulihkan dari backup"
+fi
 
-# ── Update Go jika perlu ──────────────────────────────────────────────────────
-export PATH=$PATH:/usr/local/go/bin
-if ! command -v go &>/dev/null; then
-    warn "Go tidak ditemukan — install ulang..."
-    GO_VERSION="1.21.13"
+ok "File berhasil disalin"
+
+# ── Cek / Install Go ──────────────────────────────────────────────────────────
+step "Memeriksa Go runtime..."
+if ! command -v go &>/dev/null || ! /usr/local/go/bin/go version &>/dev/null; then
+    warn "Go tidak ditemukan — install Go ${GO_VERSION}..."
     ARCH=$(uname -m)
     case "$ARCH" in
         x86_64)  GO_ARCH="amd64" ;;
@@ -119,39 +203,48 @@ if ! command -v go &>/dev/null; then
         *) fail "Arsitektur tidak didukung: $ARCH" ;;
     esac
     cd /tmp
-    wget -q "https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz"
+    wget -q --show-progress "https://go.dev/dl/go${GO_VERSION}.linux-${GO_ARCH}.tar.gz" \
+        || fail "Gagal download Go"
     rm -rf /usr/local/go
     tar -C /usr/local -xzf "go${GO_VERSION}.linux-${GO_ARCH}.tar.gz"
     rm -f "go${GO_VERSION}.linux-${GO_ARCH}.tar.gz"
     echo 'export PATH=$PATH:/usr/local/go/bin' > /etc/profile.d/go.sh
     export PATH=$PATH:/usr/local/go/bin
-    ok "Go berhasil diinstall ulang"
+    ok "Go ${GO_VERSION} berhasil diinstall"
 else
-    CURRENT_GO=$(go version | awk '{print $3}' | sed 's/go//')
-    ok "Go v${CURRENT_GO} sudah OK"
+    CURRENT_GO=$(/usr/local/go/bin/go version | awk '{print $3}')
+    ok "Go ${CURRENT_GO} sudah OK"
 fi
 
-# ── Rebuild binary ────────────────────────────────────────────────────────────
+# ── Build binary baru ─────────────────────────────────────────────────────────
 step "Build binary baru..."
 cd "$APP_DIR"
+
+# Tidy dependencies
 /usr/local/go/bin/go mod tidy -e 2>/dev/null || true
-/usr/local/go/bin/go build -ldflags="-s -w" -o "$BINARY" . \
-    || {
-        warn "Build gagal! Mengembalikan binary lama..."
-        if [ -f "${BACKUP_DIR}/${TIMESTAMP}/${BINARY}.old" ]; then
-            cp "${BACKUP_DIR}/${TIMESTAMP}/${BINARY}.old" "$APP_DIR/$BINARY"
-            warn "Binary lama dipulihkan. Periksa error build di atas."
-        fi
-        fail "Update gagal — binary lama dipulihkan"
-    }
 
-chmod +x "$BINARY"
-BINARY_SIZE=$(du -sh "$BINARY" | cut -f1)
-ok "Binary baru berhasil dibuild (${BINARY_SIZE})"
+# Build dengan optimasi size
+BUILD_START=$(date +%s)
+if /usr/local/go/bin/go build -ldflags="-s -w" -o "$BINARY" . 2>&1; then
+    BUILD_END=$(date +%s)
+    BUILD_TIME=$((BUILD_END - BUILD_START))
+    chmod +x "$BINARY"
+    BINARY_SIZE=$(du -sh "$BINARY" | cut -f1)
+    ok "Binary berhasil dibuild: ${BINARY_SIZE} (${BUILD_TIME}s)"
+else
+    warn "Build GAGAL! Mengembalikan binary lama..."
+    if [ -f "$BACKUP_PATH/${BINARY}.old" ]; then
+        cp "$BACKUP_PATH/${BINARY}.old" "$APP_DIR/$BINARY"
+        chmod +x "$APP_DIR/$BINARY"
+        ok "Binary lama dipulihkan"
+    fi
+    systemctl start "$SERVICE_NAME" 2>/dev/null || true
+    fail "Build gagal — binary lama dipulihkan dan bot direstart"
+fi
 
-# ── Update systemd service (jika ada perubahan) ───────────────────────────────
-step "Perbarui konfigurasi service..."
-cat > "/etc/systemd/system/${SERVICE_NAME}.service" << SVCEOF
+# ── Perbarui systemd service ──────────────────────────────────────────────────
+step "Memperbarui konfigurasi service..."
+cat > "/etc/systemd/system/${SERVICE_NAME}.service" << EOF
 [Unit]
 Description=MemeScalper AI Pro — Base Network Trading Bot
 After=network-online.target
@@ -168,47 +261,53 @@ StandardOutput=journal
 StandardError=journal
 EnvironmentFile=${APP_DIR}/.env
 
+# Batasi resource
 MemoryMax=512M
 CPUQuota=80%
 
 [Install]
 WantedBy=multi-user.target
-SVCEOF
+EOF
 
 systemctl daemon-reload
-ok "Konfigurasi service diperbarui"
+ok "Service diperbarui"
 
 # ── Start service ─────────────────────────────────────────────────────────────
-step "Menjalankan ulang bot..."
+step "Menjalankan bot..."
 systemctl start "$SERVICE_NAME"
-sleep 4
+sleep 5
 
-# ── Cek status ────────────────────────────────────────────────────────────────
+# ── Cek hasil ─────────────────────────────────────────────────────────────────
 VPS_IP=$(hostname -I | awk '{print $1}')
 echo ""
-echo -e "${CYAN}${BOLD}════════════════════════════════════════════${NC}"
-echo -e "${BOLD}  UPDATE SELESAI!${NC}"
+hr
 echo ""
 if systemctl is-active --quiet "$SERVICE_NAME"; then
-    echo -e "  ${GREEN}${BOLD}Status    : BERJALAN ✅${NC}"
-    echo -e "  Dashboard : ${CYAN}http://${VPS_IP}:${PORT}${NC}"
+    echo -e "  ${GREEN}${BOLD}STATUS    : BERJALAN ✅${NC}"
+    echo -e "  ${BOLD}Dashboard : ${CYAN}http://${VPS_IP}:${PORT}${NC}"
+    echo -e "  ${BOLD}Versi baru: ${NC}${NEW_VERSION}"
     echo ""
-    echo -e "  ${BOLD}Backup tersimpan di:${NC}"
-    echo -e "  ${BACKUP_DIR}/${TIMESTAMP}/"
+    echo -e "  ${BOLD}Backup sebelumnya:${NC}"
+    echo "  ${BACKUP_PATH}/"
+    echo ""
+    echo -e "  ${BOLD}Jika ada masalah, rollback cepat:${NC}"
+    echo "  ${YELLOW}cp ${BACKUP_PATH}/${BINARY}.old ${APP_DIR}/${BINARY}${NC}"
+    echo "  ${YELLOW}systemctl restart ${SERVICE_NAME}${NC}"
 else
-    echo -e "  ${RED}${BOLD}Status    : GAGAL START ❌${NC}"
+    echo -e "  ${RED}${BOLD}STATUS    : GAGAL START ❌${NC}"
     echo ""
-    warn "Cek log untuk melihat error:"
-    echo "  journalctl -u ${SERVICE_NAME} -n 50 --no-pager"
+    echo -e "  Cek log:"
+    echo "  ${YELLOW}journalctl -u ${SERVICE_NAME} -n 50 --no-pager${NC}"
     echo ""
-    info "Untuk rollback ke versi sebelumnya:"
-    echo "  cp ${BACKUP_DIR}/${TIMESTAMP}/${BINARY}.old ${APP_DIR}/${BINARY}"
-    echo "  systemctl start ${SERVICE_NAME}"
+    echo -e "  Rollback ke versi sebelumnya:"
+    echo "  ${YELLOW}cp ${BACKUP_PATH}/${BINARY}.old ${APP_DIR}/${BINARY}${NC}"
+    echo "  ${YELLOW}systemctl start ${SERVICE_NAME}${NC}"
 fi
 echo ""
 echo -e "  ${BOLD}Perintah berguna:${NC}"
-echo "  journalctl -u ${SERVICE_NAME} -f        # Log live"
-echo "  systemctl status ${SERVICE_NAME}         # Cek status"
-echo "  systemctl restart ${SERVICE_NAME}        # Restart bot"
-echo "  systemctl stop ${SERVICE_NAME}           # Stop bot"
-echo -e "${CYAN}${BOLD}════════════════════════════════════════════${NC}"
+echo "  journalctl -u ${SERVICE_NAME} -f          # Log live"
+echo "  systemctl status ${SERVICE_NAME}           # Cek status"
+echo "  systemctl restart ${SERVICE_NAME}          # Restart"
+echo "  systemctl stop ${SERVICE_NAME}             # Stop"
+echo ""
+hr
