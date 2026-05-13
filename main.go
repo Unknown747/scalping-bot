@@ -73,6 +73,8 @@ type BotState struct {
         Running         bool
         SimMode         bool
         Stats           BotStats
+        LiveStats       BotStats
+        SimStats        BotStats
         mu              sync.RWMutex
         ConsecutiveLoss int
         CircuitBroken   bool
@@ -96,9 +98,15 @@ var (
         posTracker   *position.Tracker
         tradeHistory  []TradeRecord
         historyMu     sync.Mutex
-        pnlReturns    []float64
-        totalHeldSecs int
-        equityPeak    float64
+        pnlReturns        []float64
+        totalHeldSecs     int
+        equityPeak        float64
+        livePnlReturns    []float64
+        simPnlReturns     []float64
+        liveTotalHeldSecs int
+        simTotalHeldSecs  int
+        liveEquityPeak    float64
+        simEquityPeak     float64
         returnsMu     sync.Mutex
         botState      = &BotState{}
         clients    = make(map[*websocket.Conn]bool)
@@ -564,9 +572,22 @@ func handleCommand(action string, params map[string]interface{}) {
         case "reset_stats":
                 botState.mu.Lock()
                 botState.Stats = BotStats{}
+                botState.LiveStats = BotStats{}
+                botState.SimStats = BotStats{}
                 botState.ConsecutiveLoss = 0
                 botState.CircuitBroken = false
                 botState.mu.Unlock()
+                returnsMu.Lock()
+                pnlReturns = nil
+                livePnlReturns = nil
+                simPnlReturns = nil
+                totalHeldSecs = 0
+                liveTotalHeldSecs = 0
+                simTotalHeldSecs = 0
+                liveEquityPeak = 0
+                simEquityPeak = 0
+                equityPeak = 0
+                returnsMu.Unlock()
                 broadcast("log", map[string]interface{}{"message": "🔄 Statistics reset", "type": "warning"})
 
         case "run_check":
@@ -592,6 +613,35 @@ func handleCommand(action string, params map[string]interface{}) {
                         }
                         broadcast("telegram_test", result)
                 }()
+
+        case "emergency_stop":
+                botState.mu.Lock()
+                botState.Running = false
+                botState.mu.Unlock()
+                allClosed := posTracker.CloseAll()
+                for _, pos := range allClosed {
+                        currentP := pos.CurrentPrice
+                        if currentP <= 0 {
+                                currentP = pos.EntryPrice
+                        }
+                        pnlPct := 0.0
+                        if pos.EntryPrice > 0 {
+                                pnlPct = ((currentP - pos.EntryPrice) / pos.EntryPrice) * 100
+                        }
+                        pnl := pos.SizeUSD * (pnlPct / 100.0)
+                        closePositionResult(pos, pnl, "EMERGENCY_STOP")
+                }
+                botState.mu.Lock()
+                botState.Stats.ActivePositions = 0
+                botState.mu.Unlock()
+                broadcast("log", map[string]interface{}{
+                        "message": fmt.Sprintf("🚨 EMERGENCY STOP! %d position(s) force-closed.", len(allClosed)),
+                        "type":    "error",
+                })
+                tgBot.NotifyBotStop(map[string]interface{}{
+                        "totalTrades": len(allClosed),
+                        "reason":      "EMERGENCY_STOP",
+                })
         }
 }
 
@@ -1356,6 +1406,94 @@ func closePositionResult(pos *position.Position, pnl float64, reason string) {
         botState.Stats.SharpeRatio = sharpe
         botState.mu.Unlock()
 
+        // ── Mode-specific stats (Sim vs Live separated) ──────────────────────────
+        returnsMu.Lock()
+        if pos.SimMode {
+                simPnlReturns = append(simPnlReturns, record.PnLPct)
+                simTotalHeldSecs += record.HeldSecs
+                simSnap := make([]float64, len(simPnlReturns))
+                copy(simSnap, simPnlReturns)
+                simHeldSnap := simTotalHeldSecs
+                returnsMu.Unlock()
+                simSharpe := calcSharpe(simSnap)
+                botState.mu.Lock()
+                s := &botState.SimStats
+                s.TotalTrades++
+                if win {
+                        s.WinningTrades++
+                } else {
+                        s.LosingTrades++
+                }
+                s.TotalProfitUSD += pnl
+                s.DailyPnL += pnl
+                if s.TotalTrades > 0 {
+                        s.WinRate = float64(s.WinningTrades) / float64(s.TotalTrades) * 100.0
+                }
+                if s.TotalTrades == 1 || record.PnLPct > s.BestTradePct {
+                        s.BestTradePct = record.PnLPct
+                }
+                if s.TotalTrades == 1 || record.PnLPct < s.WorstTradePct {
+                        s.WorstTradePct = record.PnLPct
+                }
+                if s.TotalTrades > 0 {
+                        s.AvgHoldSecs = simHeldSnap / s.TotalTrades
+                }
+                eq := s.TotalProfitUSD
+                if eq > simEquityPeak {
+                        simEquityPeak = eq
+                }
+                if simEquityPeak > 0 {
+                        dd := (simEquityPeak - eq) / simEquityPeak * 100.0
+                        if dd > s.MaxDrawdownPct {
+                                s.MaxDrawdownPct = dd
+                        }
+                }
+                s.SharpeRatio = simSharpe
+                botState.mu.Unlock()
+        } else {
+                livePnlReturns = append(livePnlReturns, record.PnLPct)
+                liveTotalHeldSecs += record.HeldSecs
+                liveSnap := make([]float64, len(livePnlReturns))
+                copy(liveSnap, livePnlReturns)
+                liveHeldSnap := liveTotalHeldSecs
+                returnsMu.Unlock()
+                liveSharpe := calcSharpe(liveSnap)
+                botState.mu.Lock()
+                s := &botState.LiveStats
+                s.TotalTrades++
+                if win {
+                        s.WinningTrades++
+                } else {
+                        s.LosingTrades++
+                }
+                s.TotalProfitUSD += pnl
+                s.DailyPnL += pnl
+                if s.TotalTrades > 0 {
+                        s.WinRate = float64(s.WinningTrades) / float64(s.TotalTrades) * 100.0
+                }
+                if s.TotalTrades == 1 || record.PnLPct > s.BestTradePct {
+                        s.BestTradePct = record.PnLPct
+                }
+                if s.TotalTrades == 1 || record.PnLPct < s.WorstTradePct {
+                        s.WorstTradePct = record.PnLPct
+                }
+                if s.TotalTrades > 0 {
+                        s.AvgHoldSecs = liveHeldSnap / s.TotalTrades
+                }
+                eq := s.TotalProfitUSD
+                if eq > liveEquityPeak {
+                        liveEquityPeak = eq
+                }
+                if liveEquityPeak > 0 {
+                        dd := (liveEquityPeak - eq) / liveEquityPeak * 100.0
+                        if dd > s.MaxDrawdownPct {
+                                s.MaxDrawdownPct = dd
+                        }
+                }
+                s.SharpeRatio = liveSharpe
+                botState.mu.Unlock()
+        }
+
         tgBot.NotifyTrade(pos.Symbol, "CLOSE("+reason+")", pnl, 0, pos.SimMode)
 
         if cfg.Risk.CircuitBreaker.Enabled && !win && consecutiveLoss >= cfg.Risk.CircuitBreaker.ConsecutiveLossesThreshold {
@@ -1465,8 +1603,15 @@ func broadcastLoop() {
                         })
                 }
 
+                botState.mu.RLock()
+                liveStats := botState.LiveStats
+                simStats := botState.SimStats
+                botState.mu.RUnlock()
+
                 broadcast("update", map[string]interface{}{
                         "stats":        stats,
+                        "liveStats":    liveStats,
+                        "simStats":     simStats,
                         "running":      running,
                         "simMode":      simMode,
                         "rpcEndpoints": rpcInfo,

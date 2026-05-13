@@ -109,6 +109,18 @@ func (t *Tracker) OpenCount() int {
         return len(t.open)
 }
 
+func (t *Tracker) CloseAll() []*Position {
+        t.mu.Lock()
+        defer t.mu.Unlock()
+        out := make([]*Position, 0, len(t.open))
+        for addr, p := range t.open {
+                cp := *p
+                out = append(out, &cp)
+                delete(t.open, addr)
+        }
+        return out
+}
+
 func (t *Tracker) CleanupTraded(cutoff time.Duration) {
         t.mu.Lock()
         defer t.mu.Unlock()

@@ -184,6 +184,21 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
 /* ── Notification ── */
 #notifBtn{padding:6px 12px;border-radius:6px;border:1px solid #333;background:#13131f;color:#555;font-size:11px;cursor:pointer;}
 #notifBtn.on{color:#00ffcc;border-color:#00ffcc44;}
+/* ── Stats Split ── */
+.stats-split{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px;}
+.stats-panel-sim{border-color:#ffaa0033!important;}
+.stats-panel-live{border-color:#ff336633!important;}
+.stats-panel-title{font-size:13px;font-weight:bold;margin-bottom:10px;display:flex;align-items:center;gap:7px;letter-spacing:.5px;}
+.stats-panel-title.sim{color:#ffaa00;}.stats-panel-title.live{color:#ff3366;}
+.stats-shared-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:14px;}
+/* ── Emergency Stop ── */
+.btn-emergency{background:linear-gradient(135deg,#ff5500,#cc2200);color:#fff;border:1px solid #ff550033;}
+.btn-emergency:hover{box-shadow:0 3px 18px #ff550066;}
+@keyframes emergPulse{0%,100%{box-shadow:0 0 5px #ff550044;}50%{box-shadow:0 0 18px #ff5500bb;}}
+.btn-emergency.pulsing{animation:emergPulse 1.4s ease-in-out infinite;}
+/* ── Wallet hint ── */
+.wallet-hint{font-size:9px;color:#ffaa0077;margin-top:2px;letter-spacing:.3px;}
+@media(max-width:900px){.stats-split{grid-template-columns:1fr;}}
 @media(max-width:640px){
   .ai-signals{grid-template-columns:1fr;}
   .stats-grid{grid-template-columns:repeat(2,1fr);}
@@ -211,9 +226,10 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
       <div class="wallet-eth">
         <span class="wallet-eth-val" id="walletETH">—</span>
         <span class="wallet-eth-label">ETH</span>
-        <span class="wallet-eth-fee">(fee)</span>
+        <span class="wallet-eth-fee">(gas)</span>
       </div>
       <div class="wallet-refresh" id="walletUpdated">fetching...</div>
+      <div class="wallet-hint" id="walletHint"></div>
     </div>
   </div>
 
@@ -238,54 +254,11 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
 <!-- ── TAB: Dashboard ── -->
 <div id="tab-dashboard" class="tab-pane active">
 
-  <div class="stats-grid">
-    <div class="stat-card">
-      <div class="stat-label">Total Trades</div>
-      <div class="stat-value neutral" id="totalTrades">0</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Win Rate</div>
-      <div class="stat-value neutral" id="winRate">0.0%</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Total Profit</div>
-      <div class="stat-value neutral" id="totalProfit">$0.0000</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Daily PnL</div>
-      <div class="stat-value neutral" id="dailyPnl">$0.0000</div>
-    </div>
+  <!-- Shared row: Active Positions + Kelly -->
+  <div class="stats-shared-row">
     <div class="stat-card">
       <div class="stat-label">Active Positions</div>
       <div class="stat-value neutral" id="activePos" style="cursor:pointer;" onclick="switchTab('positions')">0</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Win / Loss</div>
-      <div class="stat-value">
-        <span class="profit" id="wins">0</span>
-        <span class="dim" style="font-size:16px;"> / </span>
-        <span class="loss" id="losses">0</span>
-      </div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Sharpe Ratio</div>
-      <div class="stat-value sm neutral" id="sharpeRatio">—</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Max Drawdown</div>
-      <div class="stat-value sm neutral" id="maxDrawdown">0.00%</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Best Trade</div>
-      <div class="stat-value sm neutral" id="bestTrade">—</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Worst Trade</div>
-      <div class="stat-value sm neutral" id="worstTrade">—</div>
-    </div>
-    <div class="stat-card">
-      <div class="stat-label">Avg Hold Time</div>
-      <div class="stat-value sm neutral" id="avgHold">—</div>
     </div>
     <div class="stat-card">
       <div class="stat-label">Kelly Size</div>
@@ -293,6 +266,113 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
       <span class="kelly-mode-tag kelly-warmup" id="kellyModeTag">warmup</span>
     </div>
   </div>
+
+  <!-- Split stats: Simulation vs Live -->
+  <div class="stats-split">
+
+    <!-- Simulation Stats -->
+    <div class="panel stats-panel-sim" style="margin-bottom:0;">
+      <div class="stats-panel-title sim">🧪 Simulation Stats</div>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Total Trades</div>
+          <div class="stat-value neutral" id="sim-totalTrades">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Win Rate</div>
+          <div class="stat-value neutral" id="sim-winRate">0.0%</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total Profit</div>
+          <div class="stat-value neutral" id="sim-totalProfit">$0.0000</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Daily PnL</div>
+          <div class="stat-value neutral" id="sim-dailyPnl">$0.0000</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Win / Loss</div>
+          <div class="stat-value">
+            <span class="profit" id="sim-wins">0</span>
+            <span class="dim" style="font-size:16px;"> / </span>
+            <span class="loss" id="sim-losses">0</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Sharpe Ratio</div>
+          <div class="stat-value sm neutral" id="sim-sharpeRatio">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Max Drawdown</div>
+          <div class="stat-value sm neutral" id="sim-maxDrawdown">0.00%</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Best Trade</div>
+          <div class="stat-value sm neutral" id="sim-bestTrade">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Worst Trade</div>
+          <div class="stat-value sm neutral" id="sim-worstTrade">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Avg Hold Time</div>
+          <div class="stat-value sm neutral" id="sim-avgHold">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Live Stats -->
+    <div class="panel stats-panel-live" style="margin-bottom:0;">
+      <div class="stats-panel-title live">⚡ Live Stats</div>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Total Trades</div>
+          <div class="stat-value neutral" id="live-totalTrades">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Win Rate</div>
+          <div class="stat-value neutral" id="live-winRate">0.0%</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Total Profit</div>
+          <div class="stat-value neutral" id="live-totalProfit">$0.0000</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Daily PnL</div>
+          <div class="stat-value neutral" id="live-dailyPnl">$0.0000</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Win / Loss</div>
+          <div class="stat-value">
+            <span class="profit" id="live-wins">0</span>
+            <span class="dim" style="font-size:16px;"> / </span>
+            <span class="loss" id="live-losses">0</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Sharpe Ratio</div>
+          <div class="stat-value sm neutral" id="live-sharpeRatio">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Max Drawdown</div>
+          <div class="stat-value sm neutral" id="live-maxDrawdown">0.00%</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Best Trade</div>
+          <div class="stat-value sm neutral" id="live-bestTrade">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Worst Trade</div>
+          <div class="stat-value sm neutral" id="live-worstTrade">—</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Avg Hold Time</div>
+          <div class="stat-value sm neutral" id="live-avgHold">—</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- end stats-split -->
 
   <!-- ── PnL Chart Panel ── -->
   <div class="panel">
@@ -371,6 +451,7 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
       <label class="live-mode-wrap" id="liveModeWrap" title="Switch to Live trading (uses real wallet)">
         <input type="checkbox" id="liveModeCheck"> ⚡ LIVE MODE
       </label>
+      <button class="btn btn-emergency btn-sm" id="emergencyStopBtn" title="Force-close ALL open positions immediately and stop the bot" style="display:none;">🚨 EMERGENCY STOP</button>
       <button class="btn btn-gray btn-sm" id="resetStatsBtn">↺ Reset Stats</button>
       <button class="btn btn-gray btn-sm" id="withdrawBtn">💰 Withdraw</button>
     </div>
@@ -961,6 +1042,8 @@ function handleMsg(msg) {
       break;
     case 'update':
       if (d.stats)        updateStats(d.stats);
+      if (d.simStats)     updateModeStats('sim-', d.simStats);
+      if (d.liveStats)    updateModeStats('live-', d.liveStats);
       if (d.running !== undefined) {
         updateBotBadge(d.running, d.simMode);
         setActivityStatus(d.running ? 'scanning' : 'idle');
@@ -1038,41 +1121,43 @@ function handleMsg(msg) {
 }
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
-function updateStats(s) {
+function updateModeStats(prefix, s) {
+  if (!s) return;
   const profit = s.totalProfitUSD || 0;
   const daily  = s.dailyPnL      || 0;
   const wr     = s.winRate       || 0;
-  setText('totalTrades', s.totalTrades || 0);
-  setText('winRate',     wr.toFixed(1) + '%');
-  setText('totalProfit', '$' + profit.toFixed(4));
-  setText('dailyPnl',   '$' + daily.toFixed(4));
-  setText('activePos',   s.activePositions || 0);
-  setText('wins',        s.winningTrades || 0);
-  setText('losses',      s.losingTrades  || 0);
-  setText('posCount',    s.activePositions || 0);
-  setClass('totalProfit', 'stat-value ' + pnlClass(profit));
-  setClass('dailyPnl',    'stat-value ' + pnlClass(daily));
-  setClass('winRate',     'stat-value ' + (wr >= 55 ? 'profit' : wr >= 35 ? 'neutral' : 'loss'));
-  // Advanced
+  setText(prefix + 'totalTrades', s.totalTrades || 0);
+  setText(prefix + 'winRate',     wr.toFixed(1) + '%');
+  setText(prefix + 'totalProfit', '$' + profit.toFixed(4));
+  setText(prefix + 'dailyPnl',   '$' + daily.toFixed(4));
+  setText(prefix + 'wins',       s.winningTrades || 0);
+  setText(prefix + 'losses',     s.losingTrades  || 0);
+  setClass(prefix + 'totalProfit', 'stat-value ' + pnlClass(profit));
+  setClass(prefix + 'dailyPnl',    'stat-value ' + pnlClass(daily));
+  setClass(prefix + 'winRate',     'stat-value ' + (wr >= 55 ? 'profit' : wr >= 35 ? 'neutral' : 'loss'));
   const sharpe = s.sharpeRatio || 0;
-  setText('sharpeRatio', sharpe === 0 ? '—' : sharpe.toFixed(2));
-  setClass('sharpeRatio', 'stat-value sm ' + (sharpe > 1 ? 'profit' : sharpe > 0 ? 'neutral' : sharpe < 0 ? 'loss' : 'dim'));
+  setText(prefix + 'sharpeRatio', sharpe === 0 ? '—' : sharpe.toFixed(2));
+  setClass(prefix + 'sharpeRatio', 'stat-value sm ' + (sharpe > 1 ? 'profit' : sharpe > 0 ? 'neutral' : sharpe < 0 ? 'loss' : 'dim'));
   const dd = s.maxDrawdownPct || 0;
-  setText('maxDrawdown', dd.toFixed(2) + '%');
-  setClass('maxDrawdown', 'stat-value sm ' + (dd > 10 ? 'loss' : dd > 5 ? 'neutral' : 'profit'));
+  setText(prefix + 'maxDrawdown', dd.toFixed(2) + '%');
+  setClass(prefix + 'maxDrawdown', 'stat-value sm ' + (dd > 10 ? 'loss' : dd > 5 ? 'neutral' : 'profit'));
   if (s.totalTrades > 0) {
-    setText('bestTrade',  '+' + (s.bestTradePct  || 0).toFixed(2) + '%');
-    setText('worstTrade', (s.worstTradePct || 0).toFixed(2) + '%');
-    setClass('bestTrade',  'stat-value sm profit');
-    setClass('worstTrade', 'stat-value sm loss');
-    setText('avgHold', formatHeld(s.avgHoldSecs || 0));
+    setText(prefix + 'bestTrade',  '+' + (s.bestTradePct  || 0).toFixed(2) + '%');
+    setText(prefix + 'worstTrade', (s.worstTradePct || 0).toFixed(2) + '%');
+    setClass(prefix + 'bestTrade',  'stat-value sm profit');
+    setClass(prefix + 'worstTrade', 'stat-value sm loss');
+    setText(prefix + 'avgHold', formatHeld(s.avgHoldSecs || 0));
   }
-  // Kelly Criterion sizing card
-  const km   = s.kellyMultiplier || 1.0;
+}
+
+function updateStats(s) {
+  if (!s) return;
+  // Shared stats (active positions, kelly)
+  setText('activePos', s.activePositions || 0);
+  setText('posCount',  s.activePositions || 0);
+  const km = s.kellyMultiplier || 1.0;
   const rawMode = s.kellyMode || 'warmup';
-  // Strip confidence suffix (_hi_conf / _lo_conf) before mapping to a CSS class
-  // so we reuse existing colour rules (kelly-adaptive, kelly-warmup, etc.).
-  const baseMode  = rawMode.replace(/_(hi|lo)_conf$/, '').toLowerCase().replace(/_/g, '-');
+  const baseMode   = rawMode.replace(/_(hi|lo)_conf$/, '').toLowerCase().replace(/_/g, '-');
   const confSuffix = rawMode.endsWith('_hi_conf') ? ' ↑conf' : rawMode.endsWith('_lo_conf') ? ' ↓conf' : '';
   setText('kellyMult', km.toFixed(2) + '×');
   setClass('kellyMult', 'stat-value sm ' + (km >= 1.5 ? 'profit' : km <= 0.5 ? 'loss' : 'neutral'));
@@ -1080,6 +1165,13 @@ function updateStats(s) {
   if (tag) {
     tag.textContent = baseMode.replace(/-/g, ' ') + confSuffix;
     tag.className = 'kelly-mode-tag kelly-' + baseMode;
+  }
+  // Show/hide emergency stop button based on active positions
+  const emergBtn = document.getElementById('emergencyStopBtn');
+  if (emergBtn) {
+    const hasPositions = (s.activePositions || 0) > 0;
+    emergBtn.style.display = hasPositions ? '' : 'none';
+    emergBtn.className = 'btn btn-emergency btn-sm' + (hasPositions ? ' pulsing' : '');
   }
 }
 
@@ -1323,6 +1415,14 @@ document.getElementById('liveModeCheck').onchange = function() {
   wrap.className = 'live-mode-wrap' + (this.checked ? ' active' : '');
   updateToggleBtn(document.getElementById('botBadge').classList.contains('running'));
 };
+document.getElementById('emergencyStopBtn').onclick = () => {
+  if (!confirm('⚠️ EMERGENCY STOP\n\nThis will immediately close ALL open positions and stop the bot.\n\nProceed?')) return;
+  const btn = document.getElementById('emergencyStopBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Stopping…';
+  send('emergency_stop');
+  setTimeout(() => { btn.disabled = false; btn.textContent = '🚨 EMERGENCY STOP'; }, 3000);
+};
 document.getElementById('withdrawBtn').onclick  = () => send('withdraw');
 document.getElementById('resetStatsBtn').onclick = () => {
   send('reset_stats');
@@ -1371,6 +1471,8 @@ function updateWalletWidget(data) {
     eth.textContent  = '—'; eth.style.color  = '#ffaa00';
     upd.textContent  = 'wallet not set';
     widget.title = 'Set WALLET_ADDRESS in Secrets to see balance';
+    const hint = document.getElementById('walletHint');
+    if (hint) hint.textContent = '⚙ Add WALLET_ADDRESS secret';
     return;
   }
 
