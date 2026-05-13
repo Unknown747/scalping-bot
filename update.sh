@@ -270,11 +270,19 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-ok "Service diperbarui"
+# Pastikan service aktif saat VPS reboot
+systemctl enable "$SERVICE_NAME" &>/dev/null
+ok "Service diperbarui dan diset auto-start saat reboot"
 
-# ── Start service ─────────────────────────────────────────────────────────────
-step "Menjalankan bot..."
-systemctl start "$SERVICE_NAME"
+# ── Restart / Start service ───────────────────────────────────────────────────
+step "Merestart bot..."
+if systemctl is-active --quiet "$SERVICE_NAME" 2>/dev/null; then
+    systemctl restart "$SERVICE_NAME"
+    ok "Bot direstart"
+else
+    systemctl start "$SERVICE_NAME"
+    ok "Bot dijalankan"
+fi
 sleep 5
 
 # ── Cek hasil ─────────────────────────────────────────────────────────────────

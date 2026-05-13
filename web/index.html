@@ -37,6 +37,10 @@ body{font-family:'Segoe UI',monospace;background:#0a0a0f;color:#00ffcc;min-heigh
 .badge-tg{color:#4285f4;border-color:#4285f455;background:#4285f408;display:none;}
 .badge-logout{color:#ff6688;border-color:#ff336655;background:#ff336608;text-decoration:none;cursor:pointer;}
 .ws-dot{font-size:11px;color:#555;}.ws-dot.on{color:#00ff88;}
+.badge-src{font-size:11px;padding:4px 10px;border-radius:20px;border:1px solid #00ffcc33;color:#00ffcc88;background:#00ffcc08;display:none;transition:all .3s;}
+.badge-src.gecko{color:#00ffcc;border-color:#00ffcc55;background:#00ffcc0d;}
+.badge-src.dex{color:#a78bfa;border-color:#a78bfa55;background:#a78bfa0d;}
+.badge-src.rl{color:#ffaa00;border-color:#ffaa0055;background:#ffaa000d;}
 .tab-nav{display:flex;gap:0;padding:0 20px;background:#0d0d18;border-bottom:1px solid #1a1a2e;overflow-x:auto;}
 .tab-btn{background:none;border:none;padding:12px 18px;color:#555;font-size:13px;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;transition:all .2s;font-family:inherit;}
 .tab-btn:hover{color:#00ffcc;}.tab-btn.active{color:#00ffcc;border-bottom-color:#00ffcc;}
@@ -211,6 +215,7 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
     <span class="ws-dot" id="wsDot">● Connecting</span>
     <span class="badge badge-bot stopped" id="botBadge">STOPPED</span>
     <span class="badge badge-sim" id="simBadge">SIM MODE</span>
+    <span class="badge badge-src" id="dataSrcBadge" title="Data source">📡 —</span>
     <span class="badge badge-tg" id="tgBadge">📱 TG</span>
     <button id="notifBtn" title="Enable browser notifications">🔔 Notif Off</button>
     <a href="/logout" class="badge badge-logout">🔒 Logout</a>
@@ -1017,6 +1022,9 @@ function handleMsg(msg) {
         );
       }
       break;
+    case 'data_source':
+      if (d) updateDataSourceBadge(d.source, d.label, d.count);
+      break;
     case 'check_result':  renderCheckResults(d); break;
     case 'telegram_test': renderTgTest(d); break;
   }
@@ -1074,6 +1082,23 @@ function updateBotBadge(running, simMode) {
   badge.textContent = running ? 'RUNNING' : 'STOPPED';
   badge.className   = 'badge badge-bot ' + (running ? 'running' : 'stopped');
   simB.style.display = (running && simMode) ? '' : 'none';
+  // Hide data source badge when bot stops
+  if (!running) {
+    const srcBadge = document.getElementById('dataSrcBadge');
+    if (srcBadge) srcBadge.style.display = 'none';
+  }
+}
+
+// ── Data source badge ─────────────────────────────────────────────────────────
+function updateDataSourceBadge(source, label, count) {
+  const badge = document.getElementById('dataSrcBadge');
+  if (!badge) return;
+  badge.style.display = '';
+  badge.className = 'badge badge-src ' + (source || 'gecko');
+  const icon  = source === 'dex' ? '🔮' : '📡';
+  const short = source === 'dex' ? 'DexScreener' : 'GeckoTerminal';
+  badge.textContent = icon + ' ' + short;
+  badge.title = (label || short) + ' — ' + (count || 0) + ' tokens loaded';
 }
 
 // ── AI ────────────────────────────────────────────────────────────────────────
@@ -1285,36 +1310,66 @@ function updateWalletWidget(data) {
   const weth = document.getElementById('walletWETH');
   const eth  = document.getElementById('walletETH');
   const upd  = document.getElementById('walletUpdated');
+  const widget = document.getElementById('walletWidget');
 
-  if (!data || !data.ok) {
+  // Hard error — no response at all (network fail)
+  if (!data) {
     dot.className = 'wallet-dot err';
-    weth.textContent = 'ERR';
-    weth.style.color = '#ff3366';
-    eth.textContent  = '—';
-    upd.textContent  = 'fetch failed';
+    weth.textContent = 'ERR'; weth.style.color = '#ff3366';
+    eth.textContent  = 'ERR'; eth.style.color  = '#ff3366';
+    upd.textContent  = 'network error';
+    widget.title = 'Wallet fetch failed — network error';
+    return;
+  }
+
+  // Wallet not configured
+  if (!data.ok && data.error && data.error.includes('WALLET_ADDRESS')) {
+    dot.className = 'wallet-dot loading';
+    weth.textContent = '—'; weth.style.color = '#ffaa00';
+    eth.textContent  = '—'; eth.style.color  = '#ffaa00';
+    upd.textContent  = 'wallet not set';
+    widget.title = 'Set WALLET_ADDRESS in Secrets to see balance';
+    return;
+  }
+
+  // Other backend error
+  if (!data.ok) {
+    dot.className = 'wallet-dot err';
+    weth.textContent = 'ERR'; weth.style.color = '#ff3366';
+    eth.textContent  = 'ERR'; eth.style.color  = '#ff3366';
+    upd.textContent  = data.error || 'fetch failed';
+    widget.title = data.error || 'Wallet fetch failed';
     return;
   }
 
   dot.className = 'wallet-dot';
-  weth.style.color = '';
+  widget.title  = 'Wallet: ' + (data.address || '') + ' · updates every 10s';
 
-  const w = parseFloat(data.wethBalance) || 0;
-  const e = parseFloat(data.ethBalance)  || 0;
-
-  weth.textContent = fmtBal(w, 6);
-  eth.textContent  = fmtBal(e, 6);
-
-  if (w === 0) {
-    weth.style.color = '#ffaa00';
-  }
-  if (e < 0.001) {
-    eth.style.color = '#ff3366';
+  // WETH balance
+  if (data.wethError) {
+    weth.textContent = 'RPC ERR';
+    weth.style.color = '#ff3366';
+    weth.title       = data.wethError;
   } else {
-    eth.style.color = '';
+    const w = parseFloat(data.wethBalance) || 0;
+    weth.textContent = fmtBal(w, 6);
+    weth.style.color = w === 0 ? '#ffaa00' : '';
+    weth.title       = '';
   }
 
-  const now = new Date();
-  upd.textContent = 'updated ' + now.toLocaleTimeString();
+  // ETH balance
+  if (data.ethError) {
+    eth.textContent = 'RPC ERR';
+    eth.style.color = '#ff3366';
+    eth.title       = data.ethError;
+  } else {
+    const e = parseFloat(data.ethBalance) || 0;
+    eth.textContent = fmtBal(e, 6);
+    eth.style.color = e < 0.001 ? '#ff3366' : '';
+    eth.title       = e < 0.001 ? 'Low ETH — may not cover gas fees' : '';
+  }
+
+  upd.textContent = 'updated ' + new Date().toLocaleTimeString();
 }
 
 async function fetchWalletBalance() {

@@ -392,11 +392,22 @@ func handleWallet(w http.ResponseWriter, r *http.Request) {
         ethResult := <-ethCh
         wethResult := <-wethCh
 
+        ethErrStr := ""
+        if ethResult.err != nil {
+                ethErrStr = ethResult.err.Error()
+        }
+        wethErrStr := ""
+        if wethResult.err != nil {
+                wethErrStr = wethResult.err.Error()
+        }
+
         json.NewEncoder(w).Encode(map[string]interface{}{
                 "ok":          true,
                 "address":     walletAddr,
                 "ethBalance":  ethResult.val,
+                "ethError":    ethErrStr,
                 "wethBalance": wethResult.val,
+                "wethError":   wethErrStr,
                 "wethAddress": wethAddr,
                 "network":     "base",
         })
@@ -705,6 +716,12 @@ func runBot() {
                                 broadcast("log", map[string]interface{}{
                                         "message": fmt.Sprintf("📡 %s: %d tokens loaded", srcLabel, len(tokens)),
                                         "type":    "info",
+                                })
+                                // Notify frontend of active data source
+                                broadcast("data_source", map[string]interface{}{
+                                        "source": source,
+                                        "label":  srcLabel,
+                                        "count":  len(tokens),
                                 })
                         }
                 }
