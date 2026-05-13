@@ -10,7 +10,6 @@ import (
 )
 
 type HuangfingClient struct {
-	apiKey  string
 	baseURL string
 	model   string
 	http    *http.Client
@@ -18,7 +17,6 @@ type HuangfingClient struct {
 
 func NewHuangfingClient(baseURL, model string, timeoutSecs int) *HuangfingClient {
 	return &HuangfingClient{
-		apiKey:  os.Getenv("HUANGFING_API_KEY"),
 		baseURL: baseURL,
 		model:   model,
 		http:    &http.Client{Timeout: time.Duration(timeoutSecs) * time.Second},
@@ -26,7 +24,8 @@ func NewHuangfingClient(baseURL, model string, timeoutSecs int) *HuangfingClient
 }
 
 func (h *HuangfingClient) Analyze(ctx context.Context, tokenAddress string, marketData map[string]interface{}) map[string]*TradingDecision {
-	if h.apiKey == "" {
+	apiKey := os.Getenv("HUANGFING_API_KEY")
+	if apiKey == "" {
 		return map[string]*TradingDecision{"huangfing": {Action: "HOLD", Confidence: 0, Reasoning: "no API key"}}
 	}
 
@@ -50,7 +49,7 @@ func (h *HuangfingClient) Analyze(ctx context.Context, tokenAddress string, mark
 		return map[string]*TradingDecision{"huangfing": {Action: "HOLD", Confidence: 0, Reasoning: err.Error()}}
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+h.apiKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	resp, err := h.http.Do(req)
 	if err != nil {

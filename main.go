@@ -13,6 +13,8 @@ import (
         "sync"
         "time"
 
+        "math/big"
+
         "github.com/gorilla/websocket"
         "github.com/joho/godotenv"
 
@@ -26,6 +28,7 @@ import (
         "meme-scalper-ai/internal/notify"
         "meme-scalper-ai/internal/position"
         rpcpkg "meme-scalper-ai/internal/rpc"
+        swappkg "meme-scalper-ai/internal/swap"
 )
 
 var upgrader = websocket.Upgrader{
@@ -1269,6 +1272,26 @@ func executeTrade(token data.TokenData, decision *ai.TradingDecision, simMode bo
                 AIConfidence:   decision.Confidence,
         }
 
+        if !simMode {
+                if txResult, buyErr := executeLiveBuy(token.Address, wethAmount); buyErr != nil {
+                        broadcast("log", map[string]interface{}{
+                                "message": fmt.Sprintf("❌ [LIVE] On-chain BUY failed for %s: %v", token.Symbol, buyErr),
+                                "type":    "error",
+                        })
+                        return
+                } else {
+                        shortTx := txResult.TxHash
+                        if len(shortTx) > 12 {
+                                shortTx = "..." + txResult.TxHash[len(txResult.TxHash)-8:]
+                        }
+                        broadcast("log", map[string]interface{}{
+                                "message": fmt.Sprintf("🔗 [LIVE] BUY confirmed: %s | tx: %s | gas: %d",
+                                        token.Symbol, shortTx, txResult.GasUsed),
+                                "type": "success",
+                        })
+                }
+        }
+
         posTracker.Open(pos)
 
         botState.mu.Lock()
@@ -1386,6 +1409,7 @@ func monitorPositions() {
                                                                 pos.Symbol, mtp.TP3Percent, remainFrac*100, partialPnl),
                                                         "type": "success",
                                                 })
+                                                executeLiveSell(pos)
                                                 closePositionResult(pos, partialPnl, fmt.Sprintf("TP3+%.0f%%", mtp.TP3Percent))
                                         }
                                         continue
@@ -1408,6 +1432,7 @@ func monitorPositions() {
                                                         remainFrac = 1.0
                                                 }
                                                 pnl := pos.OrigSizeUSD * remainFrac * (pnlPct / 100.0)
+                                                executeLiveSell(pos)
                                                 closePositionResult(pos, pnl, reason)
                                         }
                                 } else if int(held.Seconds())%30 < 1 {
@@ -1442,6 +1467,7 @@ func monitorPositions() {
                         if reason != "" {
                                 if _, ok := posTracker.Close(pos.TokenAddress); ok {
                                         pnl := pos.SizeUSD * (pnlPct / 100.0)
+                                        executeLiveSell(pos)
                                         closePositionResult(pos, pnl, reason)
                                 }
                         } else {
@@ -1786,6 +1812,62 @@ func handleHistoryExport(w http.ResponseWriter, r *http.Request) {
 }
 
 // ── Broadcast helpers ────────────────────────────────────────────────────────
+
+// ── On-chain swap helpers (live mode) ────────────────────────────────────────
+
+// executeLiveBuy submits a real WETH→token swap on Base mainnet.
+// wethAmount is in WETH (float), not wei.
+func executeLiveBuy(tokenAddr string, wethAmount float64) (*swappkg.SwapResult, error) {
+        rpcURL, err := rpcClient.GetActiveEndpoint()
+        if err != nil {
+                return nil, fmt.Errorf("no RPC endpoint: %w", err)
+        }
+        exec := swappkg.NewExecutor(rpcURL)
+        ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+        defer cancel()
+        // Convert float WETH → wei (*1e18)
+        wethWei := new(big.Int)
+        wf := new(big.Float).SetFloat64(wethAmount)
+        wf.Mul(wf, new(big.Float).SetFloat64(1e18))
+        wf.Int(wethWei)
+        return exec.Buy(ctx, tokenAddr, wethWei)
+}
+
+// executeLiveSell submits a real token→WETH swap using the wallet's full token balance.
+// No-ops in simulation mode.
+func executeLiveSell(pos *position.Position) {
+        if pos.SimMode {
+                return
+        }
+        rpcURL, err := rpcClient.GetActiveEndpoint()
+        if err != nil {
+                broadcast("log", map[string]interface{}{
+                        "message": fmt.Sprintf("❌ [LIVE] No RPC endpoint for sell %s: %v", pos.Symbol, err),
+                        "type":    "error",
+                })
+                return
+        }
+        exec := swappkg.NewExecutor(rpcURL)
+        ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+        defer cancel()
+        result, err := exec.Sell(ctx, pos.TokenAddress)
+        if err != nil {
+                broadcast("log", map[string]interface{}{
+                        "message": fmt.Sprintf("❌ [LIVE] Sell tx failed for %s: %v", pos.Symbol, err),
+                        "type":    "error",
+                })
+                return
+        }
+        shortTx := result.TxHash
+        if len(shortTx) > 12 {
+                shortTx = "..." + result.TxHash[len(result.TxHash)-8:]
+        }
+        broadcast("log", map[string]interface{}{
+                "message": fmt.Sprintf("🔗 [LIVE] Sell confirmed: %s | tx: %s | gas: %d",
+                        pos.Symbol, shortTx, result.GasUsed),
+                "type": "success",
+        })
+}
 
 func broadcastLoop() {
         ticker := time.NewTicker(2 * time.Second)

@@ -10,24 +10,21 @@ import (
 	"time"
 )
 
-// TogetherClient calls api.together.ai — free tier available for Llama, Mistral,
-// Qwen models. Set TOGETHER_API_KEY to activate. Free tier: $1 credit on signup.
 type TogetherClient struct {
-	apiKey string
-	model  string
-	http   *http.Client
+	model string
+	http  *http.Client
 }
 
 func NewTogetherClient(model string, timeoutSecs int) *TogetherClient {
 	return &TogetherClient{
-		apiKey: os.Getenv("TOGETHER_API_KEY"),
-		model:  model,
-		http:   &http.Client{Timeout: time.Duration(timeoutSecs) * time.Second},
+		model: model,
+		http:  &http.Client{Timeout: time.Duration(timeoutSecs) * time.Second},
 	}
 }
 
 func (t *TogetherClient) Analyze(ctx context.Context, tokenAddress string, marketData map[string]interface{}) map[string]*TradingDecision {
-	if t.apiKey == "" {
+	apiKey := os.Getenv("TOGETHER_API_KEY")
+	if apiKey == "" {
 		return map[string]*TradingDecision{"together": {Action: "HOLD", Confidence: 0, Reasoning: "no API key"}}
 	}
 
@@ -50,7 +47,7 @@ func (t *TogetherClient) Analyze(ctx context.Context, tokenAddress string, marke
 		return map[string]*TradingDecision{"together": {Action: "HOLD", Confidence: 0, Reasoning: err.Error()}}
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+t.apiKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	resp, err := t.http.Do(req)
 	if err != nil {

@@ -10,25 +10,21 @@ import (
 	"time"
 )
 
-// OpenRouterClient calls openrouter.ai — an aggregator that provides free-tier
-// access to Llama, Mistral, Qwen, and many other models. Set OPENROUTER_API_KEY
-// to activate. Free models are marked with ":free" suffix.
 type OpenRouterClient struct {
-	apiKey string
-	model  string
-	http   *http.Client
+	model string
+	http  *http.Client
 }
 
 func NewOpenRouterClient(model string, timeoutSecs int) *OpenRouterClient {
 	return &OpenRouterClient{
-		apiKey: os.Getenv("OPENROUTER_API_KEY"),
-		model:  model,
-		http:   &http.Client{Timeout: time.Duration(timeoutSecs) * time.Second},
+		model: model,
+		http:  &http.Client{Timeout: time.Duration(timeoutSecs) * time.Second},
 	}
 }
 
 func (o *OpenRouterClient) Analyze(ctx context.Context, tokenAddress string, marketData map[string]interface{}) map[string]*TradingDecision {
-	if o.apiKey == "" {
+	apiKey := os.Getenv("OPENROUTER_API_KEY")
+	if apiKey == "" {
 		return map[string]*TradingDecision{"openrouter": {Action: "HOLD", Confidence: 0, Reasoning: "no API key"}}
 	}
 
@@ -51,7 +47,7 @@ func (o *OpenRouterClient) Analyze(ctx context.Context, tokenAddress string, mar
 		return map[string]*TradingDecision{"openrouter": {Action: "HOLD", Confidence: 0, Reasoning: err.Error()}}
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+o.apiKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 	req.Header.Set("HTTP-Referer", "https://memescalper.bot")
 	req.Header.Set("X-Title", "MemeScalper AI Pro")
 

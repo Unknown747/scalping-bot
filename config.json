@@ -10,19 +10,14 @@
 
   "rpc_config": {
     "primary_endpoints": [
-      "https://mainnet.base.org",
-      "https://base.llamarpc.com",
-      "https://rpc.base.org"
-    ],
-    "backup_endpoints": [
-      "https://base.blockpi.network/v1/rpc/public",
       "https://1rpc.io/base",
       "https://base.drpc.org",
-      "https://base.meowrpc.com",
       "https://base.publicnode.com"
     ],
+    "backup_endpoints": [
+      "https://base.meowrpc.com"
+    ],
     "websocket_endpoints": [
-      "wss://mainnet.base.org/ws",
       "wss://base.drpc.org"
     ],
     "health_check_interval_seconds": 30,
@@ -32,7 +27,7 @@
   },
 
   "trading": {
-    "position_size_usd": 1.0,
+    "position_size_usd": 0.5,
     "max_concurrent_positions": 3,
     "max_daily_trades": 50,
     "slippage_tolerance_percent": 10,
