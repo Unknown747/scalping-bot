@@ -664,12 +664,14 @@ func runBot() {
                         var source string
 
                         if !geckoData.IsRateLimited() {
-                                ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+                                // 4 pages fetched sequentially with 300ms delay between each
+                                ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
                                 tokens, fetchErr = geckoData.GetTopPools(ctx, "base")
                                 cancel()
                                 if fetchErr == nil {
                                         source = "gecko"
                                         geckoRLNotified = false
+                                        log.Printf("🔍 GeckoTerminal: %d raw pools fetched (before age/filter)", len(tokens))
                                 } else if fetchErr == data.ErrRateLimited {
                                         if !geckoRLNotified {
                                                 until := geckoData.RateLimitedUntil().Format("15:04:05")
@@ -680,8 +682,9 @@ func runBot() {
                                                 geckoRLNotified = true
                                         }
                                 } else {
+                                        log.Printf("⚠️ GeckoTerminal error: %v", fetchErr)
                                         broadcast("log", map[string]interface{}{
-                                                "message": "⚠️ GeckoTerminal error, trying DexScreener...",
+                                                "message": "⚠️ GeckoTerminal error: " + fetchErr.Error() + ", trying DexScreener...",
                                                 "type":    "warning",
                                         })
                                 }
@@ -695,10 +698,11 @@ func runBot() {
                         }
 
                         if len(tokens) == 0 {
-                                ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
+                                ctx2, cancel2 := context.WithTimeout(context.Background(), 12*time.Second)
                                 tokens, fetchErr = dexData.GetLatestTokens(ctx2, "base")
                                 cancel2()
                                 if fetchErr != nil {
+                                        log.Printf("❌ DexScreener error: %v", fetchErr)
                                         broadcast("log", map[string]interface{}{"message": "❌ Data fetch failed: " + fetchErr.Error(), "type": "error"})
                                         time.Sleep(10 * time.Second)
                                         continue
@@ -728,6 +732,21 @@ func runBot() {
 
                 if simMode && len(tokens) == 0 {
                         tokens = generateSimTokens()
+                }
+
+                // Count how many pass filters and log a summary every cycle
+                passCount := 0
+                for _, t := range tokens {
+                        if passesFilters(t) {
+                                passCount++
+                        }
+                }
+                log.Printf("🔎 Filter result: %d/%d tokens passed", passCount, len(tokens))
+                if passCount > 0 {
+                        broadcast("log", map[string]interface{}{
+                                "message": fmt.Sprintf("🔎 %d token(s) passed filters — analyzing with AI...", passCount),
+                                "type":    "info",
+                        })
                 }
 
                 for _, token := range tokens {
@@ -832,31 +851,45 @@ func generateSimTokens() []data.TokenData {
 func passesFilters(token data.TokenData) bool {
         f := cfg.Monitoring.TokenFilters
 
-        if token.LiquidityUSD < f.MinLiquidityUSD {
+        // New pools (< 90 min) use relaxed thresholds because they haven't had
+        // time to accumulate liquidity or 24h volume yet. The strict values in
+        // config.json apply only to established pools.
+        isNew := token.AgeSeconds > 0 && token.AgeSeconds < 5400
+
+        // ── Liquidity ──────────────────────────────────────────────────────────
+        minLiq := f.MinLiquidityUSD
+        if isNew {
+                minLiq = 500 // new pools seed with very little liquidity
+        }
+        if token.LiquidityUSD < minLiq {
                 return false
         }
 
-        // For very new tokens (< 2 hrs old), 24h volume is meaningless — use 5m
-        // volume projected to 1 hour as a proxy, otherwise use the actual 24h value.
-        isNew := token.AgeSeconds > 0 && token.AgeSeconds < 7200
+        // ── Volume ─────────────────────────────────────────────────────────────
         if isNew {
-                // project 5m volume to 1hr equivalent
-                projectedHourVol := token.Volume5m * 12
-                if projectedHourVol < f.MinVolume24hUSD*0.05 {
+                // For new tokens, require at least $50 in 5-min volume (any activity at all)
+                if token.Volume5m < 50 {
                         return false
                 }
         } else if token.Volume24h < f.MinVolume24hUSD {
                 return false
         }
 
+        // ── Price ──────────────────────────────────────────────────────────────
         if f.MaxPriceUSD > 0 && token.PriceUSD > f.MaxPriceUSD {
                 return false
         }
-        if token.TxCount5m < f.MinTxCount5m {
+
+        // ── Transaction count ──────────────────────────────────────────────────
+        minTx := f.MinTxCount5m
+        if isNew {
+                minTx = 2 // require just a handful of trades to confirm activity
+        }
+        if token.TxCount5m < minTx {
                 return false
         }
 
-        // Age filter
+        // ── Age ────────────────────────────────────────────────────────────────
         if token.AgeSeconds > 0 {
                 if f.MinAgeSecs > 0 && token.AgeSeconds < f.MinAgeSecs {
                         return false
@@ -866,37 +899,36 @@ func passesFilters(token data.TokenData) bool {
                 }
         }
 
-        // Buy/sell ratio filter — key momentum signal
+        // ── Buy/sell ratio ─────────────────────────────────────────────────────
         if f.MinBuySellRatio > 0 {
                 if token.Buys5m == 0 && token.Sells5m == 0 {
                         return false
                 }
                 var ratio float64
                 if token.Sells5m == 0 {
-                        ratio = 10.0
+                        ratio = 99.0 // only buys, no sells — very bullish for new token
                 } else {
                         ratio = float64(token.Buys5m) / float64(token.Sells5m)
                 }
                 if ratio < f.MinBuySellRatio {
                         return false
                 }
-                if f.MaxBuySellRatio > 0 && ratio > f.MaxBuySellRatio {
-                        // Too skewed = possible pump manipulation
+                // Skip max ratio check for new tokens — brand-new pools legitimately have
+                // all buys and zero sells in the first hour; that is NOT manipulation.
+                if !isNew && f.MaxBuySellRatio > 0 && ratio > f.MaxBuySellRatio {
                         return false
                 }
         }
 
-        // Dev filter
+        // ── Dev / blacklist filter ─────────────────────────────────────────────
         if cfg.DevFilter.Enabled {
-                // Strict minimum age — avoid very fresh launches by serial devs
                 if cfg.DevFilter.MinTokenAgeSecs > 0 && token.AgeSeconds > 0 && token.AgeSeconds < cfg.DevFilter.MinTokenAgeSecs {
                         broadcast("log", map[string]interface{}{
-                                "message": fmt.Sprintf("🚫 Dev filter: %s too new (%ds) — possible serial launch, skipping", token.Symbol, token.AgeSeconds),
+                                "message": fmt.Sprintf("🚫 Dev filter: %s too new (%ds) — skipping", token.Symbol, token.AgeSeconds),
                                 "type":    "warning",
                         })
                         return false
                 }
-                // Blacklisted token addresses
                 for _, blocked := range cfg.DevFilter.BlacklistedAddresses {
                         if strings.EqualFold(token.Address, blocked) {
                                 broadcast("log", map[string]interface{}{
