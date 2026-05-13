@@ -835,9 +835,20 @@ func passesFilters(token data.TokenData) bool {
         if token.LiquidityUSD < f.MinLiquidityUSD {
                 return false
         }
-        if token.Volume24h < f.MinVolume24hUSD {
+
+        // For very new tokens (< 2 hrs old), 24h volume is meaningless — use 5m
+        // volume projected to 1 hour as a proxy, otherwise use the actual 24h value.
+        isNew := token.AgeSeconds > 0 && token.AgeSeconds < 7200
+        if isNew {
+                // project 5m volume to 1hr equivalent
+                projectedHourVol := token.Volume5m * 12
+                if projectedHourVol < f.MinVolume24hUSD*0.05 {
+                        return false
+                }
+        } else if token.Volume24h < f.MinVolume24hUSD {
                 return false
         }
+
         if f.MaxPriceUSD > 0 && token.PriceUSD > f.MaxPriceUSD {
                 return false
         }
