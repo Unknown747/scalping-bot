@@ -26,13 +26,13 @@ args = "Meme Scalper Bot"
 name = "Meme Scalper Bot"
 author = "agent"
 
+[workflows.workflow.metadata]
+outputType = "webview"
+
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "go run main.go"
 waitForPort = 5000
-
-[workflows.workflow.metadata]
-outputType = "webview"
 
 [agent]
 stack = "BEST_EFFORT_FALLBACK"
@@ -45,10 +45,6 @@ timeoutMs = 20000
 
 [[ports]]
 localPort = 5000
-externalPort = 80
-
-[[ports]]
-localPort = 8081
 externalPort = 80
 
 [[ports]]
