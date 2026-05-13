@@ -939,6 +939,16 @@ func runBot() {
 
                         marketMap := geckoData.ToMarketMap(token)
                         decision := aiOrch.GetTradingDecision(token.Address, marketMap)
+
+                        // ── Rule-based fallback when ALL AI providers fail (no API keys) ──
+                        // If every provider returned ERR (confidence=0, action=HOLD),
+                        // compute a signal directly from on-chain data so the bot can
+                        // still trade in simulation mode without any AI keys.
+                        allFailed := decision.Action == "HOLD" && decision.Confidence == 0
+                        if allFailed {
+                                decision = ruleBasedSignal(token)
+                        }
+
                         broadcastAIUpdate(decision, token.Address, token.Symbol)
 
                         if decision.Action != "BUY" || decision.Confidence < cfg.AIConfig.MinConfidenceThreshold {
@@ -978,6 +988,90 @@ func runBot() {
         }
 
         log.Println("Bot loop stopped")
+}
+
+// ── Rule-based signal (fallback when no AI keys configured) ──────────────────
+
+// ruleBasedSignal generates a BUY/HOLD/SELL decision purely from on-chain data.
+// Used automatically when every AI provider returns ERR (no API keys).
+func ruleBasedSignal(token data.TokenData) *ai.TradingDecision {
+        votes := map[string]string{
+                "gemini": "ERR", "groq": "ERR", "openrouter": "ERR", "huangfing": "ERR",
+        }
+
+        // ── Signal conditions ──────────────────────────────────────────────────
+        isNew := token.AgeSeconds > 0 && token.AgeSeconds < 5400
+
+        // Volume spike: 5m volume ≥ 2× expected average (Vol24h / 288 intervals)
+        volSpike := false
+        if token.Volume24h > 0 && token.Volume5m > 0 {
+                avg5m := token.Volume24h / 288.0
+                volSpike = avg5m > 0 && token.Volume5m >= avg5m*2.0
+        } else if token.Volume5m >= 50000 {
+                volSpike = true // new token: no 24h yet, but 5m alone is high
+        }
+
+        // Momentum: positive 5m price change (or new token, no data yet)
+        momentum := token.PriceChange5m > 1.5 || (isNew && token.PriceChange5m >= 0)
+
+        // Buy pressure: buys ≥ 2× sells AND at least 5 absolute buys
+        bullish := false
+        if token.Buys5m >= 5 {
+                if token.Sells5m == 0 {
+                        bullish = true
+                } else {
+                        bullish = float64(token.Buys5m)/float64(token.Sells5m) >= 2.0
+                }
+        } else if isNew && token.Buys5m >= 3 && token.Sells5m == 0 {
+                bullish = true
+        }
+
+        // Good liquidity
+        goodLiq := token.LiquidityUSD >= 15000
+
+        // ── Scoring (0-100) ───────────────────────────────────────────────────
+        score := 0.0
+        if volSpike {
+                score += 35
+        }
+        if momentum {
+                score += 30
+        }
+        if bullish {
+                score += 25
+        }
+        if goodLiq {
+                score += 10
+        }
+
+        action := "HOLD"
+        if score >= 70 && volSpike && (momentum || isNew) && bullish {
+                action = "BUY"
+        }
+
+        reasoning := "rule-based (no AI keys)"
+        if action == "BUY" {
+                reasoning = fmt.Sprintf("rule-based BUY: volSpike=%.0fx momentum=%.1f%% buys=%d sells=%d liq=$%.0f",
+                        func() float64 {
+                                if token.Volume24h > 0 {
+                                        return token.Volume5m / (token.Volume24h / 288.0)
+                                }
+                                return 0
+                        }(),
+                        token.PriceChange5m, token.Buys5m, token.Sells5m, token.LiquidityUSD)
+        }
+
+        log.Printf("📐 Rule-based [%s]: vol5m=$%.0f chg5m=%.1f%% buys=%d sells=%d liq=$%.0f → %s (%.0f%%)",
+                token.Symbol, token.Volume5m, token.PriceChange5m,
+                token.Buys5m, token.Sells5m, token.LiquidityUSD, action, score)
+
+        return &ai.TradingDecision{
+                Action:        action,
+                Confidence:    score,
+                TokenAddress:  token.Address,
+                Reasoning:     reasoning,
+                ProviderVotes: votes,
+        }
 }
 
 // ── Token generation & filtering ─────────────────────────────────────────────
