@@ -51,8 +51,11 @@ type AIConfig struct {
         UpdateIntervalSecs     int                `json:"update_interval_seconds"`
         MinConfidenceThreshold float64            `json:"min_confidence_threshold"`
         MaxDecisionTimeMs      int                `json:"max_decision_time_ms"`
+        DecisionCacheTTLSecs   int                `json:"decision_cache_ttl_seconds"`
         Gemini                 AIProviderConfig   `json:"gemini"`
         Groq                   AIProviderConfig   `json:"groq"`
+        OpenRouter             AIProviderConfig   `json:"openrouter"`
+        Together               AIProviderConfig   `json:"together"`
         Huangfing              AIProviderConfig   `json:"huangfing"`
         VotingMechanism        string             `json:"voting_mechanism"`
         AIWeights              map[string]float64 `json:"ai_weights"`

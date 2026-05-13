@@ -129,7 +129,7 @@ func main() {
 
         weights := cfg.AIConfig.AIWeights
         if weights == nil {
-                weights = map[string]float64{"gemini": 0.40, "groq": 0.35, "huangfing": 0.25}
+                weights = map[string]float64{"gemini": 0.30, "groq": 0.30, "openrouter": 0.20, "together": 0.15, "huangfing": 0.05}
         }
         aiOrch = ai.NewOrchestrator(
                 cfg.AIConfig.Gemini.Model, cfg.AIConfig.Gemini.TimeoutSeconds,
@@ -779,6 +779,10 @@ func runBot() {
                         if !passesFilters(token) {
                                 continue
                         }
+
+                        // Stagger AI calls so multiple tokens don't hit the same
+                        // provider simultaneously and trigger rate limiting.
+                        time.Sleep(600 * time.Millisecond)
 
                         marketMap := geckoData.ToMarketMap(token)
                         decision := aiOrch.GetTradingDecision(token.Address, marketMap)

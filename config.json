@@ -93,21 +93,42 @@
     "update_interval_seconds": 3,
     "min_confidence_threshold": 70,
     "max_decision_time_ms": 12000,
+    "decision_cache_ttl_seconds": 180,
     "gemini": {
       "enabled": true,
       "model": "gemini-1.5-flash",
       "temperature": 0.3,
       "max_tokens": 500,
       "timeout_seconds": 10,
-      "priority": 1
+      "priority": 1,
+      "note": "Set GEMINI_API_KEY — free tier has daily quota limit"
     },
     "groq": {
       "enabled": true,
-      "model": "llama-3.3-70b-versatile",
+      "model": "llama-3.1-8b-instant",
       "temperature": 0.2,
       "max_tokens": 400,
       "timeout_seconds": 5,
-      "priority": 2
+      "priority": 2,
+      "note": "Set GROQ_API_KEY — free tier, fast inference"
+    },
+    "openrouter": {
+      "enabled": true,
+      "model": "meta-llama/llama-3.2-3b-instruct:free",
+      "temperature": 0.2,
+      "max_tokens": 300,
+      "timeout_seconds": 8,
+      "priority": 3,
+      "note": "Set OPENROUTER_API_KEY — free models available at openrouter.ai"
+    },
+    "together": {
+      "enabled": true,
+      "model": "meta-llama/Llama-3.2-3B-Instruct-Turbo",
+      "temperature": 0.2,
+      "max_tokens": 300,
+      "timeout_seconds": 8,
+      "priority": 4,
+      "note": "Set TOGETHER_API_KEY — free $1 credit at together.ai"
     },
     "huangfing": {
       "enabled": true,
@@ -116,13 +137,16 @@
       "temperature": 0.35,
       "max_tokens": 600,
       "timeout_seconds": 8,
-      "priority": 3
+      "priority": 5,
+      "note": "Set HUANGFING_API_KEY — optional extra provider"
     },
     "voting_mechanism": "weighted_majority",
     "ai_weights": {
-      "gemini": 0.40,
-      "groq": 0.35,
-      "huangfing": 0.25
+      "gemini":     0.30,
+      "groq":       0.30,
+      "openrouter": 0.20,
+      "together":   0.15,
+      "huangfing":  0.05
     }
   },
 
