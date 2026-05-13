@@ -116,15 +116,6 @@
       "priority": 3,
       "note": "Set OPENROUTER_API_KEY — free models at openrouter.ai"
     },
-    "together": {
-      "enabled": true,
-      "model": "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
-      "temperature": 0.2,
-      "max_tokens": 300,
-      "timeout_seconds": 10,
-      "priority": 4,
-      "note": "Set TOGETHER_API_KEY — free tier at together.ai"
-    },
     "huangfing": {
       "enabled": true,
       "base_url": "https://api.huangfing.ai/v1",
@@ -132,15 +123,14 @@
       "temperature": 0.35,
       "max_tokens": 600,
       "timeout_seconds": 8,
-      "priority": 5,
+      "priority": 4,
       "note": "Set HUANGFING_API_KEY — optional extra provider"
     },
     "voting_mechanism": "weighted_majority",
     "ai_weights": {
-      "gemini":     0.30,
-      "groq":       0.30,
-      "openrouter": 0.20,
-      "together":   0.15,
+      "gemini":     0.35,
+      "groq":       0.35,
+      "openrouter": 0.25,
       "huangfing":  0.05
     }
   },

@@ -139,13 +139,12 @@ func main() {
 
         weights := cfg.AIConfig.AIWeights
         if weights == nil {
-                weights = map[string]float64{"gemini": 0.30, "groq": 0.30, "openrouter": 0.20, "together": 0.15, "huangfing": 0.05}
+                weights = map[string]float64{"gemini": 0.35, "groq": 0.35, "openrouter": 0.25, "huangfing": 0.05}
         }
         aiOrch = ai.NewOrchestrator(
                 cfg.AIConfig.Gemini.Model, cfg.AIConfig.Gemini.TimeoutSeconds,
                 cfg.AIConfig.Groq.Model, cfg.AIConfig.Groq.TimeoutSeconds,
                 cfg.AIConfig.OpenRouter.Model, cfg.AIConfig.OpenRouter.TimeoutSeconds,
-                cfg.AIConfig.Together.Model, cfg.AIConfig.Together.TimeoutSeconds,
                 cfg.AIConfig.Huangfing.BaseURL, cfg.AIConfig.Huangfing.Model, cfg.AIConfig.Huangfing.TimeoutSeconds,
                 weights,
         )
@@ -182,6 +181,7 @@ func main() {
         mux.Handle("/api/history", authMiddleware(http.HandlerFunc(handleHistory)))
         mux.Handle("/api/history/export", authMiddleware(http.HandlerFunc(handleHistoryExport)))
         mux.Handle("/api/wallet", authMiddleware(http.HandlerFunc(handleWallet)))
+        mux.Handle("/api/wrap", authMiddleware(http.HandlerFunc(handleWrap)))
 
         if os.Getenv("BOT_PASSWORD") == "" {
                 log.Printf("⚠️  WARNING: BOT_PASSWORD secret not set — login uses default password. Set BOT_PASSWORD in Secrets for security!")
@@ -298,6 +298,23 @@ func handleLogout(w http.ResponseWriter, r *http.Request) {
 
 // ── Wallet balance handler ────────────────────────────────────────────────────
 
+// getWalletAddress returns WALLET_ADDRESS env var or derives it from WALLET_PRIVATE_KEY.
+func getWalletAddress() string {
+        if addr := os.Getenv("WALLET_ADDRESS"); addr != "" {
+                return addr
+        }
+        rpcURL, err := rpcClient.GetActiveEndpoint()
+        if err != nil {
+                return ""
+        }
+        exec := swappkg.NewExecutor(rpcURL)
+        addr, err := exec.WalletAddr()
+        if err != nil {
+                return ""
+        }
+        return addr
+}
+
 func rpcCall(endpoint, payload string) (string, error) {
         req, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(payload))
         if err != nil {
@@ -345,7 +362,7 @@ func hexToFloat(hexStr string, decimals int) float64 {
 func handleWallet(w http.ResponseWriter, r *http.Request) {
         w.Header().Set("Content-Type", "application/json")
 
-        walletAddr := os.Getenv("WALLET_ADDRESS")
+        walletAddr := getWalletAddress()
         if walletAddr == "" {
                 json.NewEncoder(w).Encode(map[string]interface{}{
                         "ok": false, "error": "WALLET_ADDRESS not set",
@@ -1095,6 +1112,39 @@ func passesFilters(token data.TokenData) bool {
                 }
         }
 
+        // ── Volume spike validation ────────────────────────────────────────────
+        // 5m volume must be ≥ 1.5× the expected average 5m rate to confirm a real
+        // spike, not just normal trading activity.
+        if token.Volume24h > 0 && token.Volume5m > 0 {
+                avg5m := token.Volume24h / 288.0 // 24h / 288 five-minute intervals
+                if avg5m > 0 && token.Volume5m < avg5m*1.5 {
+                        return false // volume not genuinely elevated — skip
+                }
+        }
+
+        // ── Minimum absolute buy count ─────────────────────────────────────────
+        // A good buy/sell ratio means nothing if there are only 1-2 actual buys.
+        minAbsBuys := 5
+        if isNew {
+                minAbsBuys = 3
+        }
+        if token.Buys5m > 0 && token.Buys5m < minAbsBuys {
+                return false
+        }
+
+        // ── Price momentum (non-new tokens) ───────────────────────────────────
+        // Established tokens must show positive 5m price action. New tokens may
+        // not have a 5m change yet (field is 0) so we skip this check for them.
+        if !isNew && token.PriceChange5m < 0 {
+                return false
+        }
+
+        // ── Minimum liquidity depth (absolute, not relaxed for new) ───────────
+        // Even brand-new pools need at least $5k liquidity to trade safely.
+        if token.LiquidityUSD < 5000 {
+                return false
+        }
+
         return true
 }
 
@@ -1274,6 +1324,7 @@ func executeTrade(token data.TokenData, decision *ai.TradingDecision, simMode bo
         }
 
         if !simMode {
+                autoWrapETHIfNeeded(wethAmount)
                 if txResult, buyErr := executeLiveBuy(token.Address, wethAmount); buyErr != nil {
                         broadcast("log", map[string]interface{}{
                                 "message": fmt.Sprintf("❌ [LIVE] On-chain BUY failed for %s: %v", token.Symbol, buyErr),
@@ -1813,6 +1864,152 @@ func handleHistoryExport(w http.ResponseWriter, r *http.Request) {
 }
 
 // ── Broadcast helpers ────────────────────────────────────────────────────────
+
+// ── ETH → WETH auto-wrap ─────────────────────────────────────────────────────
+
+const wrapGasReserveETH = 0.003 // keep 0.003 ETH (~$9) for gas fees on Base
+
+// autoWrapETHIfNeeded checks WETH balance before a live trade.
+// If insufficient, it wraps available native ETH → WETH while keeping a gas reserve.
+func autoWrapETHIfNeeded(neededWETH float64) {
+        rpcURL, err := rpcClient.GetActiveEndpoint()
+        if err != nil {
+                return
+        }
+        exec := swappkg.NewExecutor(rpcURL)
+        ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+        defer cancel()
+
+        wethBal, err := exec.GetWETHBalanceWei(ctx)
+        if err != nil {
+                log.Printf("⚠️  Auto-wrap: WETH balance check failed: %v", err)
+                return
+        }
+
+        // Convert needed WETH (float ETH units) → wei
+        neededWei := new(big.Int)
+        new(big.Float).SetFloat64(neededWETH * 1e18).Int(neededWei)
+
+        if wethBal.Cmp(neededWei) >= 0 {
+                return // already have enough WETH
+        }
+
+        ethBal, err := exec.GetNativeETHBalance(ctx)
+        if err != nil {
+                log.Printf("⚠️  Auto-wrap: ETH balance check failed: %v", err)
+                return
+        }
+
+        reserveWei := new(big.Int)
+        new(big.Float).SetFloat64(wrapGasReserveETH * 1e18).Int(reserveWei)
+
+        available := new(big.Int).Sub(ethBal, reserveWei)
+        if available.Sign() <= 0 {
+                broadcast("log", map[string]interface{}{
+                        "message": fmt.Sprintf("⚠️  Auto-wrap skipped: ETH too low (keeping %.3f ETH for gas)", wrapGasReserveETH),
+                        "type":    "warning",
+                })
+                return
+        }
+
+        // Wrap only what's needed (not the entire available ETH)
+        toWrap := new(big.Int).Sub(neededWei, wethBal)
+        if toWrap.Cmp(available) > 0 {
+                toWrap = new(big.Int).Set(available)
+        }
+
+        wrapFloat, _ := new(big.Float).SetInt(toWrap).Float64()
+        wrapETH := wrapFloat / 1e18
+
+        broadcast("log", map[string]interface{}{
+                "message": fmt.Sprintf("💎 Auto-wrapping %.6f ETH → WETH (keeping %.3f ETH for gas)...", wrapETH, wrapGasReserveETH),
+                "type":    "info",
+        })
+
+        ctx2, cancel2 := context.WithTimeout(context.Background(), 60*time.Second)
+        defer cancel2()
+        result, err := exec.WrapETH(ctx2, toWrap)
+        if err != nil {
+                broadcast("log", map[string]interface{}{
+                        "message": fmt.Sprintf("❌ Auto-wrap failed: %v", err),
+                        "type":    "error",
+                })
+                return
+        }
+        shortTx := result.TxHash
+        if len(shortTx) > 12 {
+                shortTx = "..." + result.TxHash[len(result.TxHash)-8:]
+        }
+        broadcast("log", map[string]interface{}{
+                "message": fmt.Sprintf("✅ Wrapped %.6f ETH → WETH | tx: %s | gas: %d", wrapETH, shortTx, result.GasUsed),
+                "type":    "success",
+        })
+}
+
+// handleWrap is the manual ETH→WETH wrap endpoint (POST /api/wrap).
+// Body (optional): {"reserveEth": 0.003}
+func handleWrap(w http.ResponseWriter, r *http.Request) {
+        w.Header().Set("Content-Type", "application/json")
+        if r.Method != http.MethodPost {
+                w.WriteHeader(http.StatusMethodNotAllowed)
+                return
+        }
+
+        var req struct {
+                ReserveETH float64 `json:"reserveEth"`
+        }
+        req.ReserveETH = wrapGasReserveETH
+        json.NewDecoder(r.Body).Decode(&req)
+        if req.ReserveETH <= 0 {
+                req.ReserveETH = wrapGasReserveETH
+        }
+
+        rpcURL, err := rpcClient.GetActiveEndpoint()
+        if err != nil {
+                json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "no RPC endpoint available"})
+                return
+        }
+
+        exec := swappkg.NewExecutor(rpcURL)
+        ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+        defer cancel()
+
+        ethBal, err := exec.GetNativeETHBalance(ctx)
+        if err != nil {
+                json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": "ETH balance: " + err.Error()})
+                return
+        }
+
+        reserveWei := new(big.Int)
+        new(big.Float).SetFloat64(req.ReserveETH * 1e18).Int(reserveWei)
+
+        toWrap := new(big.Int).Sub(ethBal, reserveWei)
+        if toWrap.Sign() <= 0 {
+                ethF, _ := new(big.Float).SetInt(ethBal).Float64()
+                json.NewEncoder(w).Encode(map[string]interface{}{
+                        "ok":    false,
+                        "error": fmt.Sprintf("insufficient ETH: have %.6f, need > %.4f for gas reserve", ethF/1e18, req.ReserveETH),
+                })
+                return
+        }
+
+        ctx2, cancel2 := context.WithTimeout(context.Background(), 90*time.Second)
+        defer cancel2()
+        result, err := exec.WrapETH(ctx2, toWrap)
+        if err != nil {
+                json.NewEncoder(w).Encode(map[string]interface{}{"ok": false, "error": err.Error()})
+                return
+        }
+
+        wrapF, _ := new(big.Float).SetInt(toWrap).Float64()
+        log.Printf("💎 [MANUAL WRAP] %.6f ETH → WETH | tx: %s | gas: %d", wrapF/1e18, result.TxHash, result.GasUsed)
+        json.NewEncoder(w).Encode(map[string]interface{}{
+                "ok":        true,
+                "txHash":    result.TxHash,
+                "gasUsed":   result.GasUsed,
+                "wethAdded": wrapF / 1e18,
+        })
+}
 
 // ── On-chain swap helpers (live mode) ────────────────────────────────────────
 

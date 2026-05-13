@@ -265,6 +265,56 @@ func (e *Executor) GetWETHBalanceWei(ctx context.Context) (*big.Int, error) {
         return e.getTokenBalance(ctx, WETHAddr, wallet)
 }
 
+// WrapETH calls WETH.deposit() to convert native ETH → WETH.
+// amountWei is the exact amount to wrap; caller is responsible for leaving a gas reserve.
+func (e *Executor) WrapETH(ctx context.Context, amountWei *big.Int) (*SwapResult, error) {
+        if amountWei == nil || amountWei.Sign() <= 0 {
+                return nil, fmt.Errorf("WrapETH: amount must be positive")
+        }
+        privKey, err := loadPrivKey()
+        if err != nil {
+                return nil, fmt.Errorf("WrapETH: %w", err)
+        }
+        walletAddr, err := e.walletAddress()
+        if err != nil {
+                return nil, fmt.Errorf("WrapETH wallet: %w", err)
+        }
+
+        // WETH deposit() selector: 0xd0e30db0 (no arguments, ETH sent as value)
+        data := []byte{0xd0, 0xe3, 0x0d, 0xb0}
+
+        nonce, err := e.rpc.getNonce(ctx, walletAddr)
+        if err != nil {
+                return nil, fmt.Errorf("WrapETH nonce: %w", err)
+        }
+        priorityFee, maxFee := e.queryGasPrice(ctx)
+
+        rawTx, err := buildAndSignTx(
+                big.NewInt(BaseChainID), nonce,
+                priorityFee, maxFee,
+                big.NewInt(50_000), // WETH deposit is cheap (~25k gas, 50k to be safe)
+                WETHAddr, amountWei, data, privKey,
+        )
+        if err != nil {
+                return nil, fmt.Errorf("WrapETH sign: %w", err)
+        }
+        txHash, err := e.rpc.sendRawTx(ctx, rawTx)
+        if err != nil {
+                return nil, fmt.Errorf("WrapETH send: %w", err)
+        }
+        receipt, err := e.rpc.waitReceipt(ctx, txHash, 60*time.Second)
+        if err != nil {
+                return nil, fmt.Errorf("WrapETH receipt: %w", err)
+        }
+        if receipt.Status == "0x0" {
+                return nil, fmt.Errorf("WrapETH tx reverted (txHash=%s)", txHash)
+        }
+        gasUsed := new(big.Int)
+        gasUsed.SetString(strings.TrimPrefix(receipt.GasUsed, "0x"), 16)
+        log.Printf("💎 [WRAP] %.6f ETH → WETH tx=%s… gas=%d", float64(amountWei.Int64())/1e18, txHash[:12], gasUsed.Uint64())
+        return &SwapResult{TxHash: txHash, GasUsed: gasUsed.Uint64()}, nil
+}
+
 // GetTokenBalanceWei returns any ERC20 token balance in its native decimals.
 func (e *Executor) GetTokenBalanceWei(ctx context.Context, tokenAddr string) (*big.Int, error) {
         wallet, err := e.walletAddress()
