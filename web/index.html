@@ -73,6 +73,12 @@ input:focus,select:focus{outline:none;border-color:#00ffcc55;}
 .btn-sim{background:linear-gradient(135deg,#ffaa00,#cc8800);color:#0a0a0f;}
 .btn-sim:hover{box-shadow:0 3px 14px #ffaa0044;}
 .btn-sm{padding:7px 13px;font-size:11px;}
+/* ── Toggle Button ── */
+.btn-toggle{min-width:160px;font-size:14px;padding:11px 28px;border-radius:9px;letter-spacing:.5px;}
+.live-mode-wrap{display:flex;align-items:center;gap:6px;font-size:11px;color:#666;cursor:pointer;user-select:none;padding:4px 8px;border-radius:6px;border:1px solid #1e1e35;transition:all .2s;}
+.live-mode-wrap:hover{color:#ff3366;border-color:#ff336633;}
+.live-mode-wrap input{width:14px;height:14px;accent-color:#ff3366;cursor:pointer;}
+.live-mode-wrap.active{color:#ff3366;border-color:#ff336655;background:#ff33660a;}
 .btn-gray{background:#1e1e35;color:#888;border:1px solid #2a2a4a;}.btn-gray:hover{color:#00ffcc;}
 .btn-blue{background:linear-gradient(135deg,#4285f4,#1a5cc8);color:#fff;}
 .btn-blue:hover{box-shadow:0 3px 14px #4285f444;}
@@ -361,43 +367,12 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
     </div>
     <hr>
     <div class="btn-row">
-      <button class="btn btn-green" id="startLiveBtn">▶ START LIVE</button>
-      <button class="btn btn-sim" id="startSimBtn">🧪 START SIM</button>
-      <button class="btn btn-stop" id="stopBtn">■ STOP</button>
+      <button class="btn btn-sim btn-toggle" id="toggleBtn">▶ START SIM</button>
+      <label class="live-mode-wrap" id="liveModeWrap" title="Switch to Live trading (uses real wallet)">
+        <input type="checkbox" id="liveModeCheck"> ⚡ LIVE MODE
+      </label>
       <button class="btn btn-gray btn-sm" id="resetStatsBtn">↺ Reset Stats</button>
       <button class="btn btn-gray btn-sm" id="withdrawBtn">💰 Withdraw</button>
-    </div>
-  </div>
-
-  <!-- AI Signals -->
-  <div class="panel">
-    <div class="panel-title">🤖 AI Engine</div>
-    <div class="ai-signals">
-      <div class="ai-card ai-gemini">
-        <div class="ai-name">🔵 GEMINI</div>
-        <div class="ai-signal signal-hold" id="geminiSignal">HOLD</div>
-        <div class="ai-conf" id="geminiConf">—</div>
-      </div>
-      <div class="ai-card ai-groq">
-        <div class="ai-name">🟡 GROQ</div>
-        <div class="ai-signal signal-hold" id="groqSignal">HOLD</div>
-        <div class="ai-conf" id="groqConf">—</div>
-      </div>
-      <div class="ai-card ai-huangfing">
-        <div class="ai-name">🟣 HUANGFING</div>
-        <div class="ai-signal signal-hold" id="huangfingSignal">HOLD</div>
-        <div class="ai-conf" id="huangfingConf">—</div>
-      </div>
-    </div>
-    <div class="consensus-bar">
-      <div>
-        <div class="consensus-label">Final Decision</div>
-        <div class="consensus-value" id="finalDecision"><span class="signal-hold">HOLD</span></div>
-      </div>
-      <div style="text-align:right;">
-        <div class="consensus-label">Consensus Score</div>
-        <div class="consensus-value" id="consensusScore">0%</div>
-      </div>
     </div>
   </div>
 
@@ -495,6 +470,38 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
       <div class="rpc-item"><span class="rpc-dot rpc-unknown"></span><span>Checking...</span></div>
     </div>
   </div>
+  <!-- AI Engine (moved from Dashboard) -->
+  <div class="panel">
+    <div class="panel-title">🤖 AI Engine — Last Decision</div>
+    <div class="ai-signals">
+      <div class="ai-card ai-gemini">
+        <div class="ai-name">🔵 GEMINI</div>
+        <div class="ai-signal signal-hold" id="geminiSignal">HOLD</div>
+        <div class="ai-conf" id="geminiConf">—</div>
+      </div>
+      <div class="ai-card ai-groq">
+        <div class="ai-name">🟡 GROQ</div>
+        <div class="ai-signal signal-hold" id="groqSignal">HOLD</div>
+        <div class="ai-conf" id="groqConf">—</div>
+      </div>
+      <div class="ai-card ai-huangfing">
+        <div class="ai-name">🟣 HUANGFING</div>
+        <div class="ai-signal signal-hold" id="huangfingSignal">HOLD</div>
+        <div class="ai-conf" id="huangfingConf">—</div>
+      </div>
+    </div>
+    <div class="consensus-bar">
+      <div>
+        <div class="consensus-label">Final Decision</div>
+        <div class="consensus-value" id="finalDecision"><span class="signal-hold">HOLD</span></div>
+      </div>
+      <div style="text-align:right;">
+        <div class="consensus-label">Consensus Score</div>
+        <div class="consensus-value" id="consensusScore">0%</div>
+      </div>
+    </div>
+  </div>
+
   <div class="panel">
     <div class="panel-hdr">
       <div class="panel-title" style="margin:0;">📋 Live Log</div>
@@ -1082,10 +1089,30 @@ function updateBotBadge(running, simMode) {
   badge.textContent = running ? 'RUNNING' : 'STOPPED';
   badge.className   = 'badge badge-bot ' + (running ? 'running' : 'stopped');
   simB.style.display = (running && simMode) ? '' : 'none';
-  // Hide data source badge when bot stops
   if (!running) {
     const srcBadge = document.getElementById('dataSrcBadge');
     if (srcBadge) srcBadge.style.display = 'none';
+  }
+  updateToggleBtn(running);
+}
+
+// ── Toggle button (Start/Stop) ────────────────────────────────────────────────
+function updateToggleBtn(running) {
+  const btn  = document.getElementById('toggleBtn');
+  const wrap = document.getElementById('liveModeWrap');
+  const live = document.getElementById('liveModeCheck');
+  if (!btn) return;
+  if (running) {
+    btn.textContent = '■  STOP BOT';
+    btn.className   = 'btn btn-stop btn-toggle';
+    wrap.style.opacity  = '0.35';
+    wrap.style.pointerEvents = 'none';
+  } else {
+    const isLive = live && live.checked;
+    btn.textContent = isLive ? '▶  START LIVE' : '▶  START SIM';
+    btn.className   = isLive ? 'btn btn-green btn-toggle' : 'btn btn-sim btn-toggle';
+    wrap.style.opacity  = '1';
+    wrap.style.pointerEvents = 'auto';
   }
 }
 
@@ -1278,9 +1305,24 @@ function buildConfig() {
 }
 
 // ── Button bindings ───────────────────────────────────────────────────────────
-document.getElementById('startLiveBtn').onclick = () => { send('start', {config:buildConfig(), simMode:false}); addLog('Starting bot in LIVE mode...','info'); };
-document.getElementById('startSimBtn').onclick  = () => { send('start', {config:buildConfig(), simMode:true});  addLog('Starting bot in SIMULATION mode...','warning'); };
-document.getElementById('stopBtn').onclick      = () => send('stop');
+// Toggle button — Start / Stop
+document.getElementById('toggleBtn').onclick = () => {
+  const isRunning = document.getElementById('botBadge').classList.contains('running');
+  if (isRunning) {
+    send('stop');
+    addLog('Stopping bot...', 'warning');
+  } else {
+    const isLive = document.getElementById('liveModeCheck').checked;
+    send('start', {config: buildConfig(), simMode: !isLive});
+    addLog(isLive ? '⚡ Starting LIVE mode...' : '🧪 Starting SIMULATION mode...', isLive ? 'error' : 'warning');
+  }
+};
+// Live mode toggle changes button label
+document.getElementById('liveModeCheck').onchange = function() {
+  const wrap = document.getElementById('liveModeWrap');
+  wrap.className = 'live-mode-wrap' + (this.checked ? ' active' : '');
+  updateToggleBtn(document.getElementById('botBadge').classList.contains('running'));
+};
 document.getElementById('withdrawBtn').onclick  = () => send('withdraw');
 document.getElementById('resetStatsBtn').onclick = () => {
   send('reset_stats');
