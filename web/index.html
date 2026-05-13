@@ -207,6 +207,21 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
 .key-badge.limited{color:#ff5500;border-color:#ff550044;background:#ff55000a;}
 .key-pool-fallback{font-size:10px;color:#ffaa00;margin-left:4px;display:none;}
 .key-pool-fallback.active{display:inline;}
+/* ── Pool Stats Table ── */
+.pool-table{width:100%;border-collapse:collapse;font-size:12px;margin-top:8px;}
+.pool-table th{text-align:left;padding:7px 10px;color:#555;font-weight:600;border-bottom:1px solid #1e1e2e;letter-spacing:.4px;font-size:10px;text-transform:uppercase;}
+.pool-table td{padding:8px 10px;border-bottom:1px solid #0d0d1a;vertical-align:middle;}
+.pool-table tr:last-child td{border-bottom:none;}
+.pool-table tr:hover td{background:#0a0a14;}
+.pool-status-ok{color:#00ffcc;font-weight:bold;}
+.pool-status-limited{color:#ff5500;font-weight:bold;}
+.pool-hit-zero{color:#444;}
+.pool-hit-some{color:#ffaa00;}
+.pool-hit-many{color:#ff3366;}
+.pool-cooldown-bar{display:inline-block;height:6px;border-radius:3px;background:linear-gradient(90deg,#ff5500,#ff3300);vertical-align:middle;margin-right:5px;}
+.pool-summary-ok{color:#00ffcc;}
+.pool-summary-warn{color:#ffaa00;}
+.pool-summary-crit{color:#ff3366;}
 @media(max-width:900px){.stats-split{grid-template-columns:1fr;}}
 @media(max-width:640px){
   .ai-signals{grid-template-columns:1fr;}
@@ -560,6 +575,33 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
       <div class="rpc-item"><span class="rpc-dot rpc-unknown"></span><span>Checking...</span></div>
     </div>
   </div>
+  <!-- Gemini Key Pool — detailed stats table -->
+  <div class="panel" id="geminiPoolPanel" style="display:none;">
+    <div class="panel-hdr">
+      <div class="panel-title" style="margin:0;">🔑 Gemini API Key Pool</div>
+      <div id="geminiPoolSummary" style="font-size:11px;color:#555;"></div>
+    </div>
+    <table class="pool-table" id="geminiPoolTable">
+      <thead>
+        <tr>
+          <th>Key</th>
+          <th>Status</th>
+          <th>Cooldown</th>
+          <th>429 Hits</th>
+          <th>Last Throttled</th>
+        </tr>
+      </thead>
+      <tbody id="geminiPoolBody">
+        <tr><td colspan="5" style="text-align:center;color:#444;padding:14px;">No Gemini keys configured</td></tr>
+      </tbody>
+    </table>
+    <div style="margin-top:10px;font-size:10px;color:#444;line-height:1.7;">
+      <b style="color:#555;">How rotation works:</b><br>
+      Keys are tried in round-robin order. A key that returns 429 is suspended for 60 s before being retried.
+      When all keys are limited, Groq + Huangfing take over with boosted vote weights.
+    </div>
+  </div>
+
   <!-- AI Engine (moved from Dashboard) -->
   <div class="panel">
     <div class="panel-title">🤖 AI Engine — Last Decision</div>
@@ -1078,6 +1120,7 @@ function handleMsg(msg) {
     case 'ai_update':
       if (d.ai) {
         updateAI(d.ai);
+        if (d.ai.geminiPool) updateGeminiPoolDetail(d.ai.geminiPool);
         // Log AI decision to activity panel
         const votes = [];
         ['gemini','groq','huangfing'].forEach(p => {
@@ -1286,6 +1329,52 @@ function updateAI(ai) {
     const allLimited = (pool.available === 0);
     fallback.className = 'key-pool-fallback' + (allLimited ? ' active' : '');
   }
+}
+
+// ── Gemini Key Pool Detail Table ──────────────────────────────────────────────
+function updateGeminiPoolDetail(pool) {
+  if (!pool || pool.total === 0) return;
+  const panel   = document.getElementById('geminiPoolPanel');
+  const body    = document.getElementById('geminiPoolBody');
+  const summary = document.getElementById('geminiPoolSummary');
+  if (!panel || !body) return;
+
+  panel.style.display = '';
+
+  // Summary line
+  const avail = pool.available || 0;
+  const total = pool.total || 0;
+  let sumCls = 'pool-summary-ok';
+  if (avail === 0) sumCls = 'pool-summary-crit';
+  else if (avail < total) sumCls = 'pool-summary-warn';
+  const fallbackNote = avail === 0 ? ' — ⚡ Groq+Huangfing fallback active' : '';
+  summary.innerHTML = `<span class="${sumCls}">${avail}/${total} ready${fallbackNote}</span>`;
+
+  const detail = pool.detail || [];
+  if (detail.length === 0) return;
+
+  body.innerHTML = '';
+  detail.forEach(k => {
+    const isLimited = k.status === 'limited';
+    const hitCls    = k.hit_count === 0 ? 'pool-hit-zero' : k.hit_count < 5 ? 'pool-hit-some' : 'pool-hit-many';
+
+    // Cooldown bar + text
+    let cooldownHtml = '<span style="color:#444;">—</span>';
+    if (isLimited && k.cooldown_secs > 0) {
+      const pct = Math.min(100, (k.cooldown_secs / 60) * 100).toFixed(0);
+      cooldownHtml = `<span class="pool-cooldown-bar" style="width:${pct}px;max-width:50px;"></span>${k.cooldown_secs}s`;
+    }
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td style="font-weight:bold;color:#aaa;">${esc(k.label)}</td>
+      <td><span class="pool-status-${isLimited ? 'limited' : 'ok'}">${isLimited ? '⛔ LIMITED' : '✅ OK'}</span></td>
+      <td>${cooldownHtml}</td>
+      <td class="${hitCls}">${k.hit_count}</td>
+      <td style="color:#555;font-size:11px;">${esc(k.last_throttle)}</td>
+    `;
+    body.appendChild(tr);
+  });
 }
 
 // ── RPC ───────────────────────────────────────────────────────────────────────
