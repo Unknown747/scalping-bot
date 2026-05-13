@@ -103,6 +103,17 @@ var (
         botState      = &BotState{}
         clients    = make(map[*websocket.Conn]bool)
         clientsMu  sync.Mutex
+
+        // Token list cache — avoids hammering APIs on every scan iteration
+        tokenCache struct {
+                sync.Mutex
+                tokens    []data.TokenData
+                fetchedAt time.Time
+                source    string // "gecko" or "dex"
+        }
+
+        // Gecko rate-limit notification — log once, not every loop
+        geckoRLNotified bool
 )
 
 func main() {
@@ -627,19 +638,74 @@ func runBot() {
                         broadcast("log", map[string]interface{}{"message": "✅ Circuit breaker reset. Resuming...", "type": "success"})
                 }
 
-                ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-                tokens, err := geckoData.GetTopPools(ctx, "base")
-                cancel()
+                // ── Token fetch with 60s cache + Gecko rate-limit awareness ──────────
+                const cacheTTL = 60 * time.Second
+                tokenCache.Lock()
+                cacheAge := time.Since(tokenCache.fetchedAt)
+                cachedTokens := tokenCache.tokens
+                tokenCache.Unlock()
 
-                if err != nil {
-                        broadcast("log", map[string]interface{}{"message": "⚠️ GeckoTerminal error, trying DexScreener...", "type": "warning"})
-                        ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
-                        tokens, err = dexData.GetLatestTokens(ctx2, "base")
-                        cancel2()
-                        if err != nil {
-                                broadcast("log", map[string]interface{}{"message": "❌ Data fetch failed: " + err.Error(), "type": "error"})
-                                time.Sleep(5 * time.Second)
-                                continue
+                var tokens []data.TokenData
+                if cacheAge < cacheTTL && len(cachedTokens) > 0 {
+                        tokens = cachedTokens
+                } else {
+                        var fetchErr error
+                        var source string
+
+                        if !geckoData.IsRateLimited() {
+                                ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+                                tokens, fetchErr = geckoData.GetTopPools(ctx, "base")
+                                cancel()
+                                if fetchErr == nil {
+                                        source = "gecko"
+                                        geckoRLNotified = false
+                                } else if fetchErr == data.ErrRateLimited {
+                                        if !geckoRLNotified {
+                                                until := geckoData.RateLimitedUntil().Format("15:04:05")
+                                                broadcast("log", map[string]interface{}{
+                                                        "message": fmt.Sprintf("⚠️ GeckoTerminal rate limited — switching to DexScreener until %s", until),
+                                                        "type":    "warning",
+                                                })
+                                                geckoRLNotified = true
+                                        }
+                                } else {
+                                        broadcast("log", map[string]interface{}{
+                                                "message": "⚠️ GeckoTerminal error, trying DexScreener...",
+                                                "type":    "warning",
+                                        })
+                                }
+                        } else if !geckoRLNotified {
+                                until := geckoData.RateLimitedUntil().Format("15:04:05")
+                                broadcast("log", map[string]interface{}{
+                                        "message": fmt.Sprintf("⏳ GeckoTerminal cooldown — using DexScreener until %s", until),
+                                        "type":    "warning",
+                                })
+                                geckoRLNotified = true
+                        }
+
+                        if len(tokens) == 0 {
+                                ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
+                                tokens, fetchErr = dexData.GetLatestTokens(ctx2, "base")
+                                cancel2()
+                                if fetchErr != nil {
+                                        broadcast("log", map[string]interface{}{"message": "❌ Data fetch failed: " + fetchErr.Error(), "type": "error"})
+                                        time.Sleep(10 * time.Second)
+                                        continue
+                                }
+                                source = "dex"
+                        }
+
+                        if len(tokens) > 0 {
+                                tokenCache.Lock()
+                                tokenCache.tokens = tokens
+                                tokenCache.fetchedAt = time.Now()
+                                tokenCache.source = source
+                                tokenCache.Unlock()
+                                srcLabel := map[string]string{"gecko": "GeckoTerminal", "dex": "DexScreener"}[source]
+                                broadcast("log", map[string]interface{}{
+                                        "message": fmt.Sprintf("📡 %s: %d tokens loaded", srcLabel, len(tokens)),
+                                        "type":    "info",
+                                })
                         }
                 }
 

@@ -5,10 +5,14 @@ import (
         "encoding/json"
         "fmt"
         "net/http"
+        "sync"
         "time"
 )
 
 const geckoBaseURL = "https://api.geckoterminal.com/api/v2"
+
+// ErrRateLimited is returned when GeckoTerminal returns HTTP 429.
+var ErrRateLimited = fmt.Errorf("geckoterminal: rate limited (429)")
 
 type TokenData struct {
         Address       string  `json:"address"`
@@ -25,8 +29,10 @@ type TokenData struct {
 }
 
 type GeckoClient struct {
-        http    *http.Client
-        baseURL string
+        http             *http.Client
+        baseURL          string
+        mu               sync.Mutex
+        rateLimitedUntil time.Time
 }
 
 func NewGeckoClient() *GeckoClient {
@@ -36,7 +42,31 @@ func NewGeckoClient() *GeckoClient {
         }
 }
 
+// IsRateLimited returns true if Gecko is in a cooldown window.
+func (g *GeckoClient) IsRateLimited() bool {
+        g.mu.Lock()
+        defer g.mu.Unlock()
+        return time.Now().Before(g.rateLimitedUntil)
+}
+
+// RateLimitedUntil returns the time when the cooldown expires.
+func (g *GeckoClient) RateLimitedUntil() time.Time {
+        g.mu.Lock()
+        defer g.mu.Unlock()
+        return g.rateLimitedUntil
+}
+
+func (g *GeckoClient) setRateLimit(d time.Duration) {
+        g.mu.Lock()
+        defer g.mu.Unlock()
+        g.rateLimitedUntil = time.Now().Add(d)
+}
+
 func (g *GeckoClient) GetTopPools(ctx context.Context, network string) ([]TokenData, error) {
+        if g.IsRateLimited() {
+                return nil, ErrRateLimited
+        }
+
         url := fmt.Sprintf("%s/networks/%s/trending_pools?include=base_token&page=1", g.baseURL, network)
 
         req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -44,12 +74,19 @@ func (g *GeckoClient) GetTopPools(ctx context.Context, network string) ([]TokenD
                 return nil, err
         }
         req.Header.Set("Accept", "application/json")
+        req.Header.Set("User-Agent", "MemeScalperBot/2.0 (trading-bot)")
 
         resp, err := g.http.Do(req)
         if err != nil {
                 return nil, fmt.Errorf("gecko request failed: %w", err)
         }
         defer resp.Body.Close()
+
+        if resp.StatusCode == 429 {
+                // Back off for 5 minutes on rate limit
+                g.setRateLimit(5 * time.Minute)
+                return nil, ErrRateLimited
+        }
         if resp.StatusCode != 200 {
                 return nil, fmt.Errorf("geckoterminal pools API: HTTP %d", resp.StatusCode)
         }
@@ -118,6 +155,10 @@ func (g *GeckoClient) GetTopPools(ctx context.Context, network string) ([]TokenD
 }
 
 func (g *GeckoClient) GetTokenPrice(ctx context.Context, network, address string) (float64, error) {
+        if g.IsRateLimited() {
+                return 0, ErrRateLimited
+        }
+
         url := fmt.Sprintf("%s/simple/networks/%s/token_price/%s", g.baseURL, network, address)
 
         req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -125,12 +166,17 @@ func (g *GeckoClient) GetTokenPrice(ctx context.Context, network, address string
                 return 0, err
         }
         req.Header.Set("Accept", "application/json")
+        req.Header.Set("User-Agent", "MemeScalperBot/2.0 (trading-bot)")
 
         resp, err := g.http.Do(req)
         if err != nil {
                 return 0, fmt.Errorf("price fetch failed: %w", err)
         }
         defer resp.Body.Close()
+        if resp.StatusCode == 429 {
+                g.setRateLimit(5 * time.Minute)
+                return 0, ErrRateLimited
+        }
         if resp.StatusCode != 200 {
                 return 0, fmt.Errorf("geckoterminal price API: HTTP %d", resp.StatusCode)
         }
