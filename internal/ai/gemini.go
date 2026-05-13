@@ -1,101 +1,130 @@
 package ai
 
 import (
-        "bytes"
-        "context"
-        "encoding/json"
-        "fmt"
-        "net/http"
-        "os"
-        "strings"
-        "time"
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strings"
+	"time"
 )
 
 type GeminiClient struct {
-        apiKey  string
-        model   string
-        timeout time.Duration
-        http    *http.Client
+	pool    *GeminiKeyPool
+	model   string
+	timeout time.Duration
+	http    *http.Client
 }
 
+// NewGeminiClient creates a client backed by a multi-key pool.
+// Keys are read from GEMINI_API_KEY (comma-separated) and
+// GEMINI_API_KEY_2 … GEMINI_API_KEY_9.
+// A key that returns HTTP 429 is suspended for keyCooldown before being retried.
 func NewGeminiClient(model string, timeoutSecs int) *GeminiClient {
-        return &GeminiClient{
-                apiKey:  os.Getenv("GEMINI_API_KEY"),
-                model:   model,
-                timeout: time.Duration(timeoutSecs) * time.Second,
-                http:    &http.Client{Timeout: time.Duration(timeoutSecs) * time.Second},
-        }
+	return &GeminiClient{
+		pool:    newGeminiKeyPool(60 * time.Second),
+		model:   model,
+		timeout: time.Duration(timeoutSecs) * time.Second,
+		http:    &http.Client{Timeout: time.Duration(timeoutSecs) * time.Second},
+	}
 }
+
+// KeyPool exposes the underlying pool so the orchestrator can report its status.
+func (g *GeminiClient) KeyPool() *GeminiKeyPool { return g.pool }
 
 func (g *GeminiClient) Analyze(ctx context.Context, tokenAddress string, marketData map[string]interface{}) map[string]*TradingDecision {
-        if g.apiKey == "" {
-                return map[string]*TradingDecision{"gemini": {Action: "HOLD", Confidence: 0, Reasoning: "no API key"}}
-        }
+	if g.pool.Size() == 0 {
+		return map[string]*TradingDecision{"gemini": {Action: "HOLD", Confidence: 0, Reasoning: "no API key configured"}}
+	}
 
-        prompt := buildPrompt(tokenAddress, marketData)
+	prompt := buildPrompt(tokenAddress, marketData)
 
-        reqBody := map[string]interface{}{
-                "contents": []map[string]interface{}{
-                        {
-                                "parts": []map[string]interface{}{
-                                        {"text": prompt},
-                                },
-                        },
-                },
-                "generationConfig": map[string]interface{}{
-                        "temperature":     0.3,
-                        "maxOutputTokens": 500,
-                },
-        }
+	reqBody := map[string]interface{}{
+		"contents": []map[string]interface{}{
+			{
+				"parts": []map[string]interface{}{
+					{"text": prompt},
+				},
+			},
+		},
+		"generationConfig": map[string]interface{}{
+			"temperature":     0.3,
+			"maxOutputTokens": 500,
+		},
+	}
+	data, _ := json.Marshal(reqBody)
 
-        data, _ := json.Marshal(reqBody)
-        url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", g.model, g.apiKey)
+	// Try each available key in round-robin order; skip keys that are cooling down.
+	for {
+		key, keyNum := g.pool.NextAvailableKey()
+		if key == "" {
+			// All keys exhausted — signal fallback providers (Groq / Huangfing) to take over.
+			return map[string]*TradingDecision{"gemini": {
+				Action:     "HOLD",
+				Confidence: 0,
+				Reasoning:  "all_keys_rate_limited",
+			}}
+		}
 
-        req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(data))
-        if err != nil {
-                return map[string]*TradingDecision{"gemini": {Action: "HOLD", Confidence: 0, Reasoning: err.Error()}}
-        }
-        req.Header.Set("Content-Type", "application/json")
+		url := fmt.Sprintf(
+			"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
+			g.model, key,
+		)
 
-        resp, err := g.http.Do(req)
-        if err != nil {
-                return map[string]*TradingDecision{"gemini": {Action: "HOLD", Confidence: 0, Reasoning: err.Error()}}
-        }
-        defer resp.Body.Close()
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewBuffer(data))
+		if err != nil {
+			return map[string]*TradingDecision{"gemini": {Action: "HOLD", Confidence: 0, Reasoning: err.Error()}}
+		}
+		req.Header.Set("Content-Type", "application/json")
 
-        if resp.StatusCode == 429 {
-                return map[string]*TradingDecision{"gemini": {Action: "HOLD", Confidence: 0, Reasoning: "quota exceeded"}}
-        }
-        if resp.StatusCode != 200 {
-                return map[string]*TradingDecision{"gemini": {Action: "HOLD", Confidence: 0, Reasoning: fmt.Sprintf("HTTP %d", resp.StatusCode)}}
-        }
+		resp, err := g.http.Do(req)
+		if err != nil {
+			// Network error on this key — treat as transient, don't mark limited
+			return map[string]*TradingDecision{"gemini": {Action: "HOLD", Confidence: 0, Reasoning: "network error: " + err.Error()}}
+		}
+		defer resp.Body.Close()
 
-        var result struct {
-                Candidates []struct {
-                        Content struct {
-                                Parts []struct {
-                                        Text string `json:"text"`
-                                } `json:"parts"`
-                        } `json:"content"`
-                } `json:"candidates"`
-        }
+		if resp.StatusCode == 429 {
+			// Rate-limited — suspend this key and loop to next
+			g.pool.MarkRateLimited(key)
+			continue
+		}
+		if resp.StatusCode != 200 {
+			return map[string]*TradingDecision{"gemini": {
+				Action:     "HOLD",
+				Confidence: 0,
+				Reasoning:  fmt.Sprintf("HTTP %d (key#%d)", resp.StatusCode, keyNum),
+			}}
+		}
 
-        if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-                return map[string]*TradingDecision{"gemini": {Action: "HOLD", Confidence: 0, Reasoning: "parse error"}}
-        }
+		var result struct {
+			Candidates []struct {
+				Content struct {
+					Parts []struct {
+						Text string `json:"text"`
+					} `json:"parts"`
+				} `json:"content"`
+			} `json:"candidates"`
+		}
 
-        if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
-                return map[string]*TradingDecision{"gemini": {Action: "HOLD", Confidence: 0, Reasoning: "empty response"}}
-        }
+		if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+			return map[string]*TradingDecision{"gemini": {Action: "HOLD", Confidence: 0, Reasoning: "parse error"}}
+		}
 
-        text := result.Candidates[0].Content.Parts[0].Text
-        decision := parseAIResponse("gemini", text, tokenAddress)
-        return map[string]*TradingDecision{"gemini": decision}
+		if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
+			return map[string]*TradingDecision{"gemini": {Action: "HOLD", Confidence: 0, Reasoning: "empty response"}}
+		}
+
+		text := result.Candidates[0].Content.Parts[0].Text
+		decision := parseAIResponse("gemini", text, tokenAddress)
+		return map[string]*TradingDecision{"gemini": decision}
+	}
 }
 
 func buildPrompt(tokenAddress string, data map[string]interface{}) string {
-        dataJSON, _ := json.Marshal(data)
-        return fmt.Sprintf(`You are an expert crypto scalping AI on Base Network.
+	dataJSON, _ := json.Marshal(data)
+	return fmt.Sprintf(`You are an expert crypto scalping AI on Base Network.
 Analyze this token and market data, then give a trading decision.
 
 Token: %s
@@ -112,34 +141,33 @@ Rules:
 }
 
 func parseAIResponse(provider, text, tokenAddress string) *TradingDecision {
-        text = strings.TrimSpace(text)
+	text = strings.TrimSpace(text)
 
-        start := strings.Index(text, "{")
-        end := strings.LastIndex(text, "}")
-        if start != -1 && end != -1 && end > start {
-                text = text[start : end+1]
-        }
+	start := strings.Index(text, "{")
+	end := strings.LastIndex(text, "}")
+	if start != -1 && end != -1 && end > start {
+		text = text[start : end+1]
+	}
 
-        var parsed struct {
-                Action     string  `json:"action"`
-                Confidence float64 `json:"confidence"`
-                Reasoning  string  `json:"reasoning"`
-        }
+	var parsed struct {
+		Action     string  `json:"action"`
+		Confidence float64 `json:"confidence"`
+		Reasoning  string  `json:"reasoning"`
+	}
 
-        if err := json.Unmarshal([]byte(text), &parsed); err != nil {
-                return &TradingDecision{Action: "HOLD", Confidence: 50, Reasoning: "parse error: " + text[:min(50, len(text))], TokenAddress: tokenAddress}
-        }
+	if err := json.Unmarshal([]byte(text), &parsed); err != nil {
+		return &TradingDecision{Action: "HOLD", Confidence: 50, Reasoning: "parse error: " + text[:min(50, len(text))], TokenAddress: tokenAddress}
+	}
 
-        action := strings.ToUpper(parsed.Action)
-        if action != "BUY" && action != "SELL" && action != "HOLD" {
-                action = "HOLD"
-        }
+	action := strings.ToUpper(parsed.Action)
+	if action != "BUY" && action != "SELL" && action != "HOLD" {
+		action = "HOLD"
+	}
 
-        return &TradingDecision{
-                Action:       action,
-                Confidence:   parsed.Confidence,
-                Reasoning:    parsed.Reasoning,
-                TokenAddress: tokenAddress,
-        }
+	return &TradingDecision{
+		Action:       action,
+		Confidence:   parsed.Confidence,
+		Reasoning:    parsed.Reasoning,
+		TokenAddress: tokenAddress,
+	}
 }
-

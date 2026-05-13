@@ -1622,10 +1622,12 @@ func broadcastLoop() {
 
 func broadcastAIUpdate(decision *ai.TradingDecision, tokenAddr, tokenSymbol string) {
         lastDecisions := aiOrch.GetLastDecisions()
+        poolInfo := aiOrch.GetGeminiPoolInfo()
 
         aiData := map[string]interface{}{
                 "finalDecision": decision.Action,
                 "consensus":     fmt.Sprintf("%.0f", decision.Confidence),
+                "geminiPool":    poolInfo,
         }
 
         for provider, d := range lastDecisions {

@@ -45,8 +45,11 @@ Set these in Replit Secrets:
 | `BOT_PASSWORD` | Yes | Password for the web dashboard login |
 | `WALLET_ADDRESS` | For live trading | Your Base Network wallet address |
 | `WALLET_PRIVATE_KEY` | For live trading | Your wallet private key |
-| `GEMINI_API_KEY` | Optional | Google Gemini AI key |
-| `GROQ_API_KEY` | Optional | Groq AI key |
+| `GEMINI_API_KEY` | Optional | Google Gemini AI — supports comma-separated list `key1,key2,key3` for multi-key rotation |
+| `GEMINI_API_KEY_2` | Optional | Gemini key #2 (alternative to comma-separated) |
+| `GEMINI_API_KEY_3` | Optional | Gemini key #3 |
+| `GEMINI_API_KEY_4` | Optional | Gemini key #4 (up to `GEMINI_API_KEY_9` supported) |
+| `GROQ_API_KEY` | Optional | Groq AI key — auto-activated as fallback when all Gemini keys are rate-limited |
 | `OPENROUTER_API_KEY` | Optional | OpenRouter AI key |
 | `TOGETHER_API_KEY` | Optional | Together AI key |
 | `HUANGFING_API_KEY` | Optional | Huangfing AI key |

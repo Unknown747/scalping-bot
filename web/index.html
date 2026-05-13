@@ -198,6 +198,15 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
 .btn-emergency.pulsing{animation:emergPulse 1.4s ease-in-out infinite;}
 /* ── Wallet hint ── */
 .wallet-hint{font-size:9px;color:#ffaa0077;margin-top:2px;letter-spacing:.3px;}
+/* ── Gemini Key Pool ── */
+.key-pool-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;padding-top:8px;border-top:1px solid #1e1e2e;}
+.key-pool-label{font-size:10px;color:#555;letter-spacing:.4px;white-space:nowrap;}
+.key-pool-keys{display:flex;gap:5px;flex-wrap:wrap;}
+.key-badge{font-size:10px;padding:2px 7px;border-radius:4px;border:1px solid;font-weight:bold;letter-spacing:.3px;}
+.key-badge.ok{color:#00ffcc;border-color:#00ffcc44;background:#00ffcc0a;}
+.key-badge.limited{color:#ff5500;border-color:#ff550044;background:#ff55000a;}
+.key-pool-fallback{font-size:10px;color:#ffaa00;margin-left:4px;display:none;}
+.key-pool-fallback.active{display:inline;}
 @media(max-width:900px){.stats-split{grid-template-columns:1fr;}}
 @media(max-width:640px){
   .ai-signals{grid-template-columns:1fr;}
@@ -580,6 +589,12 @@ tbody td{padding:9px 12px;color:#ccc;white-space:nowrap;}
         <div class="consensus-label">Consensus Score</div>
         <div class="consensus-value" id="consensusScore">0%</div>
       </div>
+    </div>
+    <!-- Gemini Key Pool Status -->
+    <div class="key-pool-row" id="keyPoolRow" style="display:none;">
+      <span class="key-pool-label">🔑 GEMINI KEYS:</span>
+      <div class="key-pool-keys" id="keyPoolKeys"></div>
+      <span class="key-pool-fallback" id="keyPoolFallback">⚡ Groq+Huangfing active</span>
     </div>
   </div>
 
@@ -1226,8 +1241,15 @@ function updateAI(ai) {
     if (!ai[p]) return;
     const sig  = document.getElementById(p + 'Signal');
     const conf = document.getElementById(p + 'Conf');
-    if (sig)  { sig.textContent = ai[p].signal || 'HOLD'; sig.className = 'ai-signal ' + sigClass(ai[p].signal); }
-    if (conf)   conf.textContent = ai[p].confidence || '—';
+    if (sig) {
+      const s = ai[p].signal || 'HOLD';
+      // Show ALL_LIMITED badge on Gemini card when all keys exhausted
+      sig.textContent = (p === 'gemini' && s === 'HOLD' && ai[p].confidence === '0%')
+        ? (ai.geminiPool && ai.geminiPool.available === 0 ? 'LIMITED' : 'HOLD')
+        : s;
+      sig.className = 'ai-signal ' + sigClass(s);
+    }
+    if (conf) conf.textContent = ai[p].confidence || '—';
   });
   if (ai.finalDecision) {
     const el   = document.getElementById('finalDecision');
@@ -1235,6 +1257,35 @@ function updateAI(ai) {
     el.innerHTML = `<span class="${sigClass(safe)}">${safe}</span>`;
   }
   if (ai.consensus !== undefined) setText('consensusScore', ai.consensus + '%');
+
+  // ── Gemini key pool status widget ─────────────────────────────────────
+  const pool = ai.geminiPool;
+  if (pool && pool.total > 0) {
+    const row       = document.getElementById('keyPoolRow');
+    const keysDiv   = document.getElementById('keyPoolKeys');
+    const fallback  = document.getElementById('keyPoolFallback');
+    if (!row) return;
+    row.style.display = '';
+
+    // Rebuild key badges
+    keysDiv.innerHTML = '';
+    const keys = pool.keys || {};
+    Object.keys(keys).sort().forEach(label => {
+      const state = keys[label];
+      const isLimited = state.startsWith('limited');
+      const badge = document.createElement('span');
+      badge.className = 'key-badge ' + (isLimited ? 'limited' : 'ok');
+      badge.title     = label + ': ' + state;
+      badge.textContent = isLimited
+        ? label + ' ⏳' + state.replace('limited(', '').replace(')', 's')
+        : label + ' ✓';
+      keysDiv.appendChild(badge);
+    });
+
+    // Show fallback notice when all keys are limited
+    const allLimited = (pool.available === 0);
+    fallback.className = 'key-pool-fallback' + (allLimited ? ' active' : '');
+  }
 }
 
 // ── RPC ───────────────────────────────────────────────────────────────────────
