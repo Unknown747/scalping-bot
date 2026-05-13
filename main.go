@@ -145,6 +145,8 @@ func main() {
         aiOrch = ai.NewOrchestrator(
                 cfg.AIConfig.Gemini.Model, cfg.AIConfig.Gemini.TimeoutSeconds,
                 cfg.AIConfig.Groq.Model, cfg.AIConfig.Groq.TimeoutSeconds,
+                cfg.AIConfig.OpenRouter.Model, cfg.AIConfig.OpenRouter.TimeoutSeconds,
+                cfg.AIConfig.Together.Model, cfg.AIConfig.Together.TimeoutSeconds,
                 cfg.AIConfig.Huangfing.BaseURL, cfg.AIConfig.Huangfing.Model, cfg.AIConfig.Huangfing.TimeoutSeconds,
                 weights,
         )

@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"os"
 	"time"
@@ -42,8 +44,9 @@ func (t *TogetherClient) Analyze(ctx context.Context, tokenAddress string, marke
 
 	data, _ := json.Marshal(reqBody)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		"https://api.together.xyz/v1/chat/completions", bytes.NewBuffer(data))
+		"https://api.together.ai/v1/chat/completions", bytes.NewBuffer(data))
 	if err != nil {
+		log.Printf("🤖 Together ERR: build request: %v", err)
 		return map[string]*TradingDecision{"together": {Action: "HOLD", Confidence: 0, Reasoning: err.Error()}}
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -51,14 +54,23 @@ func (t *TogetherClient) Analyze(ctx context.Context, tokenAddress string, marke
 
 	resp, err := t.http.Do(req)
 	if err != nil {
-		return map[string]*TradingDecision{"together": {Action: "HOLD", Confidence: 0, Reasoning: "network error"}}
+		log.Printf("🤖 Together ERR: network: %v", err)
+		return map[string]*TradingDecision{"together": {Action: "HOLD", Confidence: 0, Reasoning: "network: " + err.Error()}}
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+
 	if resp.StatusCode == 429 {
+		log.Printf("🤖 Together ERR: rate limited (429)")
 		return map[string]*TradingDecision{"together": {Action: "HOLD", Confidence: 0, Reasoning: "rate limited"}}
 	}
 	if resp.StatusCode != 200 {
+		snippet := string(body)
+		if len(snippet) > 200 {
+			snippet = snippet[:200]
+		}
+		log.Printf("🤖 Together ERR: HTTP %d | model=%s | body=%s", resp.StatusCode, t.model, snippet)
 		return map[string]*TradingDecision{"together": {Action: "HOLD", Confidence: 0, Reasoning: fmt.Sprintf("HTTP %d", resp.StatusCode)}}
 	}
 
@@ -69,10 +81,12 @@ func (t *TogetherClient) Analyze(ctx context.Context, tokenAddress string, marke
 			} `json:"message"`
 		} `json:"choices"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
+		log.Printf("🤖 Together ERR: parse: %v | body=%s", err, string(body)[:min(200, len(body))])
 		return map[string]*TradingDecision{"together": {Action: "HOLD", Confidence: 0, Reasoning: "parse error"}}
 	}
 	if len(result.Choices) == 0 {
+		log.Printf("🤖 Together ERR: empty choices | body=%s", string(body)[:min(200, len(body))])
 		return map[string]*TradingDecision{"together": {Action: "HOLD", Confidence: 0, Reasoning: "empty response"}}
 	}
 

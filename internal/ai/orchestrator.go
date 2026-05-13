@@ -48,6 +48,8 @@ type AIOrchestrator struct {
 func NewOrchestrator(
         geminiModel string, geminiTimeout int,
         groqModel string, groqTimeout int,
+        openrouterModel string, openrouterTimeout int,
+        togetherModel string, togetherTimeout int,
         huangfingURL, huangfingModel string, huangfingTimeout int,
         weights map[string]float64,
 ) *AIOrchestrator {
@@ -55,8 +57,8 @@ func NewOrchestrator(
         return &AIOrchestrator{
                 gemini:        g,
                 groq:          NewGroqClient(groqModel, groqTimeout),
-                openrouter:    NewOpenRouterClient("meta-llama/llama-3.2-3b-instruct:free", 8),
-                together:      NewTogetherClient("meta-llama/Llama-3.2-3B-Instruct-Turbo", 8),
+                openrouter:    NewOpenRouterClient(openrouterModel, openrouterTimeout),
+                together:      NewTogetherClient(togetherModel, togetherTimeout),
                 huangfing:     NewHuangfingClient(huangfingURL, huangfingModel, huangfingTimeout),
                 weights:       weights,
                 LastDecisions: make(map[string]*TradingDecision),

@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -80,7 +82,7 @@ func (g *GeminiClient) Analyze(ctx context.Context, tokenAddress string, marketD
 
 		resp, err := g.http.Do(req)
 		if err != nil {
-			// Network error on this key — treat as transient, don't mark limited
+			log.Printf("🤖 Gemini ERR: network (key#%d): %v", keyNum, err)
 			return map[string]*TradingDecision{"gemini": {Action: "HOLD", Confidence: 0, Reasoning: "network error: " + err.Error()}}
 		}
 		defer resp.Body.Close()
@@ -91,6 +93,13 @@ func (g *GeminiClient) Analyze(ctx context.Context, tokenAddress string, marketD
 			continue
 		}
 		if resp.StatusCode != 200 {
+			errBody, _ := io.ReadAll(resp.Body)
+			snippet := string(errBody)
+			if len(snippet) > 300 {
+				snippet = snippet[:300]
+			}
+			log.Printf("🤖 Gemini ERR: HTTP %d (key#%d) model=%s | %s",
+				resp.StatusCode, keyNum, g.model, snippet)
 			return map[string]*TradingDecision{"gemini": {
 				Action:     "HOLD",
 				Confidence: 0,

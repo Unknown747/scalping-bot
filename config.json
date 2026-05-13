@@ -112,18 +112,18 @@
       "model": "meta-llama/llama-3.2-3b-instruct:free",
       "temperature": 0.2,
       "max_tokens": 300,
-      "timeout_seconds": 8,
+      "timeout_seconds": 10,
       "priority": 3,
-      "note": "Set OPENROUTER_API_KEY — free models available at openrouter.ai"
+      "note": "Set OPENROUTER_API_KEY — free models at openrouter.ai"
     },
     "together": {
       "enabled": true,
-      "model": "meta-llama/Llama-3.2-3B-Instruct-Turbo",
+      "model": "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo",
       "temperature": 0.2,
       "max_tokens": 300,
-      "timeout_seconds": 8,
+      "timeout_seconds": 10,
       "priority": 4,
-      "note": "Set TOGETHER_API_KEY — free $1 credit at together.ai"
+      "note": "Set TOGETHER_API_KEY — free tier at together.ai"
     },
     "huangfing": {
       "enabled": true,
