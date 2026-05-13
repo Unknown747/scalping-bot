@@ -151,7 +151,7 @@ func checkOpenRouterKey() CheckResult {
         }
         defer resp.Body.Close()
         if resp.StatusCode == 200 {
-                return CheckResult{Name: "OpenRouter API Key", Status: "ok", Message: "Connected (openai/gpt-oss-20b:free)", Latency: lat}
+                return CheckResult{Name: "OpenRouter API Key", Status: "ok", Message: "Connected (meta-llama/llama-3.2-3b-instruct:free)", Latency: lat}
         }
         return CheckResult{Name: "OpenRouter API Key", Status: "error", Message: fmt.Sprintf("HTTP %d — check key", resp.StatusCode), Latency: lat}
 }

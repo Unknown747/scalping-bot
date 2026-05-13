@@ -75,7 +75,6 @@ type BotState struct {
         SimMode         bool
         Stats           BotStats
         LiveStats       BotStats
-        SimStats        BotStats
         mu              sync.RWMutex
         ConsecutiveLoss int
         CircuitBroken   bool
@@ -455,7 +454,6 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
         w.Header().Set("Content-Type", "application/json")
         botState.mu.RLock()
         running := botState.Running
-        simMode := botState.SimMode
         botState.mu.RUnlock()
 
         statuses := rpcClient.GetAllStatuses()
@@ -481,7 +479,7 @@ func handleStatus(w http.ResponseWriter, r *http.Request) {
 
         json.NewEncoder(w).Encode(map[string]interface{}{
                 "running":      running,
-                "simMode":      simMode,
+                "simMode":      false,
                 "rpcEndpoints": rpcInfo,
                 "telegram":     tgBot.IsEnabled(),
         })
@@ -975,39 +973,31 @@ func runBot() {
 // filterRejectReason returns the first reason a token fails filters, or "" if it passes.
 func filterRejectReason(token data.TokenData) string {
         f := cfg.Monitoring.TokenFilters
-        isNew := token.AgeSeconds > 0 && token.AgeSeconds < 5400
 
-        minLiq := f.MinLiquidityUSD
-        if isNew {
-                minLiq = 500
+        // Liquidity — single threshold from config, no special-casing
+        if f.MinLiquidityUSD > 0 && token.LiquidityUSD < f.MinLiquidityUSD {
+                return fmt.Sprintf("liquidity $%.0f < min $%.0f", token.LiquidityUSD, f.MinLiquidityUSD)
         }
-        if token.LiquidityUSD < minLiq {
-                return fmt.Sprintf("liquidity $%.0f < min $%.0f", token.LiquidityUSD, minLiq)
-        }
-        if isNew {
-                minVol5m := f.MinVolume5mUSD
-                if minVol5m <= 0 {
-                        minVol5m = 50000
-                }
-                if token.Volume5m < minVol5m {
-                        return fmt.Sprintf("new token vol5m $%.0f < $%.0f", token.Volume5m, minVol5m)
-                }
-        } else if token.Volume24h < f.MinVolume24hUSD {
-                return fmt.Sprintf("vol24h $%.0f < $%.0f", token.Volume24h, f.MinVolume24hUSD)
-        }
-        if f.MinVolume5mUSD > 0 && token.Volume5m > 0 && token.Volume5m < f.MinVolume5mUSD {
+
+        // Volume
+        if f.MinVolume5mUSD > 0 && token.Volume5m < f.MinVolume5mUSD {
                 return fmt.Sprintf("vol5m $%.0f < $%.0f", token.Volume5m, f.MinVolume5mUSD)
         }
+        if f.MinVolume24hUSD > 0 && token.Volume24h > 0 && token.Volume24h < f.MinVolume24hUSD {
+                return fmt.Sprintf("vol24h $%.0f < $%.0f", token.Volume24h, f.MinVolume24hUSD)
+        }
+
+        // Price cap
         if f.MaxPriceUSD > 0 && token.PriceUSD > f.MaxPriceUSD {
                 return fmt.Sprintf("price $%.8f > max $%.4f", token.PriceUSD, f.MaxPriceUSD)
         }
-        minTx := f.MinTxCount5m
-        if isNew {
-                minTx = 2
+
+        // Transaction count
+        if f.MinTxCount5m > 0 && token.TxCount5m < f.MinTxCount5m {
+                return fmt.Sprintf("txCount5m %d < %d", token.TxCount5m, f.MinTxCount5m)
         }
-        if token.TxCount5m < minTx {
-                return fmt.Sprintf("txCount5m %d < %d", token.TxCount5m, minTx)
-        }
+
+        // Age bounds
         if token.AgeSeconds > 0 {
                 if f.MinAgeSecs > 0 && token.AgeSeconds < f.MinAgeSecs {
                         return fmt.Sprintf("age %ds < min %ds", token.AgeSeconds, f.MinAgeSecs)
@@ -1016,6 +1006,8 @@ func filterRejectReason(token data.TokenData) string {
                         return fmt.Sprintf("age %ds > max %ds", token.AgeSeconds, f.MaxAgeSecs)
                 }
         }
+
+        // Buy/sell ratio
         if f.MinBuySellRatio > 0 {
                 if token.Buys5m == 0 && token.Sells5m == 0 {
                         return "no buy/sell data"
@@ -1029,34 +1021,31 @@ func filterRejectReason(token data.TokenData) string {
                 if ratio < f.MinBuySellRatio {
                         return fmt.Sprintf("buy/sell ratio %.2f < %.2f", ratio, f.MinBuySellRatio)
                 }
-                if !isNew && f.MaxBuySellRatio > 0 && ratio > f.MaxBuySellRatio {
-                        return fmt.Sprintf("buy/sell ratio %.2f > max %.2f (manipulation?)", ratio, f.MaxBuySellRatio)
+                if f.MaxBuySellRatio > 0 && ratio > f.MaxBuySellRatio {
+                        return fmt.Sprintf("buy/sell ratio %.2f > max %.2f (bot/manipulation?)", ratio, f.MaxBuySellRatio)
                 }
         }
+
+        // Dev filter
         if cfg.DevFilter.Enabled {
                 if cfg.DevFilter.MinTokenAgeSecs > 0 && token.AgeSeconds > 0 && token.AgeSeconds < cfg.DevFilter.MinTokenAgeSecs {
                         return fmt.Sprintf("dev filter: age %ds < %ds", token.AgeSeconds, cfg.DevFilter.MinTokenAgeSecs)
                 }
         }
+
+        // Volume spike: 5m must be ≥ 1.5× the rolling 5m average
         if token.Volume24h > 0 && token.Volume5m > 0 {
                 avg5m := token.Volume24h / 288.0
                 if avg5m > 0 && token.Volume5m < avg5m*1.5 {
                         return fmt.Sprintf("no vol spike: vol5m $%.0f < 1.5x avg $%.0f", token.Volume5m, avg5m)
                 }
         }
-        minAbsBuys := 5
-        if isNew {
-                minAbsBuys = 3
+
+        // Minimum absolute buy count
+        if f.MinTxCount5m > 0 && token.Buys5m > 0 && token.Buys5m < f.MinTxCount5m {
+                return fmt.Sprintf("buys5m %d < min %d", token.Buys5m, f.MinTxCount5m)
         }
-        if token.Buys5m > 0 && token.Buys5m < minAbsBuys {
-                return fmt.Sprintf("buys5m %d < min %d", token.Buys5m, minAbsBuys)
-        }
-        if !isNew && token.PriceChange5m < 0 {
-                return fmt.Sprintf("negative momentum: chg5m %.1f%%", token.PriceChange5m)
-        }
-        if token.LiquidityUSD < 5000 {
-                return fmt.Sprintf("liquidity $%.0f < $5000 absolute min", token.LiquidityUSD)
-        }
+
         return ""
 }
 
@@ -1149,54 +1138,30 @@ func ruleBasedSignal(token data.TokenData) *ai.TradingDecision {
 func passesFilters(token data.TokenData) bool {
         f := cfg.Monitoring.TokenFilters
 
-        // New pools (< 90 min) use relaxed thresholds because they haven't had
-        // time to accumulate liquidity or 24h volume yet. The strict values in
-        // config.json apply only to established pools.
-        isNew := token.AgeSeconds > 0 && token.AgeSeconds < 5400
-
         // ── Liquidity ──────────────────────────────────────────────────────────
-        minLiq := f.MinLiquidityUSD
-        if isNew {
-                minLiq = 500 // new pools seed with very little liquidity
-        }
-        if token.LiquidityUSD < minLiq {
+        if f.MinLiquidityUSD > 0 && token.LiquidityUSD < f.MinLiquidityUSD {
                 return false
         }
 
         // ── Volume ─────────────────────────────────────────────────────────────
-        if isNew {
-                // For new tokens, use 5m volume threshold from config (strategy: >$50k)
-                minVol5m := f.MinVolume5mUSD
-                if minVol5m <= 0 {
-                        minVol5m = 50000
-                }
-                if token.Volume5m < minVol5m {
-                        return false
-                }
-        } else if token.Volume24h < f.MinVolume24hUSD {
+        if f.MinVolume5mUSD > 0 && token.Volume5m < f.MinVolume5mUSD {
+                return false
+        }
+        if f.MinVolume24hUSD > 0 && token.Volume24h > 0 && token.Volume24h < f.MinVolume24hUSD {
                 return false
         }
 
-        // ── 5m volume for all tokens (if configured) ───────────────────────────
-        if f.MinVolume5mUSD > 0 && token.Volume5m > 0 && token.Volume5m < f.MinVolume5mUSD {
-                return false
-        }
-
-        // ── Price ──────────────────────────────────────────────────────────────
+        // ── Price cap ──────────────────────────────────────────────────────────
         if f.MaxPriceUSD > 0 && token.PriceUSD > f.MaxPriceUSD {
                 return false
         }
 
         // ── Transaction count ──────────────────────────────────────────────────
-        minTx := f.MinTxCount5m
-        if isNew {
-                minTx = 2 // require just a handful of trades to confirm activity
-        }
-        if token.TxCount5m < minTx {
+        if f.MinTxCount5m > 0 && token.TxCount5m < f.MinTxCount5m {
                 return false
         }
 
-        // ── Age ────────────────────────────────────────────────────────────────
+        // ── Age bounds ─────────────────────────────────────────────────────────
         if token.AgeSeconds > 0 {
                 if f.MinAgeSecs > 0 && token.AgeSeconds < f.MinAgeSecs {
                         return false
@@ -1213,16 +1178,14 @@ func passesFilters(token data.TokenData) bool {
                 }
                 var ratio float64
                 if token.Sells5m == 0 {
-                        ratio = 99.0 // only buys, no sells — very bullish for new token
+                        ratio = 99.0
                 } else {
                         ratio = float64(token.Buys5m) / float64(token.Sells5m)
                 }
                 if ratio < f.MinBuySellRatio {
                         return false
                 }
-                // Skip max ratio check for new tokens — brand-new pools legitimately have
-                // all buys and zero sells in the first hour; that is NOT manipulation.
-                if !isNew && f.MaxBuySellRatio > 0 && ratio > f.MaxBuySellRatio {
+                if f.MaxBuySellRatio > 0 && ratio > f.MaxBuySellRatio {
                         return false
                 }
         }
@@ -1247,36 +1210,16 @@ func passesFilters(token data.TokenData) bool {
                 }
         }
 
-        // ── Volume spike validation ────────────────────────────────────────────
-        // 5m volume must be ≥ 1.5× the expected average 5m rate to confirm a real
-        // spike, not just normal trading activity.
+        // ── Volume spike: 5m must be ≥ 1.5× rolling average ───────────────────
         if token.Volume24h > 0 && token.Volume5m > 0 {
-                avg5m := token.Volume24h / 288.0 // 24h / 288 five-minute intervals
+                avg5m := token.Volume24h / 288.0
                 if avg5m > 0 && token.Volume5m < avg5m*1.5 {
-                        return false // volume not genuinely elevated — skip
+                        return false
                 }
         }
 
         // ── Minimum absolute buy count ─────────────────────────────────────────
-        // A good buy/sell ratio means nothing if there are only 1-2 actual buys.
-        minAbsBuys := 5
-        if isNew {
-                minAbsBuys = 3
-        }
-        if token.Buys5m > 0 && token.Buys5m < minAbsBuys {
-                return false
-        }
-
-        // ── Price momentum (non-new tokens) ───────────────────────────────────
-        // Established tokens must show positive 5m price action. New tokens may
-        // not have a 5m change yet (field is 0) so we skip this check for them.
-        if !isNew && token.PriceChange5m < 0 {
-                return false
-        }
-
-        // ── Minimum liquidity depth (absolute, not relaxed for new) ───────────
-        // Even brand-new pools need at least $5k liquidity to trade safely.
-        if token.LiquidityUSD < 5000 {
+        if f.MinTxCount5m > 0 && token.Buys5m > 0 && token.Buys5m < f.MinTxCount5m {
                 return false
         }
 
@@ -1924,9 +1867,6 @@ func handleHistoryExport(w http.ResponseWriter, r *http.Request) {
         fmt.Fprint(w, "Time,Symbol,EntryPrice,ExitPrice,SizeUSD,WETH_Amount,WETH_Price_Entry,PnL_USD,PnL_Pct,Reason,HeldSecs,Mode\n")
         for _, rec := range h {
                 mode := "LIVE"
-                if rec.SimMode {
-                        mode = "SIM"
-                }
                 fmt.Fprintf(w, "%s,%s,%.8f,%.8f,%.4f,%.8f,%.2f,%.4f,%.2f,%s,%d,%s\n",
                         rec.ClosedAt, rec.Symbol,
                         rec.EntryPrice, rec.ExitPrice,
@@ -2139,11 +2079,7 @@ func executeLiveBuy(tokenAddr string, wethAmount float64) (*swappkg.SwapResult, 
 }
 
 // executeLiveSell submits a real token→WETH swap using the wallet's full token balance.
-// No-ops in simulation mode.
 func executeLiveSell(pos *position.Position) {
-        if pos.SimMode {
-                return
-        }
         rpcURL, err := rpcClient.GetActiveEndpoint()
         if err != nil {
                 broadcast("log", map[string]interface{}{
@@ -2275,7 +2211,6 @@ func sendInitialState(conn *websocket.Conn) {
         botState.mu.RLock()
         stats := botState.Stats
         running := botState.Running
-        simMode := botState.SimMode
         botState.mu.RUnlock()
 
         historyMu.Lock()
@@ -2301,7 +2236,7 @@ func sendInitialState(conn *websocket.Conn) {
                         "slPrice":           p.SLPrice,
                         "heldSecs":          int(time.Since(p.EntryTime).Seconds()),
                         "trailingActivated": p.TrailingActivated,
-                        "simMode":           p.SimMode,
+                        "simMode":           false,
                         "wethAmount":        p.WETHAmount,
                         "wethPriceEntry":    p.WETHPriceEntry,
                 })
@@ -2312,7 +2247,7 @@ func sendInitialState(conn *websocket.Conn) {
                 Data: map[string]interface{}{
                         "stats":     stats,
                         "running":   running,
-                        "simMode":   simMode,
+                        "simMode":   false,
                         "telegram":  tgBot.IsEnabled(),
                         "history":   h,
                         "positions": posData,
