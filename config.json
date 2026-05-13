@@ -92,7 +92,7 @@
     "enabled": true,
     "update_interval_seconds": 3,
     "min_confidence_threshold": 70,
-    "max_decision_time_ms": 500,
+    "max_decision_time_ms": 12000,
     "gemini": {
       "enabled": true,
       "model": "gemini-1.5-flash",

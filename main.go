@@ -177,6 +177,16 @@ func main() {
         go broadcastLoop()
         go monitorPositions()
 
+        // Auto-start bot in simulation mode if AUTO_START=true is set
+        if os.Getenv("AUTO_START") == "true" {
+                botState.mu.Lock()
+                botState.Running = true
+                botState.SimMode = true
+                botState.mu.Unlock()
+                go runBot()
+                log.Printf("🤖 Auto-start enabled — bot running in SIMULATION mode")
+        }
+
         if err := http.ListenAndServe(":"+port, mux); err != nil {
                 log.Fatalf("Server failed: %v", err)
         }
