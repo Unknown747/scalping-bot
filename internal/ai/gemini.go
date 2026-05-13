@@ -63,6 +63,13 @@ func (g *GeminiClient) Analyze(ctx context.Context, tokenAddress string, marketD
         }
         defer resp.Body.Close()
 
+        if resp.StatusCode == 429 {
+                return map[string]*TradingDecision{"gemini": {Action: "HOLD", Confidence: 0, Reasoning: "quota exceeded"}}
+        }
+        if resp.StatusCode != 200 {
+                return map[string]*TradingDecision{"gemini": {Action: "HOLD", Confidence: 0, Reasoning: fmt.Sprintf("HTTP %d", resp.StatusCode)}}
+        }
+
         var result struct {
                 Candidates []struct {
                         Content struct {
