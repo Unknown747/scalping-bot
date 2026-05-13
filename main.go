@@ -200,14 +200,14 @@ func main() {
         go broadcastLoop()
         go monitorPositions()
 
-        // Auto-start bot in simulation mode if AUTO_START=true is set
+        // Auto-start bot in LIVE mode if AUTO_START=true is set
         if os.Getenv("AUTO_START") == "true" {
                 botState.mu.Lock()
                 botState.Running = true
-                botState.SimMode = true
+                botState.SimMode = false
                 botState.mu.Unlock()
                 go runBot()
-                log.Printf("🤖 Auto-start enabled — bot running in SIMULATION mode")
+                log.Printf("🚀 Auto-start enabled — bot running in LIVE mode")
         }
 
         if err := http.ListenAndServe(":"+port, mux); err != nil {
@@ -818,17 +818,10 @@ func runBot() {
                         }
                 }
 
-                if simMode && len(tokens) == 0 {
-                        tokens = generateSimTokens()
-                }
-
                 // Count how many pass filters; log why real tokens are rejected
                 passCount := 0
                 realCount := 0
                 for _, t := range tokens {
-                        if strings.HasPrefix(t.Address, "0xSIM") {
-                                continue
-                        }
                         realCount++
                         reason := filterRejectReason(t)
                         if reason == "" {
@@ -838,26 +831,6 @@ func runBot() {
                         } else {
                                 log.Printf("🚫 REAL token rejected [%s]: %s | vol5m=$%.0f liq=$%.0f buys=%d age=%ds",
                                         t.Symbol, reason, t.Volume5m, t.LiquidityUSD, t.Buys5m, t.AgeSeconds)
-                        }
-                }
-
-                // In simulation mode, if real tokens pass 0 filters fallback to sim tokens
-                if simMode && passCount == 0 {
-                        if realCount > 0 {
-                                log.Printf("⚠️  All %d real tokens rejected by filters — running sim fallback", realCount)
-                        }
-                        tokens = generateSimTokens()
-                        passCount = len(tokens)
-                } else {
-                        // remove sim tokens if real ones passed
-                        var realTokens []data.TokenData
-                        for _, t := range tokens {
-                                if !strings.HasPrefix(t.Address, "0xSIM") {
-                                        realTokens = append(realTokens, t)
-                                }
-                        }
-                        if len(realTokens) > 0 {
-                                tokens = realTokens
                         }
                 }
                 log.Printf("🔎 Filter result: %d/%d real tokens passed", passCount, realCount)

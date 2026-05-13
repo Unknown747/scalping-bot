@@ -35,6 +35,7 @@ func RunAll(rpcEndpoints []string) *CheckReport {
         checks := []func() CheckResult{
                 checkGeminiKey,
                 checkGroqKey,
+                checkOpenRouterKey,
                 checkHuangfingKey,
                 checkTelegramBot,
                 checkGeckoTerminal,
@@ -113,7 +114,7 @@ func checkGeminiKey() CheckResult {
 func checkGroqKey() CheckResult {
         key := os.Getenv("GROQ_API_KEY")
         if key == "" {
-                return CheckResult{Name: "Groq API Key", Status: "missing", Message: "GROQ_API_KEY not set in .env"}
+                return CheckResult{Name: "Groq API Key", Status: "missing", Message: "GROQ_API_KEY not set — add in Replit Secrets"}
         }
         start := time.Now()
         ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
@@ -130,6 +131,29 @@ func checkGroqKey() CheckResult {
                 return CheckResult{Name: "Groq API Key", Status: "ok", Message: "Connected", Latency: lat}
         }
         return CheckResult{Name: "Groq API Key", Status: "error", Message: fmt.Sprintf("HTTP %d — check key", resp.StatusCode), Latency: lat}
+}
+
+func checkOpenRouterKey() CheckResult {
+        key := os.Getenv("OPENROUTER_API_KEY")
+        if key == "" {
+                return CheckResult{Name: "OpenRouter API Key", Status: "missing", Message: "OPENROUTER_API_KEY not set — add in Replit Secrets"}
+        }
+        start := time.Now()
+        ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+        defer cancel()
+        req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://openrouter.ai/api/v1/models", nil)
+        req.Header.Set("Authorization", "Bearer "+key)
+        req.Header.Set("HTTP-Referer", "https://memescalper.bot")
+        resp, err := httpClient.Do(req)
+        lat := time.Since(start).Milliseconds()
+        if err != nil {
+                return CheckResult{Name: "OpenRouter API Key", Status: "error", Message: err.Error(), Latency: lat}
+        }
+        defer resp.Body.Close()
+        if resp.StatusCode == 200 {
+                return CheckResult{Name: "OpenRouter API Key", Status: "ok", Message: "Connected (meta-llama/llama-3.1-8b-instruct:free)", Latency: lat}
+        }
+        return CheckResult{Name: "OpenRouter API Key", Status: "error", Message: fmt.Sprintf("HTTP %d — check key", resp.StatusCode), Latency: lat}
 }
 
 func checkHuangfingKey() CheckResult {

@@ -109,7 +109,7 @@
     },
     "openrouter": {
       "enabled": true,
-      "model": "openai/gpt-oss-20b:free",
+      "model": "meta-llama/llama-3.1-8b-instruct:free",
       "temperature": 0.2,
       "max_tokens": 300,
       "timeout_seconds": 10,
@@ -225,7 +225,7 @@
   },
 
   "goplus_filter": {
-    "enabled": false,
+    "enabled": true,
     "max_dev_holding_percent": 50.0,
     "max_top10_holder_percent": 80.0,
     "min_smart_money_count": 0,
