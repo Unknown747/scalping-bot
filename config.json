@@ -110,12 +110,12 @@
     },
     "openrouter": {
       "enabled": true,
-      "model": "openai/gpt-oss-20b:free",
+      "model": "meta-llama/llama-3.2-3b-instruct:free",
       "temperature": 0.2,
-      "max_tokens": 300,
-      "timeout_seconds": 10,
+      "max_tokens": 400,
+      "timeout_seconds": 15,
       "priority": 3,
-      "note": "Set OPENROUTER_API_KEY — free models at openrouter.ai"
+      "note": "Set OPENROUTER_API_KEY — free models at openrouter.ai. Falls back through multiple free models automatically."
     },
     "huangfing": {
       "enabled": true,

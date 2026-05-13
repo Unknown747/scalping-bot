@@ -7,7 +7,6 @@ import (
         "log"
         "math"
         "math/big"
-        "math/rand"
         "net/http"
         "os"
         "strings"
@@ -104,11 +103,8 @@ var (
         totalHeldSecs     int
         equityPeak        float64
         livePnlReturns    []float64
-        simPnlReturns     []float64
         liveTotalHeldSecs int
-        simTotalHeldSecs  int
         liveEquityPeak    float64
-        simEquityPeak     float64
         returnsMu     sync.Mutex
         botState      = &BotState{}
         clients    = make(map[*websocket.Conn]bool)
@@ -553,25 +549,17 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 func handleCommand(action string, params map[string]interface{}) {
         switch action {
         case "start":
-                simMode := false
-                if v, ok := params["simMode"]; ok {
-                        simMode, _ = v.(bool)
-                }
                 botState.mu.Lock()
                 if !botState.Running {
                         botState.Running = true
-                        botState.SimMode = simMode
+                        botState.SimMode = false
                         botState.mu.Unlock()
                         go runBot()
-                        modeLabel := "LIVE"
-                        if simMode {
-                                modeLabel = "SIMULATION"
-                        }
                         broadcast("log", map[string]interface{}{
-                                "message": fmt.Sprintf("✅ Bot started in %s mode", modeLabel),
+                                "message": "✅ Bot started in LIVE mode",
                                 "type":    "success",
                         })
-                        tgBot.NotifyBotStart(simMode)
+                        tgBot.NotifyBotStart(false)
                 } else {
                         botState.mu.Unlock()
                 }
@@ -594,19 +582,15 @@ func handleCommand(action string, params map[string]interface{}) {
                 botState.mu.Lock()
                 botState.Stats = BotStats{}
                 botState.LiveStats = BotStats{}
-                botState.SimStats = BotStats{}
                 botState.ConsecutiveLoss = 0
                 botState.CircuitBroken = false
                 botState.mu.Unlock()
                 returnsMu.Lock()
                 pnlReturns = nil
                 livePnlReturns = nil
-                simPnlReturns = nil
                 totalHeldSecs = 0
                 liveTotalHeldSecs = 0
-                simTotalHeldSecs = 0
                 liveEquityPeak = 0
-                simEquityPeak = 0
                 equityPeak = 0
                 returnsMu.Unlock()
                 broadcast("log", map[string]interface{}{"message": "🔄 Statistics reset", "type": "warning"})
@@ -670,13 +654,13 @@ func handleCommand(action string, params map[string]interface{}) {
 
 func runBot() {
         log.Println("Bot loop started")
-        botState.mu.RLock()
-        simMode := botState.SimMode
-        botState.mu.RUnlock()
 
-        if simMode {
-                broadcast("log", map[string]interface{}{"message": "🧪 SIMULATION MODE — no real trades", "type": "warning"})
-        }
+        // Force LIVE mode — simulation removed
+        botState.mu.Lock()
+        botState.SimMode = false
+        botState.mu.Unlock()
+
+        broadcast("log", map[string]interface{}{"message": "🔴 LIVE MODE — real trades on Base Network", "type": "success"})
         broadcast("log", map[string]interface{}{"message": "🔍 Scanning tokens on Base Network...", "type": "info"})
 
         for {
@@ -684,7 +668,6 @@ func runBot() {
                 running := botState.Running
                 circuitBroken := botState.CircuitBroken
                 circuitUntil := botState.CircuitUntil
-                simMode = botState.SimMode
                 dailyPnl := botState.Stats.DailyPnL
                 botState.mu.RUnlock()
 
@@ -975,18 +958,13 @@ func runBot() {
                         }
                         log.Printf("🛡️ MEV ok [%s]: score=%.0f level=%s — proceeding to trade", token.Symbol, risk.RiskPercent, risk.RiskLevel)
 
-                        if !simMode {
-                                mevShield.RandomDelay()
-                        }
-                        executeTrade(token, decision, simMode)
+                        mevShield.RandomDelay()
+                        executeTrade(token, decision)
                 }
 
                 pollInterval := time.Duration(cfg.Monitoring.PollIntervalSecs) * time.Second
                 if pollInterval < time.Second {
                         pollInterval = 2 * time.Second
-                }
-                if simMode {
-                        pollInterval = 3 * time.Second
                 }
                 time.Sleep(pollInterval)
         }
@@ -1166,36 +1144,7 @@ func ruleBasedSignal(token data.TokenData) *ai.TradingDecision {
         }
 }
 
-// ── Token generation & filtering ─────────────────────────────────────────────
-
-func generateSimTokens() []data.TokenData {
-        syms := []string{"DEGEN", "BRETT", "TOSHI", "MOCHI", "BENJI", "FROG", "PEPE", "MEME", "CHAD", "WOJAK"}
-        out := make([]data.TokenData, 3)
-        for i := range out {
-                sym := syms[rand.Intn(len(syms))]
-                buys := 30 + rand.Intn(60)
-                sells := 5 + rand.Intn(15)
-                // Generate sim tokens that match Pro Config strategy criteria:
-                // - Age: 1–30 min (60–1800 s)
-                // - Liquidity: >$15k
-                // - Volume 5m: >$50k
-                // - Buy/sell ratio bullish
-                out[i] = data.TokenData{
-                        Address:       fmt.Sprintf("0xSIM%04d", rand.Intn(9999)),
-                        Symbol:        sym,
-                        PriceUSD:      0.0001 + rand.Float64()*0.009,
-                        Volume24h:     100000 + rand.Float64()*200000,
-                        Volume5m:      50000 + rand.Float64()*150000,
-                        LiquidityUSD:  15000 + rand.Float64()*35000,
-                        PriceChange5m: 2.0 + rand.Float64()*5,
-                        TxCount5m:     buys + sells,
-                        Buys5m:        buys,
-                        Sells5m:       sells,
-                        AgeSeconds:    60 + rand.Intn(1740),
-                }
-        }
-        return out
-}
+// ── Token filtering ───────────────────────────────────────────────────────────
 
 func passesFilters(token data.TokenData) bool {
         f := cfg.Monitoring.TokenFilters
@@ -1404,7 +1353,7 @@ func fetchWETHPrice() float64 {
         return price
 }
 
-func executeTrade(token data.TokenData, decision *ai.TradingDecision, simMode bool) {
+func executeTrade(token data.TokenData, decision *ai.TradingDecision) {
         strat := cfg.ScalpingStrategies()
 
         // Kelly Criterion dynamic position sizing
@@ -1461,14 +1410,9 @@ func executeTrade(token data.TokenData, decision *ai.TradingDecision, simMode bo
                 wethAmount = posSize / wethPrice
         }
 
-        simTag := ""
-        if simMode {
-                simTag = " [SIM]"
-        }
-
         if mtp.Enabled {
-                msg := fmt.Sprintf("📈%s OPEN %s | Entry: $%.6f | Size: %.6f WETH ($%.2f) | Kelly: %.2f× [%s] | TP1: +%.0f%% TP2: +%.0f%% TP3: +%.0f%% | SL: -%.0f%% | Conf: %.0f%%",
-                        simTag, token.Symbol, token.PriceUSD,
+                msg := fmt.Sprintf("📈 [LIVE] OPEN %s | Entry: $%.6f | Size: %.6f WETH ($%.2f) | Kelly: %.2f× [%s] | TP1: +%.0f%% TP2: +%.0f%% TP3: +%.0f%% | SL: -%.0f%% | Conf: %.0f%%",
+                        token.Symbol, token.PriceUSD,
                         wethAmount, posSize,
                         kr.Multiplier, kr.Mode,
                         mtp.TP1Percent, mtp.TP2Percent, mtp.TP3Percent, strat.MomentumSL,
@@ -1479,8 +1423,8 @@ func executeTrade(token data.TokenData, decision *ai.TradingDecision, simMode bo
                         "type":    "success",
                 })
         } else {
-                msg := fmt.Sprintf("📈%s OPEN %s | WETH→TOKEN | Entry: $%.6f | Size: %.6f WETH ($%.2f) | Kelly: %.2f× [%s] | TP: +%.1f%% | SL: -%.1f%% | Conf: %.0f%%",
-                        simTag, token.Symbol, token.PriceUSD,
+                msg := fmt.Sprintf("📈 [LIVE] OPEN %s | WETH→TOKEN | Entry: $%.6f | Size: %.6f WETH ($%.2f) | Kelly: %.2f× [%s] | TP: +%.1f%% | SL: -%.1f%% | Conf: %.0f%%",
+                        token.Symbol, token.PriceUSD,
                         wethAmount, posSize,
                         kr.Multiplier, kr.Mode,
                         strat.MomentumTP, strat.MomentumSL,
@@ -1488,7 +1432,7 @@ func executeTrade(token data.TokenData, decision *ai.TradingDecision, simMode bo
                 log.Print(msg)
                 broadcast("log", map[string]interface{}{
                         "message": msg,
-                        "type": "success",
+                        "type":    "success",
                 })
         }
 
@@ -1509,40 +1453,38 @@ func executeTrade(token data.TokenData, decision *ai.TradingDecision, simMode bo
                 TP2Price:       tp2Price,
                 TP3Price:       tp3Price,
                 MaxHoldMins:    maxHold,
-                SimMode:        simMode,
+                SimMode:        false,
                 AIConfidence:   decision.Confidence,
         }
 
-        if !simMode {
-                if wrapErr := autoWrapETHIfNeeded(wethAmount); wrapErr != nil {
-                        broadcast("log", map[string]interface{}{
-                                "message": fmt.Sprintf("❌ [LIVE] Trade blocked for %s — wallet/wrap error: %v", token.Symbol, wrapErr),
-                                "type":    "error",
-                        })
-                        log.Printf("❌ [LIVE] Trade blocked for %s: %v", token.Symbol, wrapErr)
-                        return
+        if wrapErr := autoWrapETHIfNeeded(wethAmount); wrapErr != nil {
+                broadcast("log", map[string]interface{}{
+                        "message": fmt.Sprintf("❌ [LIVE] Trade blocked for %s — wallet/wrap error: %v", token.Symbol, wrapErr),
+                        "type":    "error",
+                })
+                log.Printf("❌ [LIVE] Trade blocked for %s: %v", token.Symbol, wrapErr)
+                return
+        }
+        if txResult, buyErr := executeLiveBuy(token.Address, wethAmount); buyErr != nil {
+                log.Printf("❌ [LIVE] On-chain BUY failed for %s: %v", token.Symbol, buyErr)
+                broadcast("log", map[string]interface{}{
+                        "message": fmt.Sprintf("❌ [LIVE] On-chain BUY failed for %s: %v", token.Symbol, buyErr),
+                        "type":    "error",
+                })
+                // Mark as traded so bot doesn't retry the same token next cycle
+                posTracker.MarkFailed(token.Address)
+                return
+        } else {
+                shortTx := txResult.TxHash
+                if len(shortTx) > 12 {
+                        shortTx = "..." + txResult.TxHash[len(txResult.TxHash)-8:]
                 }
-                if txResult, buyErr := executeLiveBuy(token.Address, wethAmount); buyErr != nil {
-                        log.Printf("❌ [LIVE] On-chain BUY failed for %s: %v", token.Symbol, buyErr)
-                        broadcast("log", map[string]interface{}{
-                                "message": fmt.Sprintf("❌ [LIVE] On-chain BUY failed for %s: %v", token.Symbol, buyErr),
-                                "type":    "error",
-                        })
-                        // Mark as traded so bot doesn't retry the same token next cycle
-                        posTracker.MarkFailed(token.Address)
-                        return
-                } else {
-                        shortTx := txResult.TxHash
-                        if len(shortTx) > 12 {
-                                shortTx = "..." + txResult.TxHash[len(txResult.TxHash)-8:]
-                        }
-                        log.Printf("🔗 [LIVE] BUY confirmed: %s | tx: %s | gas: %d", token.Symbol, shortTx, txResult.GasUsed)
-                        broadcast("log", map[string]interface{}{
-                                "message": fmt.Sprintf("🔗 [LIVE] BUY confirmed: %s | tx: %s | gas: %d",
-                                        token.Symbol, shortTx, txResult.GasUsed),
-                                "type": "success",
-                        })
-                }
+                log.Printf("🔗 [LIVE] BUY confirmed: %s | tx: %s | gas: %d", token.Symbol, shortTx, txResult.GasUsed)
+                broadcast("log", map[string]interface{}{
+                        "message": fmt.Sprintf("🔗 [LIVE] BUY confirmed: %s | tx: %s | gas: %d",
+                                token.Symbol, shortTx, txResult.GasUsed),
+                        "type": "success",
+                })
         }
 
         posTracker.Open(pos)
@@ -1551,7 +1493,7 @@ func executeTrade(token data.TokenData, decision *ai.TradingDecision, simMode bo
         botState.Stats.ActivePositions = posTracker.OpenCount()
         botState.mu.Unlock()
 
-        tgBot.NotifyTrade(token.Symbol, "BUY", 0, decision.Confidence, simMode)
+        tgBot.NotifyTrade(token.Symbol, "BUY", 0, decision.Confidence, false)
 }
 
 // ── Position monitor (fast loop) ─────────────────────────────────────────────
@@ -1574,27 +1516,16 @@ func monitorPositions() {
 
                         var currentPrice float64
 
-                        if pos.SimMode {
-                                // Realistic random walk: slight negative drift for meme coins
-                                tick := (rand.Float64() - 0.52) * 0.015
-                                prev := pos.CurrentPrice
-                                if prev <= 0 {
-                                        prev = pos.EntryPrice
-                                }
-                                currentPrice = prev * (1 + tick)
-                                posTracker.UpdateCurrentPrice(pos.TokenAddress, currentPrice)
-                        } else {
-                                // Fetch live price from GeckoTerminal
-                                ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-                                price, err := geckoData.GetTokenPrice(ctx, "base", pos.TokenAddress)
-                                cancel()
-                                if err != nil {
-                                        // Can't get price this tick, keep watching
-                                        continue
-                                }
-                                posTracker.UpdateCurrentPrice(pos.TokenAddress, price)
-                                currentPrice = price
+                        // Fetch live price from GeckoTerminal (LIVE mode only)
+                        ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+                        price, err := geckoData.GetTokenPrice(ctx, "base", pos.TokenAddress)
+                        cancel()
+                        if err != nil {
+                                // Can't get price this tick, keep watching
+                                continue
                         }
+                        posTracker.UpdateCurrentPrice(pos.TokenAddress, price)
+                        currentPrice = price
 
                         if currentPrice <= 0 {
                                 continue
@@ -1773,34 +1704,20 @@ func monitorPositions() {
 
 // recordPartialExit logs and accounts for a partial take-profit exit without closing the position.
 func recordPartialExit(pos *position.Position, pnl float64, reason string) {
-        simTag := ""
-        if pos.SimMode {
-                simTag = " [SIM]"
-        }
         broadcast("log", map[string]interface{}{
-                "message": fmt.Sprintf("💰%s [%s] %s | Partial PnL: +$%.4f", simTag, reason, pos.Symbol, pnl),
+                "message": fmt.Sprintf("💰 [LIVE] [%s] %s | Partial PnL: +$%.4f", reason, pos.Symbol, pnl),
                 "type":    "success",
         })
 
         botState.mu.Lock()
         botState.Stats.TotalProfitUSD += pnl
         botState.Stats.DailyPnL += pnl
-        if pos.SimMode {
-                botState.SimStats.TotalProfitUSD += pnl
-                botState.SimStats.DailyPnL += pnl
-        } else {
-                botState.LiveStats.TotalProfitUSD += pnl
-                botState.LiveStats.DailyPnL += pnl
-        }
+        botState.LiveStats.TotalProfitUSD += pnl
+        botState.LiveStats.DailyPnL += pnl
         botState.mu.Unlock()
 }
 
 func closePositionResult(pos *position.Position, pnl float64, reason string) {
-        simTag := ""
-        if pos.SimMode {
-                simTag = " [SIM]"
-        }
-
         logType := "success"
         emoji := "✅"
         if pnl < 0 {
@@ -1819,8 +1736,8 @@ func closePositionResult(pos *position.Position, pnl float64, reason string) {
         wethReturned := pos.WETHAmount + wethPnl
 
         broadcast("log", map[string]interface{}{
-                "message": fmt.Sprintf("%s%s [%s] %s | PnL: %+.4f USD (%+.6f WETH) | Returned: %.6f WETH",
-                        emoji, simTag, reason, pos.Symbol, pnl, wethPnl, wethReturned),
+                "message": fmt.Sprintf("%s [LIVE] [%s] %s | PnL: %+.4f USD (%+.6f WETH) | Returned: %.6f WETH",
+                        emoji, reason, pos.Symbol, pnl, wethPnl, wethReturned),
                 "type": logType,
         })
 
@@ -1912,95 +1829,51 @@ func closePositionResult(pos *position.Position, pnl float64, reason string) {
         botState.Stats.SharpeRatio = sharpe
         botState.mu.Unlock()
 
-        // ── Mode-specific stats (Sim vs Live separated) ──────────────────────────
+        // ── Live stats update ──────────────────────────────────────────────────────
         returnsMu.Lock()
-        if pos.SimMode {
-                simPnlReturns = append(simPnlReturns, record.PnLPct)
-                simTotalHeldSecs += record.HeldSecs
-                simSnap := make([]float64, len(simPnlReturns))
-                copy(simSnap, simPnlReturns)
-                simHeldSnap := simTotalHeldSecs
-                returnsMu.Unlock()
-                simSharpe := calcSharpe(simSnap)
-                botState.mu.Lock()
-                s := &botState.SimStats
-                s.TotalTrades++
-                if win {
-                        s.WinningTrades++
-                } else {
-                        s.LosingTrades++
-                }
-                s.TotalProfitUSD += pnl
-                s.DailyPnL += pnl
-                if s.TotalTrades > 0 {
-                        s.WinRate = float64(s.WinningTrades) / float64(s.TotalTrades) * 100.0
-                }
-                if s.TotalTrades == 1 || record.PnLPct > s.BestTradePct {
-                        s.BestTradePct = record.PnLPct
-                }
-                if s.TotalTrades == 1 || record.PnLPct < s.WorstTradePct {
-                        s.WorstTradePct = record.PnLPct
-                }
-                if s.TotalTrades > 0 {
-                        s.AvgHoldSecs = simHeldSnap / s.TotalTrades
-                }
-                eq := s.TotalProfitUSD
-                if eq > simEquityPeak {
-                        simEquityPeak = eq
-                }
-                if simEquityPeak > 0 {
-                        dd := (simEquityPeak - eq) / simEquityPeak * 100.0
-                        if dd > s.MaxDrawdownPct {
-                                s.MaxDrawdownPct = dd
-                        }
-                }
-                s.SharpeRatio = simSharpe
-                botState.mu.Unlock()
+        livePnlReturns = append(livePnlReturns, record.PnLPct)
+        liveTotalHeldSecs += record.HeldSecs
+        liveSnap := make([]float64, len(livePnlReturns))
+        copy(liveSnap, livePnlReturns)
+        liveHeldSnap := liveTotalHeldSecs
+        returnsMu.Unlock()
+        liveSharpe := calcSharpe(liveSnap)
+        botState.mu.Lock()
+        s := &botState.LiveStats
+        s.TotalTrades++
+        if win {
+                s.WinningTrades++
         } else {
-                livePnlReturns = append(livePnlReturns, record.PnLPct)
-                liveTotalHeldSecs += record.HeldSecs
-                liveSnap := make([]float64, len(livePnlReturns))
-                copy(liveSnap, livePnlReturns)
-                liveHeldSnap := liveTotalHeldSecs
-                returnsMu.Unlock()
-                liveSharpe := calcSharpe(liveSnap)
-                botState.mu.Lock()
-                s := &botState.LiveStats
-                s.TotalTrades++
-                if win {
-                        s.WinningTrades++
-                } else {
-                        s.LosingTrades++
-                }
-                s.TotalProfitUSD += pnl
-                s.DailyPnL += pnl
-                if s.TotalTrades > 0 {
-                        s.WinRate = float64(s.WinningTrades) / float64(s.TotalTrades) * 100.0
-                }
-                if s.TotalTrades == 1 || record.PnLPct > s.BestTradePct {
-                        s.BestTradePct = record.PnLPct
-                }
-                if s.TotalTrades == 1 || record.PnLPct < s.WorstTradePct {
-                        s.WorstTradePct = record.PnLPct
-                }
-                if s.TotalTrades > 0 {
-                        s.AvgHoldSecs = liveHeldSnap / s.TotalTrades
-                }
-                eq := s.TotalProfitUSD
-                if eq > liveEquityPeak {
-                        liveEquityPeak = eq
-                }
-                if liveEquityPeak > 0 {
-                        dd := (liveEquityPeak - eq) / liveEquityPeak * 100.0
-                        if dd > s.MaxDrawdownPct {
-                                s.MaxDrawdownPct = dd
-                        }
-                }
-                s.SharpeRatio = liveSharpe
-                botState.mu.Unlock()
+                s.LosingTrades++
         }
+        s.TotalProfitUSD += pnl
+        s.DailyPnL += pnl
+        if s.TotalTrades > 0 {
+                s.WinRate = float64(s.WinningTrades) / float64(s.TotalTrades) * 100.0
+        }
+        if s.TotalTrades == 1 || record.PnLPct > s.BestTradePct {
+                s.BestTradePct = record.PnLPct
+        }
+        if s.TotalTrades == 1 || record.PnLPct < s.WorstTradePct {
+                s.WorstTradePct = record.PnLPct
+        }
+        if s.TotalTrades > 0 {
+                s.AvgHoldSecs = liveHeldSnap / s.TotalTrades
+        }
+        eq := s.TotalProfitUSD
+        if eq > liveEquityPeak {
+                liveEquityPeak = eq
+        }
+        if liveEquityPeak > 0 {
+                dd := (liveEquityPeak - eq) / liveEquityPeak * 100.0
+                if dd > s.MaxDrawdownPct {
+                        s.MaxDrawdownPct = dd
+                }
+        }
+        s.SharpeRatio = liveSharpe
+        botState.mu.Unlock()
 
-        tgBot.NotifyTrade(pos.Symbol, "CLOSE("+reason+")", pnl, 0, pos.SimMode)
+        tgBot.NotifyTrade(pos.Symbol, "CLOSE("+reason+")", pnl, 0, false)
 
         if cfg.Risk.CircuitBreaker.Enabled && !win && consecutiveLoss >= cfg.Risk.CircuitBreaker.ConsecutiveLossesThreshold {
                 botState.mu.Lock()
@@ -2318,7 +2191,6 @@ func broadcastLoop() {
                 botState.mu.RLock()
                 stats := botState.Stats
                 running := botState.Running
-                simMode := botState.SimMode
                 botState.mu.RUnlock()
 
                 statuses := rpcClient.GetAllStatuses()
@@ -2346,15 +2218,13 @@ func broadcastLoop() {
 
                 botState.mu.RLock()
                 liveStats := botState.LiveStats
-                simStats := botState.SimStats
                 botState.mu.RUnlock()
 
                 broadcast("update", map[string]interface{}{
                         "stats":        stats,
                         "liveStats":    liveStats,
-                        "simStats":     simStats,
                         "running":      running,
-                        "simMode":      simMode,
+                        "simMode":      false,
                         "rpcEndpoints": rpcInfo,
                         "activeRpc":    activeRPC,
                 })
