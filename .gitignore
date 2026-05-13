@@ -61,6 +61,14 @@ npm-debug.log
 yarn-error.log
 testem.log
 
+# ─── Go compiled binary ───────────────────────────────────────────────────────
+meme-scalper
+meme-scalper-ai
+*.exe
+
+# ─── Go build cache (auto-generated, tidak perlu di-commit) ──────────────────
+.config/
+
 # ─── Replit internal (tidak diperlukan untuk VPS) ─────────────────────────────
 .cache/
 .local/

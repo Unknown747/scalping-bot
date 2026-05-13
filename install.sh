@@ -112,8 +112,9 @@ if [ ! -f "$APP_DIR/.env" ]; then
     step "Membuat file konfigurasi .env..."
     cat > "$APP_DIR/.env" << 'ENVEOF'
 # ================================================================
-#  MemeScalper AI Pro — Konfigurasi Environment
+#  MemeScalper AI Pro v2.0.0 — Konfigurasi Environment
 #  Edit file ini sebelum menjalankan bot!
+#  Panduan lengkap: lihat .env.example
 # ================================================================
 
 # ── Dashboard Login (WAJIB diisi) ────────────────────────────────
@@ -121,20 +122,39 @@ BOT_USERNAME=admin
 BOT_PASSWORD=ganti_dengan_password_aman_kamu
 
 # ── Wallet Base Network (untuk trading nyata) ────────────────────
-WALLET_PRIVATE_KEY=0x_private_key_wallet_kamu
 WALLET_ADDRESS=0x_alamat_wallet_kamu
+WALLET_PRIVATE_KEY=private_key_tanpa_prefix_0x
 
-# ── AI Providers (untuk keputusan trading) ───────────────────────
+# ── AI: Gemini (Primary — GRATIS) ────────────────────────────────
+# Daftar di: https://aistudio.google.com/app/apikey
 GEMINI_API_KEY=ganti_dengan_gemini_api_key
-GROQ_API_KEY=ganti_dengan_groq_api_key
-HUANGFING_API_KEY=ganti_dengan_huangfing_api_key
+# Opsional: tambah key ke-2 dst untuk rotasi (pisah koma atau pakai GEMINI_API_KEY_2)
 
-# ── Telegram Notifikasi (opsional) ───────────────────────────────
+# ── AI: Groq (Backup #1 — GRATIS) ────────────────────────────────
+# Daftar di: https://console.groq.com
+GROQ_API_KEY=ganti_dengan_groq_api_key
+
+# ── AI: OpenRouter (Opsional — GRATIS) ───────────────────────────
+# Daftar di: https://openrouter.ai
+OPENROUTER_API_KEY=ganti_dengan_openrouter_api_key
+
+# ── AI: Together AI (Opsional — $1 kredit gratis) ────────────────
+# Daftar di: https://api.together.ai
+TOGETHER_API_KEY=ganti_dengan_together_api_key
+
+# ── AI: Huangfing (Backup #2) ─────────────────────────────────────
+HUANGFING_API_KEY=ganti_dengan_huangfing_api_key
+HUANGFING_BASE_URL=https://api.huangfing.ai/v1
+
+# ── Telegram Notifikasi (opsional — GRATIS) ───────────────────────
+# Cara dapat: chat @BotFather → /newbot  |  Chat ID: @userinfobot
 TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 
-# ── MEV Protection ───────────────────────────────────────────────
-MEV_PROTECTION_RPC=https://mev-blocker.drpc.org
+# ── Bot Behaviour ─────────────────────────────────────────────────
+AUTO_START=true
+PORT=5000
+LOG_LEVEL=info
 ENVEOF
 
     echo ""

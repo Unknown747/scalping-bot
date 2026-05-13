@@ -100,17 +100,38 @@ ok "File disalin ke ${APP_DIR}"
 if [ ! -f "$APP_DIR/.env" ]; then
     step "Membuat file .env..."
     cat > "$APP_DIR/.env" << 'ENVEOF'
-# ─── Telegram ───────────────────────────────────────
-TELEGRAM_BOT_TOKEN=ganti_dengan_token_bot_kamu
-TELEGRAM_CHAT_ID=ganti_dengan_chat_id_kamu
-
-# ─── Dashboard Login ─────────────────────────────────
+# ── Dashboard Login (WAJIB) ───────────────────────────
 BOT_USERNAME=admin
 BOT_PASSWORD=ganti_password_aman
 
-# ─── AI Keys ─────────────────────────────────────────
+# ── Wallet ────────────────────────────────────────────
+WALLET_ADDRESS=0x_alamat_wallet_kamu
+WALLET_PRIVATE_KEY=private_key_tanpa_prefix_0x
+
+# ── AI: Gemini (GRATIS) https://aistudio.google.com ──
 GEMINI_API_KEY=ganti_dengan_gemini_key
+
+# ── AI: Groq (GRATIS) https://console.groq.com ───────
 GROQ_API_KEY=ganti_dengan_groq_key
+
+# ── AI: OpenRouter (GRATIS) https://openrouter.ai ────
+OPENROUTER_API_KEY=ganti_dengan_openrouter_key
+
+# ── AI: Together AI ($1 gratis) https://together.ai ──
+TOGETHER_API_KEY=ganti_dengan_together_key
+
+# ── AI: Huangfing ─────────────────────────────────────
+HUANGFING_API_KEY=ganti_dengan_huangfing_key
+HUANGFING_BASE_URL=https://api.huangfing.ai/v1
+
+# ── Telegram (opsional) ───────────────────────────────
+TELEGRAM_BOT_TOKEN=
+TELEGRAM_CHAT_ID=
+
+# ── Behaviour ─────────────────────────────────────────
+AUTO_START=true
+PORT=5000
+LOG_LEVEL=info
 ENVEOF
     echo ""
     echo -e "${YELLOW}⚠️  PENTING: Edit file .env sebelum bot dijalankan!${NC}"

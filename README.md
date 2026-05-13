@@ -1,6 +1,6 @@
 # MemeScalper AI Pro v2.0.0
 
-Bot trading otomatis untuk scalping meme token di **Base Network**, menggunakan sistem voting **5 model AI** secara paralel dengan proteksi MEV, Kelly Criterion sizing, dan rotasi API key otomatis. Semua trading menggunakan **WETH** sebagai base currency.
+Bot trading otomatis untuk scalping meme token di **Base Network**, menggunakan sistem voting **5 model AI** secara paralel dengan proteksi MEV, Kelly Criterion sizing, GoPlus on-chain security check, dan rotasi API key otomatis. Semua trading menggunakan **WETH** sebagai base currency.
 
 ---
 
@@ -11,13 +11,14 @@ Bot trading otomatis untuk scalping meme token di **Base Network**, menggunakan 
 | **Multi-AI Voting (5 Provider)** | Gemini, Groq, OpenRouter, Together, Huangfing — voting berbobot paralel setiap keputusan |
 | **Rotasi Gemini API Key** | Dukung hingga 9 Gemini key, rotasi otomatis saat key kena rate limit (429) |
 | **Fallback Otomatis** | Saat semua Gemini key habis → Groq + Huangfing dapat bobot ekstra |
+| **GoPlus Security Check** | Cek on-chain: dev holding, top-10 holder, tax, honeypot, mintable — GRATIS tanpa API key |
+| **Multi-TP Exit** | TP1 +30% (jual 25%), TP2 +50% (jual 25%), TP3 +80% (jual 50%) |
 | **WETH Base Currency** | Semua trade: WETH→MEME (beli) dan MEME→WETH (jual) |
 | **MEV Protection** | Deteksi sandwich attack, random delay 100–500ms, Flashbots relay |
 | **Kelly Criterion** | Position sizing adaptif berdasarkan win rate dan reward:risk historis |
 | **Circuit Breaker** | Pause otomatis setelah consecutive loss melebihi threshold |
 | **Trailing Stop** | Stop-loss naik otomatis mengikuti harga naik untuk lock profit |
 | **Emergency Stop** | Tombol paksa tutup semua posisi sekaligus dari dashboard |
-| **Split Stats Panel** | Statistik Live dan Simulasi dipisah — tidak tercampur |
 | **Simulation Mode** | Uji strategi tanpa modal nyata — statistik terpisah dari live |
 | **Web Dashboard** | Real-time via WebSocket: stats, posisi, AI panel, log, riwayat trade |
 | **Notifikasi Telegram** | Alert setiap trade, circuit breaker, start/stop |
@@ -40,9 +41,11 @@ main.go                      ← HTTP server, WebSocket hub, bot loop utama
 ├── internal/auth/
 │   └── session.go           ← Cookie session, brute-force lockout (5 percobaan / 10 menit)
 ├── internal/checker/
-│   └── checker.go           ← System health check (API keys, RPC, WETH balance)
+│   ├── checker.go           ← System health check (API keys, RPC, WETH balance)
+│   └── goplus.go            ← GoPlus Security API: dev%, holder%, tax, honeypot (gratis)
 ├── internal/config/
-│   └── loader.go            ← config.json parser
+│   ├── loader.go            ← config.json parser + semua struct config
+│   └── helpers.go           ← ScalpingStrategies() helper
 ├── internal/data/
 │   ├── geckoterm.go         ← GeckoTerminal API (sumber data utama)
 │   └── dexscreener.go       ← DexScreener API (fallback)
@@ -53,7 +56,7 @@ main.go                      ← HTTP server, WebSocket hub, bot loop utama
 ├── internal/notify/
 │   └── telegram.go          ← Telegram bot notifications
 ├── internal/position/
-│   └── tracker.go           ← Position tracker + CloseAll() untuk Emergency Stop
+│   └── tracker.go           ← Position tracker + multi-TP fields + CloseAll()
 ├── internal/rpc/
 │   └── multi_rpc.go         ← Multi-endpoint RPC dengan failover
 └── web/
@@ -69,12 +72,12 @@ main.go                      ← HTTP server, WebSocket hub, bot loop utama
 
 - Go 1.21+
 - Wallet Base Network dengan saldo WETH (untuk live trading)
-- Minimal satu API key AI (Gemini atau Groq direkomendasikan)
+- Minimal satu API key AI (Gemini atau Groq direkomendasikan — keduanya **gratis**)
 
 ### 2. Environment Variables / Secrets
 
 > **Di Replit:** tambahkan ke **Tools → Secrets**
-> **Lokal:** copy `.env.example` ke `.env` dan isi nilainya
+> **Di VPS:** isi file `.env` (salin dari `.env.example`)
 
 #### Wajib
 
@@ -84,27 +87,29 @@ main.go                      ← HTTP server, WebSocket hub, bot loop utama
 | `WALLET_ADDRESS` | Alamat wallet Base Network (wajib untuk live trading) |
 | `WALLET_PRIVATE_KEY` | Private key wallet (wajib untuk live trading) |
 
-#### AI Providers
+#### AI Providers (Semua GRATIS)
 
-| Variabel | Bobot | Provider | Keterangan |
-|---|---|---|---|
-| `GEMINI_API_KEY` | 30% | Google Gemini | Primary. Dukung multi-key (lihat di bawah) |
-| `GEMINI_API_KEY_2` … `GEMINI_API_KEY_9` | — | — | Key Gemini tambahan untuk rotasi |
-| `GROQ_API_KEY` | 30% | Groq (Llama-3) | Backup utama saat Gemini limit |
-| `OPENROUTER_API_KEY` | 20% | OpenRouter | Model gratis tersedia (suffix `:free`) |
-| `TOGETHER_API_KEY` | 15% | Together AI | $1 kredit gratis untuk akun baru |
-| `HUANGFING_API_KEY` | 5% | Huangfing | Backup sekunder saat Gemini limit |
+| Variabel | Bobot | Cara Dapat Gratis |
+|---|---|---|
+| `GEMINI_API_KEY` | 30% | https://aistudio.google.com/app/apikey — 1.500 req/hari |
+| `GEMINI_API_KEY_2` … `GEMINI_API_KEY_9` | — | Key tambahan untuk rotasi |
+| `GROQ_API_KEY` | 30% | https://console.groq.com — 14.400 req/hari |
+| `OPENROUTER_API_KEY` | 20% | https://openrouter.ai — model gratis suffix `:free` |
+| `TOGETHER_API_KEY` | 15% | https://api.together.ai — $1 kredit gratis |
+| `HUANGFING_API_KEY` | 5% | Backup sekunder |
 
-> Minimal satu provider harus aktif. Makin banyak provider aktif, makin akurat voting.
+#### GoPlus Security (Otomatis — TIDAK Perlu API Key)
+
+Bot secara otomatis memanggil GoPlus Security API (`https://api.gopluslabs.io`) untuk setiap token real yang lolos filter dasar. Tidak perlu daftar atau isi key apapun.
 
 #### Opsional
 
 | Variabel | Default | Keterangan |
 |---|---|---|
 | `BOT_USERNAME` | `admin` | Username login dashboard |
-| `TELEGRAM_BOT_TOKEN` | — | Token bot Telegram untuk notifikasi |
-| `TELEGRAM_CHAT_ID` | — | Chat ID untuk menerima notifikasi |
-| `AUTO_START` | `false` | Set `true` agar bot langsung jalan saat server start |
+| `TELEGRAM_BOT_TOKEN` | — | Cara dapat: chat `@BotFather` di Telegram → `/newbot` |
+| `TELEGRAM_CHAT_ID` | — | Cara dapat: chat `@userinfobot` di Telegram |
+| `AUTO_START` | `true` | Bot langsung jalan dalam mode simulasi saat server start |
 | `PORT` | `5000` | Port server web dashboard |
 
 ### 3. Rotasi Gemini API Key
@@ -127,60 +132,184 @@ GEMINI_API_KEY_3=key3
 1. Key dicoba secara round-robin
 2. Key yang kena 429 → disuspend **60 detik**, lalu otomatis aktif kembali
 3. Kalau **semua key** sedang limit → Groq + Huangfing dapat redistribusi bobot Gemini
-4. Status setiap key bisa dipantau di tab **🔧 System → 🔑 Gemini API Key Pool**
+4. Status setiap key bisa dipantau di tab **System → Gemini API Key Pool**
 
 ### 4. Konfigurasi Trading (`config.json`)
 
-Parameter penting di `config.json`:
+Parameter penting di `config.json` (Pro Config — aktif):
 
 ```json
 {
   "trading": {
-    "position_size_usd": 1.0,          // ukuran posisi per trade (USD)
-    "max_concurrent_positions": 3,      // maks posisi terbuka bersamaan
-    "max_daily_trades": 50,             // maks trade per hari
-    "slippage_tolerance_percent": 0.5   // toleransi slippage
+    "position_size_usd": 1.0,
+    "max_concurrent_positions": 3,
+    "slippage_tolerance_percent": 10.0,
+    "max_gas_price_gwei": 100
   },
   "scalping_strategies": {
     "momentum": {
-      "take_profit_percent": 1.5,       // target profit per trade
-      "stop_loss_percent": 0.8          // stop loss per trade
+      "take_profit_percent": 80.0,
+      "stop_loss_percent": 20.0,
+      "max_hold_minutes": 30
+    },
+    "multi_tp": {
+      "tp1_percent": 30.0,  "tp1_sell_fraction": 0.25,
+      "tp2_percent": 50.0,  "tp2_sell_fraction": 0.25,
+      "tp3_percent": 80.0,  "tp3_sell_fraction": 0.50
     },
     "trailing_stop": {
       "enabled": true,
-      "activation_percent": 0.8,        // aktif setelah harga naik 0.8%
-      "trailing_distance_percent": 0.4  // jarak trailing stop
+      "activation_percent": 20.0,
+      "trailing_distance_percent": 0.4
     }
+  },
+  "token_filters": {
+    "min_liquidity_usd": 15000,
+    "min_volume_5m_usd": 50000,
+    "max_age_seconds": 1800
+  },
+  "goplus_filter": {
+    "enabled": true,
+    "max_dev_holding_percent": 1.0,
+    "max_top10_holder_percent": 25.0,
+    "min_smart_money_count": 3,
+    "max_buy_tax_percent": 5.0,
+    "max_sell_tax_percent": 5.0,
+    "block_honeypot": true,
+    "block_mintable": true
   },
   "risk_management": {
-    "max_daily_loss_usd": 2.0,          // stop trading jika loss harian ≥ $2
+    "max_daily_loss_usd": 3.0,
+    "max_daily_loss_percent": 30.0,
     "circuit_breaker": {
-      "consecutive_losses_threshold": 5, // pause setelah 5 loss beruntun
-      "pause_minutes": 30               // durasi pause
+      "consecutive_losses_threshold": 5,
+      "pause_minutes": 30
     }
-  },
-  "kelly": {
-    "enabled": true,
-    "fraction": 0.5,                    // half-Kelly (lebih konservatif)
-    "min_multiplier": 0.25,             // ukuran minimum 0.25× dari base
-    "max_multiplier": 3.0,              // ukuran maksimum 3× dari base
-    "min_trades_required": 10           // warmup: butuh 10 trade sebelum aktif
   }
 }
 ```
 
-### 5. Menjalankan
+---
 
-**Di Replit** — workflow "Start application" berjalan otomatis.
+## Instalasi di VPS
 
-**Lokal:**
+### Instalasi Pertama
+
 ```bash
-cp .env.example .env
-# Edit .env dengan API key kamu
-go run main.go
+# Clone atau upload project ke VPS
+git clone <repo_url> /opt/meme-scalper
+cd /opt/meme-scalper
+
+# Jalankan installer (butuh root)
+sudo bash install.sh
 ```
 
-Dashboard tersedia di `http://localhost:5000`. Login dengan `BOT_USERNAME` / `BOT_PASSWORD`.
+Script `install.sh` otomatis:
+1. Install Go 1.21 jika belum ada
+2. Build binary Go dengan optimasi produksi (`-ldflags="-s -w"`)
+3. Buat systemd service (auto-start saat reboot)
+4. Buka port 5000 di firewall (UFW)
+5. Buat file `.env` template
+
+Setelah install, **wajib isi** file `.env`:
+```bash
+nano /opt/meme-scalper/.env
+# Isi GEMINI_API_KEY, GROQ_API_KEY, BOT_PASSWORD, dan WALLET_* jika live trading
+systemctl start meme-scalper
+```
+
+### Update Bot
+
+```bash
+# Dari folder project yang sama
+sudo bash update.sh
+
+# Jika pakai git
+sudo bash update.sh --pull
+
+# Jika clone dari URL baru
+sudo bash update.sh --git https://github.com/user/repo.git
+```
+
+`update.sh` otomatis:
+1. Backup `.env`, `config.json`, dan binary lama
+2. Build binary baru
+3. Restart service
+4. Rollback otomatis jika build gagal
+
+### Build Manual (tanpa script)
+
+```bash
+export PATH=$PATH:/usr/local/go/bin
+go mod tidy
+go build -ldflags="-s -w" -o meme-scalper .
+./meme-scalper
+```
+
+### Perintah Berguna di VPS
+
+```bash
+journalctl -u meme-scalper -f        # Log live
+systemctl status meme-scalper         # Status service
+systemctl restart meme-scalper        # Restart
+systemctl stop meme-scalper           # Stop
+nano /opt/meme-scalper/.env           # Edit config
+bash /opt/meme-scalper/update.sh      # Update bot
+```
+
+---
+
+## Menjalankan di Replit
+
+Workflow "Start application" berjalan otomatis di port 5000.
+Tambahkan semua API key di **Tools → Secrets**.
+
+---
+
+## Strategi Pro Config
+
+### Multi-TP Exit (3 Level Take Profit)
+
+| Level | Target | Jual |
+|---|---|---|
+| TP1 | +30% | 25% posisi |
+| TP2 | +50% | 25% posisi |
+| TP3 (Full Exit) | +80% | 50% posisi (sisa) |
+
+### Parameter Risiko
+
+| Parameter | Nilai |
+|---|---|
+| Stop Loss | -20% |
+| Trailing Stop aktif dari | +20% |
+| Max hold per posisi | 30 menit |
+| Slippage toleransi | 10% |
+| Max gas price | 100 GWEI |
+| Volume 5 menit minimum | $50.000 |
+| Likuiditas minimum | $15.000 |
+| Usia token maksimal | 30 menit |
+| Stop trading harian jika loss | $3 atau 30% modal |
+
+### GoPlus On-Chain Security Filter
+
+| Filter | Nilai | Sumber |
+|---|---|---|
+| Dev holding | < 1% | GoPlus API (gratis) |
+| Top-10 holders | < 25% | GoPlus API (gratis) |
+| Smart money wallets | ≥ 3 wallet EOA | GoPlus API (gratis) |
+| Buy tax | < 5% | GoPlus API (gratis) |
+| Sell tax | < 5% | GoPlus API (gratis) |
+| Honeypot | Diblok otomatis | GoPlus API (gratis) |
+| Mintable token | Diblok otomatis | GoPlus API (gratis) |
+
+### Kondisi BUY — Semua harus terpenuhi:
+
+1. Voting AI agregat: **BUY** (weighted majority ≥ confidence threshold)
+2. Token lolos filter dasar (likuiditas, volume, usia, buy/sell ratio)
+3. Token lolos GoPlus security check
+4. MEV risk: **ACCEPTABLE**
+5. Circuit breaker: **tidak aktif**
+6. Daily loss: **belum melebihi batas**
 
 ---
 
@@ -188,7 +317,7 @@ Dashboard tersedia di `http://localhost:5000`. Login dengan `BOT_USERNAME` / `BO
 
 ### Voting Berbobot (5 Provider Paralel)
 
-| Provider | Model Default | Bobot |
+| Provider | Model | Bobot |
 |---|---|---|
 | Gemini | gemini-1.5-flash | 30% |
 | Groq (Llama-3) | llama-3.1-8b-instant | 30% |
@@ -196,87 +325,18 @@ Dashboard tersedia di `http://localhost:5000`. Login dengan `BOT_USERNAME` / `BO
 | Together AI | Llama-3.2-3B-Instruct-Turbo | 15% |
 | Huangfing | huangfing-pro | 5% |
 
-> Ketika Gemini semua key habis, bobot 30% Gemini dibagi rata ke Groq dan Huangfing.
-
-### Kondisi BUY
-
-Semua kondisi berikut harus terpenuhi:
-- Voting AI agregat: **BUY** (setelah weighted majority)
-- Confidence ≥ `min_confidence_threshold` (default 70)
-- Token lolos semua filter (likuiditas, usia, buy/sell ratio)
-- MEV risk: **ACCEPTABLE** (< 25%)
-- Circuit breaker: **tidak aktif**
-- Daily loss: **belum melebihi batas**
+Ketika semua Gemini key rate-limited, bobot 30% Gemini otomatis terdistribusi ke Groq dan Huangfing.
 
 ---
 
 ## Kelly Criterion Position Sizing
-
-Bot menyesuaikan ukuran posisi secara adaptif berdasarkan performa historis:
 
 | Kondisi | Mode | Multiplier |
 |---|---|---|
 | < 10 trade (warmup) | `warmup` | 1.0× (base size) |
 | Expected value negatif | `neg_edge` | 0.25× (minimum) |
 | Normal | `adaptive` | 0.25× – 3.0× |
-| Drawdown tinggi | `dd_damped` / `dd_floor` | Diturunkan proporsional |
-
-Multiplier ditampilkan live di dashboard (panel statistik, badge **Kelly Size**).
-
----
-
-## Strategi Scalping
-
-### Momentum Scalp (Primer)
-
-| Parameter | Default |
-|---|---|
-| Take Profit | +1.5% |
-| Stop Loss | -0.8% |
-| Volume Spike | >2.5× rata-rata |
-| Lookback | 5 candle |
-| Max Hold | 8 menit |
-
-### Grid Scalp (Sekunder)
-
-| Parameter | Default |
-|---|---|
-| Take Profit | +1.2% |
-| Stop Loss | -0.6% |
-| Levels | 3 |
-
-### Trailing Stop
-
-Aktif setelah harga naik ≥ 0.8% dari entry. Stop-loss otomatis naik mengikuti harga dengan jarak 0.4%.
-
----
-
-## Filter Token
-
-| Filter | Default |
-|---|---|
-| Minimum likuiditas | $5,000 |
-| Minimum volume 24h | $10,000 |
-| Usia token | 5 menit – 1 jam |
-| Harga maksimal | $0.01 |
-| Jumlah transaksi 5m | ≥ 10 |
-| Rasio buy/sell | 1.2× – 8.0× |
-| Exclude honeypot | Ya |
-| Exclude mintable | Ya |
-
----
-
-## Risk Management
-
-| Mekanisme | Keterangan |
-|---|---|
-| **Daily Loss Limit** | Bot berhenti jika loss harian ≥ `max_daily_loss_usd` ($2 default) |
-| **Circuit Breaker** | Pause 30 menit setelah 5 consecutive loss beruntun |
-| **Max Drawdown** | Alert di dashboard jika drawdown > 20% dari equity peak |
-| **Max Concurrent** | Maksimal 3 posisi terbuka bersamaan |
-| **Max Hold Time** | Posisi otomatis ditutup setelah 8 menit |
-| **Max Daily Trades** | Maksimal 50 trade per hari |
-| **Emergency Stop** | Tombol di dashboard: tutup semua posisi paksa + stop bot |
+| Drawdown tinggi | `dd_damped` | Diturunkan proporsional |
 
 ---
 
@@ -291,77 +351,13 @@ Aktif setelah harga naik ≥ 0.8% dari entry. Stop-loss otomatis naik mengikuti 
 
 ---
 
-## Dashboard Web
-
-Tersedia di `http://localhost:5000` (atau domain Replit setelah di-deploy).
-
-### Tab Dashboard
-
-- **Statistik Live** — total trades, win rate, profit, Sharpe ratio, drawdown (mode LIVE saja)
-- **Statistik Simulasi** — statistik terpisah untuk simulasi (tidak tercampur)
-- **Kelly Size** — multiplier posisi saat ini + mode (warmup/adaptive/dd_damped)
-- **Emergency Stop** — muncul otomatis saat ada posisi terbuka; tombol merah berkedip
-
-### Tab Positions
-
-Posisi terbuka real-time: harga live, PnL%, WETH amount, AI confidence, trailing stop status.
-
-### Tab History
-
-Riwayat 100 trade terakhir, chart PnL, export CSV.
-
-### Tab System (🔧)
-
-- **System Check** — verifikasi koneksi semua API, RPC, WETH balance
-- **🔑 Gemini API Key Pool** — status setiap key: OK / LIMITED, cooldown countdown, total 429 hits, waktu throttle terakhir
-- **AI Engine** — keputusan tiap model AI dengan confidence score
-- **RPC Endpoints** — status semua endpoint Base Network
-
----
-
-## WETH Trading
-
-Semua posisi menggunakan **WETH** (`0x4200000000000000000000000000000000000006`) sebagai base currency:
-
-1. **Open** — `WETH → MEME TOKEN` (swap lewat Uniswap v4 → v3 → Aerodrome → BaseSwap → PancakeSwap)
-2. **Close** — `MEME TOKEN → WETH`
-3. **PnL** — dihitung dalam USD dan WETH
-
-Contoh log:
-```
-📈 OPEN BRETT | WETH→TOKEN | Entry: $0.000412 | Size: 0.000333 WETH ($1.00) | TP: +1.5% | SL: -0.8%
-✅ [TP] BRETT | PnL: +$0.0150 (+0.000005 WETH) | Returned: 0.000338 WETH
-```
-
----
-
-## Notifikasi Telegram
-
-Bot mengirim alert untuk:
-- Bot start / stop
-- Setiap trade (BUY & CLOSE) dengan PnL dalam USD dan WETH
-- Emergency Stop triggered
-- Circuit breaker triggered
-- Error kritis
-
----
-
-## Ekspor Data
-
-Tab History → tombol **Export CSV**. Format kolom:
-```
-Time, Symbol, EntryPrice, ExitPrice, SizeUSD, WETH_Amount, WETH_Price_Entry, PnL_USD, PnL_Pct, Reason, HeldSecs, Mode
-```
-
----
-
 ## Catatan Keamanan
 
-- **Jangan commit** file `.env` atau private key ke repository
+- **Jangan commit** file `.env` atau private key ke repository (sudah di `.gitignore`)
 - **Gunakan Simulation Mode** sebelum live trading untuk memvalidasi strategi
-- **Set `BOT_PASSWORD` yang kuat** — dashboard tidak menggunakan auth Replit; auth custom dengan brute-force lockout (5 percobaan / 10 menit)
+- **Set `BOT_PASSWORD` yang kuat** — auth custom dengan brute-force lockout (5 percobaan / 10 menit)
 - **Session cookie** diset HttpOnly + SameSite Strict, TTL 24 jam
-- **API key Gemini tidak pernah diekspos** di UI — hanya nomor urut (key#1, key#2) yang ditampilkan
+- **API key Gemini tidak pernah diekspos** di UI — hanya nomor urut (key#1, key#2)
 - **WETH balance** dicek saat System Check; pastikan wallet punya cukup WETH sebelum live trading
 
 ---
