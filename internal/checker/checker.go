@@ -7,6 +7,7 @@ import (
         "fmt"
         "net/http"
         "os"
+        "strings"
         "time"
 )
 
@@ -72,14 +73,30 @@ func RunAll(rpcEndpoints []string) *CheckReport {
 }
 
 func checkGeminiKey() CheckResult {
-        key := os.Getenv("GEMINI_API_KEY")
-        if key == "" {
-                return CheckResult{Name: "Gemini API Key", Status: "missing", Message: "GEMINI_API_KEY not set in .env"}
+        raw := os.Getenv("GEMINI_API_KEY")
+
+        // Support comma-separated multi-key pool — check only the first key.
+        // Also support GEMINI_API_KEY_2 … GEMINI_API_KEY_9 as extras.
+        var keys []string
+        for _, part := range strings.Split(raw, ",") {
+                if k := strings.TrimSpace(part); k != "" {
+                        keys = append(keys, k)
+                }
         }
+        for i := 2; i <= 9; i++ {
+                if k := strings.TrimSpace(os.Getenv(fmt.Sprintf("GEMINI_API_KEY_%d", i))); k != "" {
+                        keys = append(keys, k)
+                }
+        }
+        if len(keys) == 0 {
+                return CheckResult{Name: "Gemini API Key", Status: "missing", Message: "GEMINI_API_KEY not set — set key or comma-separated list"}
+        }
+
+        label := fmt.Sprintf("Connected (%d key(s) configured)", len(keys))
         start := time.Now()
         ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
         defer cancel()
-        url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models?key=%s", key)
+        url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models?key=%s", keys[0])
         req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
         resp, err := httpClient.Do(req)
         lat := time.Since(start).Milliseconds()
@@ -88,9 +105,9 @@ func checkGeminiKey() CheckResult {
         }
         defer resp.Body.Close()
         if resp.StatusCode == 200 {
-                return CheckResult{Name: "Gemini API Key", Status: "ok", Message: "Connected", Latency: lat}
+                return CheckResult{Name: "Gemini API Key", Status: "ok", Message: label, Latency: lat}
         }
-        return CheckResult{Name: "Gemini API Key", Status: "error", Message: fmt.Sprintf("HTTP %d — check key", resp.StatusCode), Latency: lat}
+        return CheckResult{Name: "Gemini API Key", Status: "error", Message: fmt.Sprintf("HTTP %d — check key#1 value", resp.StatusCode), Latency: lat}
 }
 
 func checkGroqKey() CheckResult {
